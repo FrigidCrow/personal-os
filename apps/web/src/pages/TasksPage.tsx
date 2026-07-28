@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
 import { ArrowRight, Plus, Robot, User } from "@phosphor-icons/react";
@@ -24,6 +24,14 @@ const nextAction: Partial<Record<TaskStatus, { status: TaskStatus; label: string
   blocked: { status: "ready", label: "解除阻塞" }
 };
 
+const priorityLabels: Record<Priority, string> = { low: "低", medium: "中", high: "高", critical: "关键" };
+const delegationLabels: Record<DelegationMode, string> = { human_only: "本人处理", codex_ready: "Codex 可执行", mixed: "人机协作" };
+const interactiveSelector = "button, a, input, textarea, select, [role='button']";
+
+function formatTimestamp(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
 const initialTask: TaskInput = {
   projectId: null,
   title: "",
@@ -48,12 +56,14 @@ export function TasksPage() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<TaskInput>(initialTask);
+  const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [assignmentTask, setAssignmentTask] = useState<Task | null>(null);
   const [assignmentMode, setAssignmentMode] = useState<"demo" | "live">("demo");
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dropStatus, setDropStatus] = useState<TaskStatus | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const pointerDrag = useRef<PointerDrag | null>(null);
+  const suppressCardClickUntil = useRef(0);
   const tasks = useQuery({ queryKey: ["tasks"], queryFn: api.tasks });
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
@@ -116,7 +126,7 @@ export function TasksPage() {
   };
 
   const beginPointerDrag = (event: ReactPointerEvent<HTMLElement>, task: Task) => {
-    const isInteractive = (event.target as HTMLElement).closest("button, a, input, textarea, select, [role='button']");
+    const isInteractive = (event.target as HTMLElement).closest(interactiveSelector);
     const hasDestination = columns.some((target) => canTransitionTask(task.status, target.status));
     if (event.button !== 0 || isInteractive || transition.isPending || !hasDestination) return;
     const drag: PointerDrag = {
@@ -142,6 +152,7 @@ export function TasksPage() {
     const onEnd = (pointerEvent: globalThis.PointerEvent) => {
       if (pointerEvent.pointerId !== drag.pointerId) return;
       const status = drag.active ? dropStatusAtPoint(pointerEvent.clientX, pointerEvent.clientY, drag.task) : null;
+      if (drag.active) suppressCardClickUntil.current = Date.now() + 350;
       clearDragState();
       if (status) transition.mutate({ id: drag.task.id, status });
     };
@@ -157,6 +168,17 @@ export function TasksPage() {
     window.addEventListener("pointermove", onMove, { passive: false });
     window.addEventListener("pointerup", onEnd);
     window.addEventListener("pointercancel", onCancel);
+  };
+
+  const openTaskDetail = (event: ReactMouseEvent<HTMLElement>, task: Task) => {
+    if (Date.now() < suppressCardClickUntil.current || (event.target as HTMLElement).closest(interactiveSelector)) return;
+    setDetailTask(task);
+  };
+
+  const openTaskDetailFromKeyboard = (event: ReactKeyboardEvent<HTMLElement>, task: Task) => {
+    if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    setDetailTask(task);
   };
 
   return (
@@ -204,6 +226,39 @@ export function TasksPage() {
         </Dialog.Content>
       </Dialog.Root>
 
+      <Dialog.Root open={Boolean(detailTask)} onOpenChange={(nextOpen) => { if (!nextOpen) setDetailTask(null); }}>
+        <Dialog.Content className="form-dialog task-detail-dialog" maxWidth="700px">
+          {detailTask ? (
+            <>
+              <div className="task-detail-kicker">
+                <span className="priority-text" data-priority={detailTask.priority}>优先级 · {priorityLabels[detailTask.priority]}</span>
+                <StatusBadge status={detailTask.status} />
+              </div>
+              <Dialog.Title className="task-detail-title">{detailTask.title}</Dialog.Title>
+              <Dialog.Description className="task-detail-description">{detailTask.description || "这项任务还没有补充说明。"}</Dialog.Description>
+
+              <dl className="task-detail-facts">
+                <div><dt>所属项目</dt><dd>{detailTask.projectId ? projects.data?.items.find((project) => project.id === detailTask.projectId)?.name ?? "项目已移除" : "未归属项目"}</dd></div>
+                <div><dt>执行方式</dt><dd>{delegationLabels[detailTask.delegationMode]}</dd></div>
+                <div><dt>截止日期</dt><dd>{formatDate(detailTask.dueDate)}</dd></div>
+              </dl>
+
+              <section className="task-detail-acceptance">
+                <span>验收条件</span>
+                {detailTask.acceptanceCriteria.length > 0 ? (
+                  <ol>{detailTask.acceptanceCriteria.map((criterion, index) => <li key={`${detailTask.id}-${index}`}>{criterion}</li>)}</ol>
+                ) : <p>尚未设置验收条件。</p>}
+              </section>
+
+              <footer className="task-detail-footer">
+                <div><span>创建于 {formatTimestamp(detailTask.createdAt)}</span><span>更新于 {formatTimestamp(detailTask.updatedAt)}</span></div>
+                <Dialog.Close><Button variant="soft" color="gray">关闭</Button></Dialog.Close>
+              </footer>
+            </>
+          ) : null}
+        </Dialog.Content>
+      </Dialog.Root>
+
       {items.length === 0 ? <EmptyState title="任务队列为空" body="先捕获一个事项，再决定由本人还是 Codex 处理。" /> : (
         <div className={`task-board${draggedTask ? " is-dragging" : ""}`}>
           {columns.map((column) => {
@@ -219,13 +274,16 @@ export function TasksPage() {
                 <div className="task-column-body">
                   {columnTasks.length === 0 ? <span className="column-empty">没有任务</span> : columnTasks.map((task) => (
                     <article
-                      aria-label={`${task.title}，拖动可更改状态`}
+                      aria-label={`查看 ${task.title} 详情；拖动可更改状态`}
                       className={`task-ticket${draggedTaskId === task.id ? " is-dragging" : ""}`}
                       data-draggable={!transition.isPending && columns.some((target) => canTransitionTask(task.status, target.status))}
                       data-task-id={task.id}
                       key={task.id}
+                      onClick={(event) => openTaskDetail(event, task)}
+                      onKeyDown={(event) => openTaskDetailFromKeyboard(event, task)}
                       onPointerDown={(event) => beginPointerDrag(event, task)}
                       style={draggedTaskId === task.id ? { transform: `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0) scale(0.98) rotate(1deg)`, zIndex: 3 } : undefined}
+                      tabIndex={0}
                     >
                       <div className="task-ticket-top"><span className="priority-text" data-priority={task.priority}>{task.priority}</span><StatusBadge status={task.status} /></div>
                       <h3>{task.title}</h3>
