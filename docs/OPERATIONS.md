@@ -77,6 +77,8 @@ Dispatcher 每 15 秒执行一次：
 - 在最大尝试次数内创建新的幂等重试；否则把任务标为 Blocked。
 - 所有失败原因、下一次重试时间和事件都显示在 Agent 控制面。
 
+Personal OS 的默认 worker lease 是 2 分钟。对较慢的本地 OpenWorker 模型，可通过 MCP 进程环境变量 `WORKER_LEASE_MILLISECONDS` 延长；本机使用 `600000`（10 分钟）。租约仍需通过 heartbeat 续期，过期后照常进入有限重试或 Blocked。
+
 进程退出后 launchd 会重启它。SQLite 中的幂等键、单活跃运行约束和租约避免重启后重复执行同一个任务。
 
 ## 5. 触发器与 catch-up
@@ -144,4 +146,13 @@ node /Users/frigidcrow/Documents/Codex/dev/personal-os/apps/mcp/dist/index.js
 - `submit_run_result`
 - `fail_run`
 
-OpenWorker 自动化 `Personal OS Pull Worker` 每五分钟尝试领取一个任务。模型未配置时应保持暂停；在 OpenWorker Settings 中配置模型后再启用。不要把 OpenWorker Token 或模型密钥写入 Personal OS 仓库、日志或 MCP 参数。
+MCP 环境至少包含：
+
+```text
+DATABASE_PATH=/Users/frigidcrow/Documents/Codex/dev/personal-os/data/personal-os.db
+WORKER_LEASE_MILLISECONDS=600000
+```
+
+OpenWorker 自动化 `Personal OS Pull Worker` 已启用，每五分钟尝试领取一个任务，运行时 `tool_allowlist` 必须严格等于上面的十个工具。当前本地模型为 Ollama `qwen3.5:4b`；模型可在 OpenWorker Settings 中替换。不要把 OpenWorker Token、认证 seed 或模型密钥写入 Personal OS 仓库、日志、计划文档或 MCP 参数。
+
+OpenWorker 的 headless automation MCP 附加与运行时 allowlist 修复记录在其独立仓库提交 `428adf4`。升级 OpenWorker 后应先运行该仓库完整测试，再验证 `/v1/mcp` 中 `personal_os` 为 connected，并执行一次无外部写操作的真实领取任务。

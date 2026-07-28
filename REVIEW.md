@@ -135,3 +135,23 @@ Final automated evidence:
 | Patch hygiene | Passed |
 
 MVP1.1 verdict: **Passed - ready for user acceptance.**
+
+## MVP2 automated multi-executor review
+
+Status: **Passed**
+
+MVP2 now provides one Personal OS control plane for Codex, OpenWorker and Human execution. It includes deterministic routing, common AgentRun/event/artifact records, manual/cron/event/dependency triggers, atomic worker leases and heartbeat, bounded recovery, an Approval Inbox, explicit final acceptance, and loopback-only local operation.
+
+Review used both isolated automated journeys and real executors:
+
+- Playwright: 7/7 browser journeys passed. Every mutation captured its HTTP request and response, then verified backend effects directly in SQLite.
+- Codex Live: run `2485d0f9-f6e2-4cf1-9f62-87fe7009b761` completed in an isolated Git repository and reached Done only after Web approval.
+- OpenWorker Live: run `6088109f-3b11-4e2f-a4a3-027b5c6a1a5e` was claimed by Ollama through MCP, heartbeated, submitted with evidence and accepted in Web.
+- Personal OS: 6 test files / 57 tests, typecheck, lint, build, dependency audit and diff checks passed.
+- OpenWorker: 933 tests passed, 1 skipped; 63 focused MCP/automation tests passed.
+
+The live review exposed five gaps that simulated tests had not: missing MCP attachment in headless automation, weak prompt-only tool restriction, ambiguous task/run identifiers for a small local model, an undersized worker lease, and OpenWorker Live rows mislabeled as Demo. All five were fixed and regression-tested. Earlier lease-expiry attempts remain in history as failure-recovery evidence instead of being deleted.
+
+All C01-C30 requirements are Passed. The complete feature inventory, gap review, request/response/database evidence and journey results are recorded in `docs/MVP2-ACCEPTANCE.md` and `docs/FULL-E2E-ACCEPTANCE.md`.
+
+MVP2 verdict: **Passed - ready for user acceptance.**

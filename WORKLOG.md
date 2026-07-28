@@ -100,6 +100,19 @@ Phase E verification so far:
 - The online backup passed `quick_check = ok`, retained 4 tasks and 2 AgentRuns, and returned zero foreign-key violations.
 - Full automated gates passed with 6 test files / 54 tests, TypeScript, ESLint, and patch hygiene. A fresh production build and rendered E2E remain part of Review.
 
+### Review - MVP2 full acceptance and E2E
+
+- Inventoried every MVP1, MVP1.1 and MVP2 function in `docs/FULL-E2E-ACCEPTANCE.md`; no required capability remained unimplemented.
+- Added a Playwright acceptance harness with isolated API, Web and SQLite state. Seven browser cases capture mutation request/response payloads and query the resulting SQLite rows directly.
+- Covered shell navigation, project CRUD, task automation, Codex Demo acceptance, approval approve/reject, final review rejection, task/project deletion, and opportunity/experiment/asset flows.
+- Exercised negative paths that had only positive coverage during Work: approval rejection, final result rejection with reason, task deletion and project deletion.
+- Completed real Codex run `2485d0f9-f6e2-4cf1-9f62-87fe7009b761` through Web acceptance; the isolated repository received only the requested acceptance artifact.
+- Completed real OpenWorker/Ollama run `6088109f-3b11-4e2f-a4a3-027b5c6a1a5e` through list, atomic claim, heartbeat, context read, result submission and Web acceptance.
+- Fixed the five real integration gaps documented in the acceptance report. OpenWorker commit `428adf4` attaches MCP tools to headless automation and enforces an exact runtime allowlist.
+- Final browser E2E: 7/7 passed in 41.1 seconds. Personal OS automated gates: 6 files / 57 tests, typecheck, lint, production build, zero dependency vulnerabilities and clean patch hygiene.
+- OpenWorker regression gates: 933 passed, 1 skipped; focused MCP/automation subset: 63 passed.
+- Operational smoke verified loopback listeners on 5273, 8787, 5274 and 8765, healthy SQLite, running Personal OS LaunchAgents, backup/privacy/install dry-runs and zero pending approvals after review.
+
 ## 2026-07-28 - Plan
 
 - Cloned the empty remote repository into `/Users/frigidcrow/Documents/Codex/dev/personal-os`.

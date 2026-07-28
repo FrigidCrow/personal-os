@@ -304,7 +304,7 @@ MVP1 已完成并保留为历史执行基线。下一阶段的自动多执行器
 
 ## 12. MVP2 execution control
 
-Status: In progress
+Status: Passed
 Date: 2026-07-28
 
 MVP2 的详细架构、实施顺序和安全边界以 [`AUTOMATION-PLAN.md`](./AUTOMATION-PLAN.md) 为准；逐项验收以 [`MVP2-ACCEPTANCE.md`](./MVP2-ACCEPTANCE.md) 为准。
@@ -320,4 +320,4 @@ Plan
   -> Complete business-journey E2E
 ```
 
-在 `MVP2-ACCEPTANCE.md` 存在 Pending、Failed 或仅有间接证据的条目时，不得宣布 MVP2 完成。
+最终结果：`MVP2-ACCEPTANCE.md` 的 C01-C30 全部 Passed；`FULL-E2E-ACCEPTANCE.md` 已完成 MVP1、MVP1.1 与 MVP2 的功能盘点、7 条浏览器级 UI -> HTTP -> backend -> SQLite 用例，以及真实 Codex/OpenWorker 全流程验收。

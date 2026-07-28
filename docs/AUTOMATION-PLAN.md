@@ -1,11 +1,11 @@
 # Personal OS 自动多执行器计划
 
-Status: Approved for implementation  
+Status: Passed
 Date: 2026-07-28  
 Target: MVP2 — Automated Agent Dispatch  
-Method: Plan -> Implement -> Verify -> Human Review
+Method: Plan -> Work -> Review
 
-Environment baseline: OpenWorker 已完成本机源码安装并通过启动验证；Personal OS 与 OpenWorker 的自动领取、审批和结果回传尚未实现。
+Environment result: OpenWorker 已完成独立安装、MCP Pull 接入、真实本地模型运行和人工验收；Personal OS 保持为控制平面。
 
 ## 1. 目标
 
@@ -105,27 +105,22 @@ NODE_OPTIONS=--no-experimental-webstorage \
 
 `NODE_OPTIONS=--no-experimental-webstorage` 用于规避当前 Node 25 实验性 Web Storage 与 OpenWorker/Vitest 的 `localStorage` 冲突；切换到项目兼容的 Node 22 后可以重新验证是否仍然需要。
 
-#### 当前安装验证
+#### 最终安装验证
 
 - `GET http://127.0.0.1:8765/v1/health` 返回 `{"status":"ok"}`。
-- Python 后端测试：930 passed，1 skipped。
+- Python 后端测试：933 passed，1 skipped。
 - GUI 测试：74 passed。
 - GUI TypeScript 与 Vite 生产构建通过。
 - Python `pip check` 无缺失或冲突依赖。
-- OpenWorker Git 工作区保持干净，没有修改上游源码。
+- OpenWorker 集成修复提交为 `428adf4`；Git 工作区保持干净。
 
 GUI 当前依赖审计报告 7 项上游告警：3 moderate、3 high、1 critical，主要涉及 Vite/Vitest 开发工具及 `xlsx`。本机开发服务保持 loopback-only；在评估上游兼容性前不执行 `npm audit fix --force`。处理不可信电子表格文件前必须单独评估 `xlsx` 风险。
 
 #### 集成状态
 
-安装成功不代表 OpenWorker 自动化链路已经完成。当前只证明 OpenWorker 可以独立启动、构建和运行；以下能力仍属于 Phase A 至 Phase D：
+Phase A 至 E 已按顺序完成。OpenWorker 自动化 `Personal OS Pull Worker` 使用精确的十工具 allowlist，每五分钟领取一次任务；本机慢模型的 worker 租约设为 600000 ms。真实 Ollama 运行已完成 list、原子 claim、running event、heartbeat、context、result 和 Web 人工验收。OpenWorker 仍是独立项目，Personal OS 只保存通用 AgentRun、必要事件、产物和审批证据。
 
-- Personal OS 通用 `AgentRun`、租约和幂等模型。
-- OpenWorker 的 `list_claimable_tasks`、`claim_task`、心跳和结果回传 MCP 契约。
-- Personal OS Approval Inbox。
-- OpenWorker 定时领取任务与真实端到端验收。
-
-不得因为 OpenWorker 已安装而跳过 Phase A 与 Phase B，直接把 Codex 专用数据结构复制成 OpenWorker 专用结构。
+Review 中发现并修复了五个真实集成缺口：headless automation 未附加 MCP、prompt-only 工具约束不可靠、模型易混淆 taskId/runId、两分钟租约不足以覆盖本地推理，以及 OpenWorker Live 运行被错误标为 Demo。完整证据见 `docs/FULL-E2E-ACCEPTANCE.md`。
 
 ## 4. 目标架构
 
