@@ -11,3 +11,5 @@ data/*.db-shm
 data/*.db-wal
 work/
 review-artifacts/
+backups/
+logs/

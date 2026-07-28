@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { randomUUID } from "node:crypto";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
@@ -22,6 +23,7 @@ import type { PersonalOsDatabase } from "@personal-os/database";
 import { CodexOrchestrator } from "./codex.js";
 import { AgentDispatcher } from "./dispatcher.js";
 import { RadarService } from "./radar.js";
+import { validateTaskAutomation } from "./task-automation.js";
 
 export interface AppDependencies {
   database: PersonalOsDatabase;
@@ -100,6 +102,13 @@ export function createApp(dependencies: AppDependencies): Hono {
     if (error instanceof ZodError) {
       return context.json({ error: "VALIDATION_ERROR", message: "Request validation failed.", issues: error.issues }, 400);
     }
+    if (
+      error.message.includes("trigger requires") ||
+      error.message.startsWith("Invalid cron trigger") ||
+      error.message.startsWith("Dependency task")
+    ) {
+      return context.json({ error: "VALIDATION_ERROR", message: error.message }, 400);
+    }
     if (error.message.includes("not found")) {
       return context.json({ error: "NOT_FOUND", message: error.message }, 404);
     }
@@ -131,7 +140,11 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json({ error: "INTERNAL_ERROR", message: "The request could not be completed." }, 500);
   });
 
-  app.get("/api/health", (context) => context.json({ ok: true, service: "personal-os", codexMode: process.env.CODEX_MODE ?? "demo", executors: dispatcher.health() }));
+  app.get("/api/health/live", (context) => context.json({ ok: true, service: "personal-os" }));
+  app.get("/api/health", (context) => {
+    const operational = database.operationalHealth();
+    return context.json({ ok: operational.database === "ok", service: "personal-os", codexMode: process.env.CODEX_MODE ?? "demo", executors: dispatcher.health(), operational }, operational.database === "ok" ? 200 : 503);
+  });
   app.get("/api/dashboard", (context) => context.json(database.getDashboard()));
 
   app.get("/api/projects", (context) => context.json({ items: database.listProjects() }));
@@ -173,6 +186,10 @@ export function createApp(dependencies: AppDependencies): Hono {
   });
   app.post("/api/tasks", async (context) => {
     const input = taskInputSchema.parse(await context.req.json());
+    validateTaskAutomation(input);
+    if (input.triggerType === "dependency" && !database.getTask(String(input.triggerConfig?.taskId))) {
+      throw new Error("Dependency task does not exist.");
+    }
     return context.json(database.createTask(input), 201);
   });
   app.patch("/api/tasks/:id", async (context) => {
@@ -181,6 +198,12 @@ export function createApp(dependencies: AppDependencies): Hono {
     if (!current) return context.json({ error: "NOT_FOUND", message: "Task not found." }, 404);
     const patch = taskPatchSchema.parse(await context.req.json());
     const input = taskInputSchema.parse({ ...taskToInput(current), ...patch });
+    validateTaskAutomation(input);
+    if (input.triggerType === "dependency") {
+      const dependencyId = String(input.triggerConfig?.taskId);
+      if (dependencyId === id) throw new Error("Dependency task cannot reference itself.");
+      if (!database.getTask(dependencyId)) throw new Error("Dependency task does not exist.");
+    }
     return context.json(database.updateTask(id, input));
   });
   app.delete("/api/tasks/:id", (context) => {
@@ -321,6 +344,13 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json(database.rejectAgentRun(context.req.param("id"), body.reason));
   });
   app.post("/api/dispatcher/tick", (context) => context.json(dispatcher.tick()));
+  app.post("/api/events", async (context) => {
+    const body = z.object({
+      eventName: z.string().trim().min(1).max(180),
+      eventId: z.string().trim().min(1).max(180).default(randomUUID())
+    }).parse(await context.req.json());
+    return context.json({ eventName: body.eventName, eventId: body.eventId, ...dispatcher.handleEvent(body.eventName, body.eventId) }, 202);
+  });
 
   app.get("/api/approvals", (context) => {
     const status = z.enum(["pending", "approved", "rejected", "expired"]).safeParse(context.req.query("status"));

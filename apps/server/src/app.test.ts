@@ -22,6 +22,16 @@ describe("Personal OS API", () => {
     expect(body.latestReport.isDemo).toBe(true);
   });
 
+  it("reports database and executor operational health", async () => {
+    const response = await app.request("/api/health");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      ok: true,
+      operational: expect.objectContaining({ database: "ok", quickCheck: "ok", foreignKeyViolations: 0 }),
+      executors: expect.arrayContaining([expect.objectContaining({ executor: "codex" }), expect.objectContaining({ executor: "openworker" })])
+    }));
+  });
+
   it("creates and persists a project", async () => {
     const response = await app.request("/api/projects", {
       method: "POST",
@@ -97,6 +107,49 @@ describe("Personal OS API", () => {
     const deleted = await app.request(`/api/tasks/${task.id}`, { method: "DELETE" });
     expect(deleted.status).toBe(200);
     expect(database.getTask(task.id)).toBeNull();
+  });
+
+  it("rejects incomplete automation trigger configuration", async () => {
+    const response = await app.request("/api/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Invalid cron task",
+        status: "ready",
+        executor: "openworker",
+        executionMode: "automatic",
+        triggerType: "cron",
+        triggerConfig: null,
+        triggerTimezone: "UTC",
+        riskLevel: "low"
+      })
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(expect.objectContaining({ error: "VALIDATION_ERROR", message: expect.stringContaining("triggerConfig.expression") }));
+  });
+
+  it("dispatches a matching internal event through the unified dispatcher", async () => {
+    const task = database.createTask({
+      title: "React to internal event",
+      status: "ready",
+      executor: "openworker",
+      executionMode: "automatic",
+      triggerType: "event",
+      triggerConfig: { eventName: "project.completed" },
+      riskLevel: "low"
+    });
+    const response = await app.request("/api/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ eventName: "project.completed", eventId: "api-event-1" })
+    });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      eventName: "project.completed",
+      eventId: "api-event-1",
+      dispatched: [expect.objectContaining({ taskId: task.id, executor: "openworker" })]
+    }));
+    expect(database.listAgentRuns({ executor: "openworker" })).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: task.id })]));
   });
 
   it("converts an opportunity into an experiment", async () => {

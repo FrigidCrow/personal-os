@@ -43,6 +43,16 @@ npm run dev
 
 然后打开 [http://localhost:5273](http://localhost:5273)。API 默认运行在 [http://localhost:8787](http://localhost:8787)，健康检查地址是 [http://localhost:8787/api/health](http://localhost:8787/api/health)。
 
+构建后可安装 macOS 登录自启服务：
+
+```bash
+npm run build
+npm run launchagent:install -- --apply
+npm run healthcheck
+```
+
+Personal OS 固定使用 Web `5273` 和 API `8787`。独立安装的 OpenWorker 使用 Web `5274` 和 agent server `8765`，不会与其他占用 `5173` 的项目冲突。启动、备份、恢复、隐私清理和 OpenWorker MCP 配置见 [`docs/OPERATIONS.md`](docs/OPERATIONS.md)。
+
 Server 默认只监听 `127.0.0.1`。MVP1 没有账号与鉴权，请不要把 `HOST` 改为局域网或公网地址。
 
 第一次启动会在 `data/personal-os.db` 创建 SQLite 数据库，并写入明确标注为演示数据的样例。自定义数据库位置：

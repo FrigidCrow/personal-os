@@ -9,6 +9,7 @@ import {
   type ExecutorHealth,
   type TaskExecutionContext
 } from "./executors.js";
+import { cronCatchUpEnabled, dependencyTaskId, eventNameForTask, nextCronOccurrence } from "./task-automation.js";
 
 const codexTaskTypes = new Set(["coding", "testing", "code_review", "technical_docs"]);
 const openWorkerTaskTypes = new Set(["email", "calendar", "slack", "notion", "business_report", "general_writing"]);
@@ -44,7 +45,8 @@ export class AgentDispatcher {
     codex = new CodexOrchestrator(database),
     adapters?: ExecutorAdapter[],
     private readonly clock: () => Date = () => new Date(),
-    private readonly automaticMode: "demo" | "live" = process.env.CODEX_MODE === "live" ? "live" : "demo"
+    private readonly automaticMode: "demo" | "live" = process.env.CODEX_MODE === "live" ? "live" : "demo",
+    private readonly scheduleGraceMilliseconds = 60_000
   ) {
     const configured = adapters ?? [
       new CodexExecutorAdapter(database, codex),
@@ -119,6 +121,33 @@ export class AgentDispatcher {
     return this.database.cancelAgentRun(runId);
   }
 
+  handleEvent(eventName: string, eventId: string): DispatchTickResult {
+    const dispatched: AgentRun[] = [];
+    const skipped: Array<{ taskId: string; reason: string }> = [];
+    const currentTime = this.clock();
+    for (const original of this.database.listTasks()) {
+      if (
+        original.executionMode !== "automatic" ||
+        original.triggerType !== "event" ||
+        original.automationPaused ||
+        eventNameForTask(original) !== eventName
+      ) continue;
+      try {
+        const task = original.status === "done" ? this.database.prepareTaskForAutomation(original.id) : original;
+        if (task.status !== "ready") throw new Error(`Task is not ready for event dispatch: ${task.status}`);
+        this.database.updateTask(task.id, { ...task, lastScheduledAt: currentTime.toISOString() });
+        dispatched.push(this.dispatch(task.id, {
+          automatic: true,
+          mode: this.automaticMode,
+          idempotencyKey: `event:${task.id}:${eventId}`
+        }));
+      } catch (error) {
+        skipped.push({ taskId: original.id, reason: error instanceof Error ? error.message : "Event dispatch failed" });
+      }
+    }
+    return { dispatched, skipped };
+  }
+
   tick(): DispatchTickResult {
     const dispatched: AgentRun[] = [];
     const skipped: Array<{ taskId: string; reason: string }> = [];
@@ -135,18 +164,62 @@ export class AgentDispatcher {
       }
     }
 
-    for (const task of this.database.listTasks({ status: "ready" })) {
+    for (const original of this.database.listTasks()) {
+      let task = original;
       if (task.executionMode !== "automatic" || task.automationPaused || task.triggerType === "manual") continue;
-      if (!task.nextRunAt || new Date(task.nextRunAt).getTime() > currentTime.getTime()) continue;
+
+      if (task.triggerType === "event") continue;
+
+      if (task.triggerType === "dependency") {
+        const dependencyId = dependencyTaskId(task);
+        const dependency = dependencyId ? this.database.getTask(dependencyId) : null;
+        if (!dependency || dependency.status !== "done" || task.lastScheduledAt) continue;
+        try {
+          if (task.status !== "ready") throw new Error(`Task is not ready for dependency dispatch: ${task.status}`);
+          task = this.database.updateTask(task.id, { ...task, lastScheduledAt: currentTime.toISOString() });
+          dispatched.push(this.dispatch(task.id, {
+            automatic: true,
+            mode: this.automaticMode,
+            idempotencyKey: `dependency:${task.id}:${dependency.id}`
+          }));
+        } catch (error) {
+          skipped.push({ taskId: task.id, reason: error instanceof Error ? error.message : "Dependency dispatch failed" });
+        }
+        continue;
+      }
+
+      if (task.triggerType !== "cron") continue;
+      if (!task.nextRunAt) {
+        try {
+          this.database.updateTask(task.id, { ...task, nextRunAt: nextCronOccurrence(task, currentTime).toISOString() });
+        } catch (error) {
+          skipped.push({ taskId: task.id, reason: error instanceof Error ? error.message : "Cron initialization failed" });
+        }
+        continue;
+      }
+      const scheduledFor = new Date(task.nextRunAt);
+      if (scheduledFor.getTime() > currentTime.getTime()) continue;
       try {
+        const nextRunAt = nextCronOccurrence(task, currentTime).toISOString();
+        if (currentTime.getTime() - scheduledFor.getTime() > this.scheduleGraceMilliseconds && !cronCatchUpEnabled(task)) {
+          this.database.updateTask(task.id, { ...task, lastScheduledAt: currentTime.toISOString(), nextRunAt });
+          skipped.push({ taskId: task.id, reason: `Missed cron occurrence at ${task.nextRunAt}; catch-up is disabled.` });
+          continue;
+        }
+        if (task.status === "done") task = this.database.prepareTaskForAutomation(task.id);
+        if (task.status !== "ready") {
+          this.database.updateTask(task.id, { ...task, lastScheduledAt: currentTime.toISOString(), nextRunAt });
+          throw new Error(`Task is not ready for cron dispatch: ${task.status}`);
+        }
         const scheduledTask = this.database.updateTask(task.id, {
           ...task,
-          lastScheduledAt: currentTime.toISOString()
+          lastScheduledAt: currentTime.toISOString(),
+          nextRunAt
         });
         dispatched.push(this.dispatch(scheduledTask.id, {
           automatic: true,
           mode: this.automaticMode,
-          idempotencyKey: `scheduled:${task.id}:${task.nextRunAt}`
+          idempotencyKey: `scheduled:${task.id}:${scheduledFor.toISOString()}`
         }));
       } catch (error) {
         skipped.push({ taskId: task.id, reason: error instanceof Error ? error.message : "Dispatch failed" });

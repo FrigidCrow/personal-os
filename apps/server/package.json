@@ -14,6 +14,7 @@
     "@openai/codex-sdk": "^0.145.0",
     "@personal-os/database": "*",
     "@personal-os/domain": "*",
+    "cron-parser": "^5.6.2",
     "hono": "^4.12.32",
     "node-cron": "^4.6.0",
     "zod": "^4.4.3"

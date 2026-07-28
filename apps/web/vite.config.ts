@@ -10,6 +10,13 @@ export default defineConfig({
       "/api": "http://127.0.0.1:8787"
     }
   },
+  preview: {
+    port: 5273,
+    strictPort: true,
+    proxy: {
+      "/api": "http://127.0.0.1:8787"
+    }
+  },
   build: {
     sourcemap: true
   }

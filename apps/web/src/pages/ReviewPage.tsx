@@ -37,12 +37,14 @@ function RunDetailDialog({
   initialRun,
   taskTitle,
   projectName,
+  maxAttempts,
   approvals,
   onClose
 }: {
   initialRun: AgentRun;
   taskTitle: string;
   projectName: string;
+  maxAttempts: number;
   approvals: ApprovalRequest[];
   onClose: () => void;
 }) {
@@ -103,6 +105,9 @@ function RunDetailDialog({
           <div><dt><FolderOpen size={15} />所属项目</dt><dd>{projectName}</dd></div>
           <div><dt><FolderOpen size={15} />工作目录</dt><dd>{current.workingDirectory ?? "未设置"}</dd></div>
           <div><dt><ArrowClockwise size={15} />执行尝试</dt><dd>第 {current.attempt} 次</dd></div>
+          <div><dt><ArrowClockwise size={15} />重试预算</dt><dd>{current.attempt} / {maxAttempts}</dd></div>
+          <div><dt><Clock size={15} />下次重试</dt><dd>{formatTimestamp(current.nextRetryAt)}</dd></div>
+          <div><dt><Clock size={15} />租约到期</dt><dd>{formatTimestamp(current.leaseExpiresAt)}</dd></div>
           <div><dt><Clock size={15} />开始时间</dt><dd>{formatTimestamp(current.startedAt)}</dd></div>
           <div><dt><Clock size={15} />完成时间</dt><dd>{formatTimestamp(current.completedAt)}</dd></div>
         </dl>
@@ -141,6 +146,7 @@ export function ReviewPage() {
   const tasks = useQuery({ queryKey: ["tasks"], queryFn: api.tasks });
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const approvals = useQuery({ queryKey: ["approvals"], queryFn: () => api.approvals(), refetchInterval: 4000 });
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
 
   const refresh = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ["runs"] }),
@@ -186,7 +192,7 @@ export function ReviewPage() {
 
   return (
     <div className="page-stack">
-      {selectedRun ? <RunDetailDialog initialRun={selectedRun} taskTitle={taskTitle(selectedRun)} projectName={projectName(selectedRun)} approvals={approvalItems} onClose={() => setSelectedRun(null)} /> : null}
+      {selectedRun ? <RunDetailDialog initialRun={selectedRun} taskTitle={taskTitle(selectedRun)} projectName={projectName(selectedRun)} maxAttempts={tasks.data?.items.find((task) => task.id === selectedRun.taskId)?.maxAttempts ?? selectedRun.attempt} approvals={approvalItems} onClose={() => setSelectedRun(null)} /> : null}
       <Dialog.Root open={Boolean(rejectingRun)} onOpenChange={(open) => { if (!open) { setRejectingRun(null); setRejectReason(""); } }}>
         <Dialog.Content className="form-dialog" maxWidth="520px">
           <Dialog.Title>驳回 Agent 结果</Dialog.Title>
@@ -210,11 +216,16 @@ export function ReviewPage() {
         <button type="button" className={filter === "all" ? "selected" : ""} onClick={() => setFilter("all")}><Robot size={18} /><span>全部运行</span><strong>{allRuns.length}</strong></button>
       </section>
 
+      {health.data ? <section className="executor-health-grid" aria-label="执行器健康状态">
+        {health.data.executors.map((executor) => <article key={executor.executor} data-available={executor.available}><header><Robot size={17} /><strong>{executor.executor}</strong><span>{executor.available ? "READY" : "UNAVAILABLE"}</span></header><p>{executor.detail}</p></article>)}
+        <article data-available={health.data.operational.database === "ok"}><header><FolderOpen size={17} /><strong>SQLite</strong><span>{health.data.operational.database.toUpperCase()}</span></header><p>{health.data.operational.activeRuns} 个活跃运行，{health.data.operational.staleRuns} 个租约过期，{health.data.operational.pendingApprovals} 个待审批。</p></article>
+      </section> : null}
+
       <SectionHeader title="审批收件箱" description="发送消息、写日历、发布和外部写入等动作必须先得到你的明确决定。" />
       {approvals.error ? <ErrorState error={approvals.error} retry={() => approvals.refetch()} /> : pendingApprovals.length === 0 ? <div className="approval-empty"><ShieldCheck size={19} /><span>当前没有待处理的高风险动作</span></div> : (
         <div className="approval-grid">{pendingApprovals.map((approval) => (
           <article className="approval-card" key={approval.id}>
-            <header><span>{approval.actionType}</span><strong>等待你的决定</strong></header>
+            <header><span>{allRuns.find((run) => run.id === approval.runId)?.executor ?? "agent"} · {approval.actionType}</span><strong>等待你的决定</strong></header>
             <h2>{approval.summary}</h2>
             <dl><div><dt>目标</dt><dd>{approval.destination}</dd></div><div><dt>过期</dt><dd>{formatTimestamp(approval.expiresAt)}</dd></div></dl>
             {approval.payloadPreview ? <pre>{approval.payloadPreview}</pre> : null}
@@ -226,11 +237,13 @@ export function ReviewPage() {
       <SectionHeader title="Agent Runs" description="统一查看执行器、结果、验证、产物、审批和事件时间线。" />
       {filteredRuns.length === 0 ? <EmptyState title="这个视图里没有运行" body="从任务队列派发 Codex 或 OpenWorker 后，记录会出现在这里。" /> : (
         <div className="review-list">
-          {filteredRuns.map((run) => (
-            <article className="review-run" key={run.id}>
+          {filteredRuns.map((run) => {
+            const task = tasks.data?.items.find((item) => item.id === run.taskId);
+            const canRetry = ["failed", "blocked", "cancelled"].includes(run.status) && run.attempt < (task?.maxAttempts ?? run.attempt);
+            return <article className="review-run" key={run.id}>
               <header>
                 <div className="run-avatar"><Robot size={22} weight="duotone" /></div>
-                <div><span>{run.executor} · {run.mode}</span><h2>{taskTitle(run)}</h2><small>{projectName(run)} · 第 {run.attempt} 次</small></div>
+                <div><span>{run.executor} · {run.mode}</span><h2>{taskTitle(run)}</h2><small>{projectName(run)} · 第 {run.attempt} / {task?.maxAttempts ?? run.attempt} 次</small></div>
                 <StatusBadge status={run.status} demo={run.mode === "demo"} />
               </header>
               {run.mode === "demo" ? <div className="run-warning"><WarningCircle size={17} weight="fill" />该结果由确定性 Demo 适配器生成，只用于验证工作流。</div> : null}
@@ -245,13 +258,13 @@ export function ReviewPage() {
                 <div className="review-actions">
                   <button className="secondary-button" onClick={() => setSelectedRun(run)}>查看运行详情</button>
                   {["queued", "claimed"].includes(run.status) ? <button className="danger-button" disabled={cancel.isPending} onClick={() => cancel.mutate(run.id)}>取消运行</button> : null}
-                  {["failed", "blocked", "cancelled"].includes(run.status) ? <button className="secondary-button" disabled={retry.isPending} onClick={() => retry.mutate(run.id)}><ArrowClockwise size={16} />重试</button> : null}
+                  {canRetry ? <button className="secondary-button" disabled={retry.isPending} onClick={() => retry.mutate(run.id)}><ArrowClockwise size={16} />重试</button> : null}
                   {run.status === "needs_review" ? <button className="danger-button" onClick={() => setRejectingRun(run)}><XCircle size={17} />驳回</button> : null}
                   {run.status === "needs_review" ? <button className="primary-button" onClick={() => accept.mutate(run.id)} disabled={accept.isPending}><CheckCircle size={17} weight="fill" />批准结果</button> : null}
                 </div>
               </footer>
-            </article>
-          ))}
+            </article>;
+          })}
         </div>
       )}
       {actionError ? <p className="inline-error">{actionError.message}</p> : null}

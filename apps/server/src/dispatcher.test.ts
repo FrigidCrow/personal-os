@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PersonalOsDatabase } from "@personal-os/database";
 import type { Project, Task } from "@personal-os/domain";
 import { AgentDispatcher, routeTask } from "./dispatcher.js";
@@ -77,6 +80,8 @@ describe("AgentDispatcher", () => {
     expect(tick.dispatched).toHaveLength(1);
     expect(tick.dispatched[0]).toMatchObject({ executor: "codex", status: "running" });
     expect(database.getTask(task.id)?.status).toBe("in_progress");
+    expect(database.getTask(task.id)?.nextRunAt).toBe("2026-07-29T08:00:00.000Z");
+    expect(dispatcher.tick().dispatched).toHaveLength(0);
 
     await wait(450);
     expect(database.getAgentRun(tick.dispatched[0]!.id)?.status).toBe("needs_review");
@@ -124,6 +129,7 @@ describe("dispatcher restart recovery", () => {
         executor: "openworker",
         executionMode: "automatic",
         triggerType: "cron",
+        triggerConfig: { expression: "* * * * *" },
         riskLevel: "low",
         maxAttempts: 2,
         nextRunAt: "2026-07-28T07:59:00.000Z"
@@ -145,6 +151,92 @@ describe("dispatcher restart recovery", () => {
     }
   });
 });
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+
+describe("automatic trigger policies", () => {
+  let currentTime = new Date("2026-07-28T08:00:00.000Z");
+  let database: PersonalOsDatabase;
+  let dispatcher: AgentDispatcher;
+
+  beforeEach(() => {
+    currentTime = new Date("2026-07-28T08:00:00.000Z");
+    database = new PersonalOsDatabase({ filePath: ":memory:", seed: false, clock: () => currentTime });
+    dispatcher = new AgentDispatcher(database, undefined, undefined, () => currentTime);
+  });
+
+  afterEach(() => database.close());
+
+  it("skips old cron occurrences by default and catches up at most once when enabled", () => {
+    const skippedTask = database.createTask({
+      title: "No catch-up",
+      status: "ready",
+      executor: "openworker",
+      executionMode: "automatic",
+      triggerType: "cron",
+      triggerConfig: { expression: "* * * * *" },
+      riskLevel: "low",
+      nextRunAt: "2026-07-28T07:50:00.000Z"
+    });
+    const catchUpTask = database.createTask({
+      title: "Latest catch-up",
+      status: "ready",
+      executor: "openworker",
+      executionMode: "automatic",
+      triggerType: "cron",
+      triggerConfig: { expression: "* * * * *", catchUp: true },
+      riskLevel: "low",
+      nextRunAt: "2026-07-28T07:40:00.000Z"
+    });
+
+    const tick = dispatcher.tick();
+    expect(tick.skipped).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: skippedTask.id, reason: expect.stringContaining("catch-up is disabled") })]));
+    expect(tick.dispatched).toEqual([expect.objectContaining({ taskId: catchUpTask.id, status: "queued" })]);
+    expect(database.getTask(skippedTask.id)?.nextRunAt).toBe("2026-07-28T08:01:00.000Z");
+    expect(database.getTask(catchUpTask.id)?.nextRunAt).toBe("2026-07-28T08:01:00.000Z");
+    expect(dispatcher.tick().dispatched).toHaveLength(0);
+  });
+
+  it("dispatches matching events idempotently and can rearm an accepted recurring task", () => {
+    const task = database.createTask({
+      title: "Event report",
+      status: "ready",
+      executor: "openworker",
+      executionMode: "automatic",
+      triggerType: "event",
+      triggerConfig: { eventName: "opportunity.shortlisted" },
+      riskLevel: "low"
+    });
+
+    const first = dispatcher.handleEvent("opportunity.shortlisted", "event-1").dispatched[0]!;
+    expect(first).toMatchObject({ taskId: task.id, status: "queued" });
+    expect(dispatcher.handleEvent("opportunity.shortlisted", "event-1").dispatched).toHaveLength(0);
+    database.claimAgentRun(first.id);
+    database.submitAgentRunResult(first.id, { finalResponse: "Done", verificationSummary: "Verified" });
+    database.acceptAgentRun(first.id);
+
+    const second = dispatcher.handleEvent("opportunity.shortlisted", "event-2").dispatched[0]!;
+    expect(second.id).not.toBe(first.id);
+    expect(second.taskId).toBe(task.id);
+    expect(database.getTask(task.id)?.status).toBe("ready");
+  });
+
+  it("runs a dependency trigger once after its prerequisite is accepted", () => {
+    const prerequisite = database.createTask({ title: "Prerequisite", status: "ready" });
+    const dependent = database.createTask({
+      title: "Dependent worker",
+      status: "ready",
+      executor: "openworker",
+      executionMode: "automatic",
+      triggerType: "dependency",
+      triggerConfig: { taskId: prerequisite.id },
+      riskLevel: "low"
+    });
+    database.transitionTask(prerequisite.id, "in_progress");
+    database.transitionTask(prerequisite.id, "needs_review");
+    database.transitionTask(prerequisite.id, "done");
+
+    const first = dispatcher.tick();
+    expect(first.dispatched).toEqual([expect.objectContaining({ taskId: dependent.id })]);
+    expect(dispatcher.tick().dispatched).toHaveLength(0);
+    expect(database.getTask(dependent.id)?.lastScheduledAt).toBe(currentTime.toISOString());
+  });
+});

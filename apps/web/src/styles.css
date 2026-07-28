@@ -525,6 +525,14 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .agent-control-strip button:hover svg { transform: rotate(-8deg) scale(1.08); }
 .agent-control-strip span { font-size: 10.5px; font-weight: 620; }
 .agent-control-strip strong { font-family: "Geist Mono Variable", monospace; font-size: 19px; font-weight: 560; }
+.executor-health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+.executor-health-grid article { padding: 14px 15px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.executor-health-grid article[data-available="false"] { border-color: color-mix(in srgb, var(--danger) 36%, var(--line)); background: var(--danger-soft); }
+.executor-health-grid header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; color: var(--success); }
+.executor-health-grid article[data-available="false"] header { color: var(--danger); }
+.executor-health-grid strong { color: var(--ink); font-size: 10.5px; text-transform: capitalize; }
+.executor-health-grid span { font-family: "Geist Mono Variable", monospace; font-size: 7.5px; letter-spacing: 0.05em; }
+.executor-health-grid p { margin: 8px 0 0; color: var(--ink-soft); font-size: 9.5px; line-height: 1.5; }
 .approval-empty { display: flex; min-height: 76px; align-items: center; gap: 10px; padding: 18px 20px; border: 1px dashed var(--line-strong); border-radius: 15px; color: var(--success); background: var(--success-soft); font-size: 10.5px; }
 .approval-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .approval-card { position: relative; overflow: hidden; padding: 20px; border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--line)); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-soft); }
@@ -572,6 +580,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .automation-fields > header strong { font-size: 11px; }
 .automation-fields > header span { color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 8px; }
 .automation-fields > p { margin: -1px 0 0; color: var(--ink-soft); font-size: 9px; line-height: 1.5; }
+.automation-fields .automation-check { display: flex; flex-direction: row; align-items: center; gap: 9px; color: var(--ink-soft); font-size: 9.5px; }
 .assignment-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .assignment-mode button { display: flex; min-height: 66px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: var(--surface-raised); cursor: pointer; text-align: left; transition: border-color 180ms ease, transform 180ms ease, background 180ms ease; }
 .assignment-mode button:hover { transform: translateY(-2px); }
@@ -750,6 +759,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
   .agent-control-strip { grid-template-columns: repeat(2, 1fr); }
   .agent-control-strip button:nth-child(2) { border-right: 0; }
   .agent-control-strip button:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .executor-health-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {

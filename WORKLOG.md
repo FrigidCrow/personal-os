@@ -79,6 +79,27 @@ Phase D verification so far:
 - Full automated gates passed with 6 test files / 48 tests, TypeScript, ESLint, production builds, and patch hygiene.
 - Rendered desktop, mobile, keyboard, and complete request/response/SQLite E2E evidence remains scheduled for the dedicated Review stage.
 
+### Work - Phase E: reliable local operation
+
+- Added validated cron parsing with IANA timezone support and deterministic next-occurrence calculation.
+- Completed all four trigger policies: manual dispatch, cron dispatch, internal event dispatch with stable event ids, and one-time dependency dispatch after prerequisite acceptance.
+- Cron now advances `nextRunAt` before dispatch. Missed schedules are skipped by default; explicit `catchUp` runs only the latest missed occurrence and advances immediately to the next future time.
+- Recurring cron and event tasks can be prepared for another run only after their previous result was accepted. Active-run and idempotency constraints remain enforced.
+- Added operational health reporting for SQLite quick check, foreign keys, active runs, expired leases, pending approvals, and executor adapters. The Agent control plane now shows executor and database health.
+- Added build-backed macOS LaunchAgent install and uninstall scripts for API `8787` and Web `5273`, with loopback-only binding, KeepAlive, logs, dry-run defaults, and explicit `--apply` mutation.
+- Added online SQLite backup with source integrity validation and a 14-backup retention default. Added dry-run-first privacy cleanup for resolved approval previews and old terminal-run prompt snapshots.
+- Added `docs/OPERATIONS.md` with exact ports, install, health, restart, logs, backup, restore, privacy, trigger, and OpenWorker MCP instructions.
+- Installed both LaunchAgents on this machine after creating a valid database backup, replacing the temporary Personal OS development processes. OpenWorker remains independent on Web `5274` and server `8765`.
+
+Phase E verification so far:
+
+- Trigger tests cover cron advancement, duplicate tick suppression, default missed-run skip, one-item catch-up, stable event id behavior, recurring event rearm, and dependency dispatch exactly once.
+- API tests cover automation validation, event dispatch, health response, and persisted AgentRun creation.
+- LaunchAgent dry-runs produced only the two intended plist targets. Applied services both reported `state = running`; API health returned database `ok` and Web returned HTTP 200.
+- A forced API restart changed PID `20596` to `20749`; AgentRun count remained 2 before and after, and the post-restart health check passed.
+- The online backup passed `quick_check = ok`, retained 4 tasks and 2 AgentRuns, and returned zero foreign-key violations.
+- Full automated gates passed with 6 test files / 54 tests, TypeScript, ESLint, and patch hygiene. A fresh production build and rendered E2E remain part of Review.
+
 ## 2026-07-28 - Plan
 
 - Cloned the empty remote repository into `/Users/frigidcrow/Documents/Codex/dev/personal-os`.

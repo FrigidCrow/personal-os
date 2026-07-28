@@ -17,7 +17,12 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "seed": "npm run seed -w @personal-os/server",
-    "start": "npm run start -w @personal-os/server"
+    "start": "npm run start -w @personal-os/server",
+    "healthcheck": "node scripts/healthcheck.mjs",
+    "backup": "node scripts/backup-database.mjs",
+    "privacy:cleanup": "node scripts/privacy-cleanup.mjs",
+    "launchagent:install": "node scripts/install-launch-agents.mjs",
+    "launchagent:uninstall": "node scripts/uninstall-launch-agents.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

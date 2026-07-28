@@ -70,7 +70,7 @@ OpenWorker 保持为独立执行器，不复制或合并进 Personal OS 仓库�
 | OpenWorker 运行方式 | Python local agent server + React/Vite browser GUI |
 | 模型认证 | 由用户在 OpenWorker Settings 中配置，不写入 Personal OS、Git 或本文档 |
 
-当前采用源码开发运行方式，不是已打包的 macOS `.app`。开发进程关闭或电脑重启后需要重新启动；登录自动启动留到 Phase E 的 LaunchAgent 实现。
+开发时仍可用源码进程；Phase E 已定义构建产物的 macOS LaunchAgent 登录自启方式。API 与 Web 分别运行，任一进程退出后由 launchd 重启，操作手册见 `docs/OPERATIONS.md`。
 
 #### 本机端口约定
 
@@ -429,7 +429,7 @@ MCP 不提供：
 - Server 或电脑停止时不承诺实时执行。
 - Cron 必须记录 `lastScheduledAt` 和 `nextRunAt`。
 - 默认不补跑所有错过周期，只补跑最近一次且需要显式配置 `catchUp = true`。
-- 后续可增加 macOS LaunchAgent，让 Personal OS 登录后自动启动。
+- macOS LaunchAgent 让 Personal OS API 与 Web 在登录后自动启动；安装、卸载和恢复命令见 `docs/OPERATIONS.md`。
 
 ## 11. 安全与自动化策略
 

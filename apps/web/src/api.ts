@@ -33,6 +33,22 @@ export interface DashboardData {
   };
 }
 
+export interface HealthData {
+  ok: boolean;
+  service: string;
+  codexMode: string;
+  executors: Array<{ executor: "codex" | "openworker"; available: boolean; detail: string }>;
+  operational: {
+    database: "ok" | "error";
+    quickCheck: string;
+    foreignKeyViolations: number;
+    activeRuns: number;
+    staleRuns: number;
+    pendingApprovals: number;
+    checkedAt: string;
+  };
+}
+
 interface ItemList<T> {
   items: T[];
 }
@@ -66,6 +82,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  health: () => request<HealthData>("/api/health"),
   dashboard: () => request<DashboardData>("/api/dashboard"),
   projects: () => request<ItemList<Project>>("/api/projects"),
   project: (id: string) => request<ProjectDetail>(`/api/projects/${id}`),

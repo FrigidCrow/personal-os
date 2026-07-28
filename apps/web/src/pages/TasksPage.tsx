@@ -1,6 +1,6 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertDialog, Button, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
+import { AlertDialog, Button, Checkbox, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
 import { ArrowClockwise, ArrowRight, Lightning, Pause, PencilSimple, Play, Plus, Robot, Trash, User } from "@phosphor-icons/react";
 import { Link } from "wouter";
 import { canTransitionTask, type DelegationMode, type Priority, type Task, type TaskInput, type TaskStatus } from "@personal-os/domain";
@@ -92,8 +92,11 @@ function toLocalDateTime(value: string | null | undefined): string {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
-function AutomationFields({ value, onChange }: { value: TaskInput; onChange: (next: TaskInput) => void }) {
+function AutomationFields({ value, onChange, taskOptions = [] }: { value: TaskInput; onChange: (next: TaskInput) => void; taskOptions?: Task[] }) {
   const cronExpression = typeof value.triggerConfig?.expression === "string" ? value.triggerConfig.expression : "";
+  const eventName = typeof value.triggerConfig?.eventName === "string" ? value.triggerConfig.eventName : "";
+  const dependencyId = typeof value.triggerConfig?.taskId === "string" ? value.triggerConfig.taskId : "";
+  const catchUp = value.triggerConfig?.catchUp === true;
   return (
     <section className="automation-fields">
       <header><div><Lightning size={17} weight="duotone" /><strong>Agent 自动化</strong></div><span>先路由，再执行</span></header>
@@ -106,10 +109,12 @@ function AutomationFields({ value, onChange }: { value: TaskInput; onChange: (ne
         <div className="form-field"><span>风险等级</span><Select.Root value={value.riskLevel} onValueChange={(next) => onChange({ ...value, riskLevel: next as TaskInput["riskLevel"] })}><Select.Trigger aria-label="风险等级" /><Select.Content><Select.Item value="low">低风险</Select.Item><Select.Item value="medium">中风险</Select.Item><Select.Item value="high">高风险</Select.Item></Select.Content></Select.Root></div>
       </div>
       <div className="form-grid">
-        <div className="form-field"><span>触发方式</span><Select.Root value={value.triggerType} onValueChange={(next) => onChange({ ...value, triggerType: next as TaskInput["triggerType"], triggerConfig: next === "cron" ? { expression: cronExpression } : null })}><Select.Trigger aria-label="触发方式" /><Select.Content><Select.Item value="manual">手动</Select.Item><Select.Item value="cron">定时</Select.Item><Select.Item value="event">事件</Select.Item><Select.Item value="dependency">依赖完成</Select.Item></Select.Content></Select.Root></div>
+        <div className="form-field"><span>触发方式</span><Select.Root value={value.triggerType} onValueChange={(next) => onChange({ ...value, triggerType: next as TaskInput["triggerType"], triggerConfig: next === "cron" ? { expression: cronExpression, catchUp } : next === "event" ? { eventName } : next === "dependency" ? { taskId: dependencyId } : null })}><Select.Trigger aria-label="触发方式" /><Select.Content><Select.Item value="manual">手动</Select.Item><Select.Item value="cron">定时</Select.Item><Select.Item value="event">事件</Select.Item><Select.Item value="dependency">依赖完成</Select.Item></Select.Content></Select.Root></div>
         <label><span>最大尝试次数</span><TextField.Root type="number" min="1" max="10" value={String(value.maxAttempts)} onChange={(event) => onChange({ ...value, maxAttempts: Number(event.target.value) || 1 })} /></label>
       </div>
-      {value.triggerType === "cron" ? <div className="form-grid"><label><span>Cron 表达式</span><TextField.Root placeholder="0 8 * * *" value={cronExpression} onChange={(event) => onChange({ ...value, triggerConfig: { expression: event.target.value } })} /></label><label><span>时区</span><TextField.Root value={value.triggerTimezone} onChange={(event) => onChange({ ...value, triggerTimezone: event.target.value })} /></label></div> : null}
+      {value.triggerType === "cron" ? <><div className="form-grid"><label><span>Cron 表达式</span><TextField.Root placeholder="0 8 * * *" value={cronExpression} onChange={(event) => onChange({ ...value, triggerConfig: { expression: event.target.value, catchUp } })} /></label><label><span>时区</span><TextField.Root value={value.triggerTimezone} onChange={(event) => onChange({ ...value, triggerTimezone: event.target.value })} /></label></div><label className="automation-check"><Checkbox checked={catchUp} onCheckedChange={(checked) => onChange({ ...value, triggerConfig: { expression: cronExpression, catchUp: checked === true } })} /><span>电脑离线错过周期时，只补跑最近一次</span></label></> : null}
+      {value.triggerType === "event" ? <label><span>内部事件名</span><TextField.Root placeholder="opportunity.shortlisted" value={eventName} onChange={(event) => onChange({ ...value, triggerConfig: { eventName: event.target.value } })} /></label> : null}
+      {value.triggerType === "dependency" ? <div className="form-field"><span>依赖任务</span><Select.Root value={dependencyId || "none"} onValueChange={(taskId) => onChange({ ...value, triggerConfig: { taskId: taskId === "none" ? "" : taskId } })}><Select.Trigger aria-label="依赖任务" /><Select.Content><Select.Item value="none">请选择已存在任务</Select.Item>{taskOptions.map((task) => <Select.Item key={task.id} value={task.id}>{task.title}</Select.Item>)}</Select.Content></Select.Root></div> : null}
       {value.executionMode === "automatic" ? <label><span>下次执行时间</span><TextField.Root type="datetime-local" value={toLocalDateTime(value.nextRunAt)} onChange={(event) => onChange({ ...value, nextRunAt: event.target.value ? new Date(event.target.value).toISOString() : null })} /></label> : null}
       <p>只有低风险任务允许自动派发。中高风险任务会停在人工控制面。</p>
     </section>
@@ -349,7 +354,7 @@ export function TasksPage() {
                   <div className="form-field"><span>委派方式</span><Select.Root value={form.delegationMode} onValueChange={(value) => setForm({ ...form, delegationMode: value as DelegationMode })}><Select.Trigger aria-label="委派方式" /><Select.Content><Select.Item value="human_only">本人处理</Select.Item><Select.Item value="codex_ready">Codex 可执行</Select.Item><Select.Item value="mixed">协作执行</Select.Item></Select.Content></Select.Root></div>
                   <div className="form-field"><span>优先级</span><Select.Root value={form.priority} onValueChange={(value) => setForm({ ...form, priority: value as Priority })}><Select.Trigger aria-label="优先级" /><Select.Content><Select.Item value="low">低</Select.Item><Select.Item value="medium">中</Select.Item><Select.Item value="high">高</Select.Item><Select.Item value="critical">关键</Select.Item></Select.Content></Select.Root></div>
                 </div>
-                <AutomationFields value={form} onChange={setForm} />
+                <AutomationFields value={form} onChange={setForm} taskOptions={items} />
                 <label><span>验收条件，每行一条</span><TextArea value={form.acceptanceCriteria.join("\n")} onChange={(event) => setForm({ ...form, acceptanceCriteria: event.target.value.split("\n").map((value) => value.trim()).filter(Boolean) })} /></label>
                 {createTask.error ? <p className="inline-error">{createTask.error.message}</p> : null}
                 <div className="dialog-actions"><Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close><Button type="submit" loading={createTask.isPending}>创建任务</Button></div>
@@ -399,7 +404,7 @@ export function TasksPage() {
                     <div className="form-field"><span>执行方式</span><Select.Root value={detailForm.delegationMode} onValueChange={(value) => setDetailForm((current) => ({ ...current, delegationMode: value as DelegationMode }))}><Select.Trigger aria-label="编辑执行方式" /><Select.Content><Select.Item value="human_only">本人处理</Select.Item><Select.Item value="codex_ready">Codex 可执行</Select.Item><Select.Item value="mixed">人机协作</Select.Item></Select.Content></Select.Root></div>
                     <div className="form-field"><span>优先级</span><Select.Root value={detailForm.priority} onValueChange={(value) => setDetailForm((current) => ({ ...current, priority: value as Priority }))}><Select.Trigger aria-label="编辑优先级" /><Select.Content><Select.Item value="low">低</Select.Item><Select.Item value="medium">中</Select.Item><Select.Item value="high">高</Select.Item><Select.Item value="critical">关键</Select.Item></Select.Content></Select.Root></div>
                   </div>
-                  <AutomationFields value={detailForm} onChange={setDetailForm} />
+                  <AutomationFields value={detailForm} onChange={setDetailForm} taskOptions={items.filter((task) => task.id !== detailTask.id)} />
                   <label><span>验收条件，每行一条</span><TextArea value={detailForm.acceptanceCriteria.join("\n")} onChange={(event) => { const value = event.target.value; setDetailForm((current) => ({ ...current, acceptanceCriteria: value.split("\n").map((item) => item.trim()).filter(Boolean) })); }} /></label>
                   {updateTask.error ? <p className="inline-error">{updateTask.error.message}</p> : null}
                   <footer className="task-detail-footer task-detail-edit-footer">

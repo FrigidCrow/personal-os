@@ -715,6 +715,49 @@ export class PersonalOsDatabase {
     return this.requireTask(id);
   }
 
+  prepareTaskForAutomation(id: string): Task {
+    const task = this.requireTask(id);
+    if (task.executionMode !== "automatic" || task.triggerType === "manual") {
+      throw new Error("Only triggered automatic tasks can be prepared for another run.");
+    }
+    if (task.status === "ready") return task;
+    if (task.status !== "done") throw new Error(`Task cannot be prepared for automation from status: ${task.status}`);
+    if (this.getActiveRunForTask(id)) throw new Error("Active run already exists for task.");
+    const timestamp = this.timestamp();
+    this.connection.prepare("UPDATE tasks SET status = 'ready', updated_at = ? WHERE id = ?").run(timestamp, id);
+    return this.requireTask(id);
+  }
+
+  operationalHealth(asOf = this.timestamp()): {
+    database: "ok" | "error";
+    quickCheck: string;
+    foreignKeyViolations: number;
+    activeRuns: number;
+    staleRuns: number;
+    pendingApprovals: number;
+    checkedAt: string;
+  } {
+    const quickCheck = String((this.connection.pragma("quick_check", { simple: true }) as string | undefined) ?? "error");
+    const foreignKeyViolations = (this.connection.pragma("foreign_key_check") as unknown[]).length;
+    const activeRuns = Number((this.connection.prepare(`
+      SELECT COUNT(*) AS count FROM agent_runs WHERE status IN ('queued', 'claimed', 'running', 'awaiting_approval')
+    `).get() as { count: number }).count);
+    const staleRuns = Number((this.connection.prepare(`
+      SELECT COUNT(*) AS count FROM agent_runs
+      WHERE status IN ('claimed', 'running', 'awaiting_approval') AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+    `).get(asOf) as { count: number }).count);
+    const pendingApprovals = Number((this.connection.prepare("SELECT COUNT(*) AS count FROM approval_requests WHERE status = 'pending'").get() as { count: number }).count);
+    return {
+      database: quickCheck === "ok" && foreignKeyViolations === 0 ? "ok" : "error",
+      quickCheck,
+      foreignKeyViolations,
+      activeRuns,
+      staleRuns,
+      pendingApprovals,
+      checkedAt: asOf
+    };
+  }
+
   listOpportunities(): Opportunity[] {
     return (this.connection.prepare("SELECT * FROM opportunities ORDER BY created_at DESC").all() as Row[]).map((row) => this.hydrateOpportunity(row));
   }
