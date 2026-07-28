@@ -19,6 +19,7 @@ import {
   X,
   type Icon
 } from "@phosphor-icons/react";
+import { SuccessToastProvider } from "./SuccessToast";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -72,7 +73,7 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <nav className="primary-nav" aria-label="主导航">
         {navItems.map(({ to, label, description, icon: NavIcon }) => {
-          const active = location === to;
+          const active = location === to || (to !== "/" && location.startsWith(`${to}/`));
           return (
             <Link
               key={to}
@@ -146,12 +147,12 @@ export function Shell({ children }: { children: ReactNode }) {
   }, [themeMode]);
 
   const appearance = themeMode === "system" ? systemTheme : themeMode;
-  const page = useMemo(() => titles[location] ?? titles["/"]!, [location]);
+  const page = useMemo(() => titles[location] ?? (location.startsWith("/projects/") ? { title: "项目详情", subtitle: "把结果、上下文和执行任务放在同一页。" } : titles["/"]!), [location]);
   const dateLabel = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date());
 
   return (
     <Theme appearance={appearance} accentColor="orange" grayColor="sand" radius="large" scaling="100%">
-      <div className="app-shell" data-theme-mode={appearance}>
+      <SuccessToastProvider><div className="app-shell" data-theme-mode={appearance}>
         <div className="ambient-field" aria-hidden="true"><span /><span /><span /></div>
         <aside className="desktop-sidebar"><NavContent /></aside>
 
@@ -184,7 +185,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </header>
           <main className="app-main">{children}</main>
         </div>
-      </div>
+      </div></SuccessToastProvider>
     </Theme>
   );
 }

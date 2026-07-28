@@ -2,14 +2,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowSquareOut, Crosshair, Flask, Lightning, Sparkle } from "@phosphor-icons/react";
 import { api } from "../api";
 import { DemoBanner, EmptyState, ErrorState, LoadingState, SectionHeader } from "../components/UI";
+import { useSuccessToast } from "../components/SuccessToast";
 
 export function RadarPage() {
   const queryClient = useQueryClient();
+  const { showSuccess } = useSuccessToast();
   const opportunities = useQuery({ queryKey: ["opportunities"], queryFn: api.opportunities });
   const report = useQuery({ queryKey: ["report"], queryFn: api.latestReport, retry: false });
   const convert = useMutation({
     mutationFn: api.createExperiment,
     onSuccess: async () => {
+      showSuccess("机会已转为最小实验");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["opportunities"] }),
         queryClient.invalidateQueries({ queryKey: ["experiments"] }),
@@ -19,9 +22,11 @@ export function RadarPage() {
   });
   const generate = useMutation({
     mutationFn: api.generateReport,
-    onSuccess: async () => {
+    onSuccess: async (generatedReport) => {
+      showSuccess(generatedReport.isDemo ? "Demo 机会报告已生成" : "Live 机会报告已生成");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["report"] }),
+        queryClient.invalidateQueries({ queryKey: ["opportunities"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard"] })
       ]);
     }

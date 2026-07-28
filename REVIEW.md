@@ -106,3 +106,32 @@ The original MVP1 visual direction was rejected during user acceptance for weak 
 - The complete visual rationale and reference list are recorded in `docs/VISUAL-REDESIGN.md`.
 
 Visual follow-up verdict: **Passed - ready for renewed user acceptance.**
+
+## MVP1.1 closeout review
+
+Status: Passed
+
+MVP1.1 closes the five interaction gaps recorded in `docs/PLAN.md`:
+
+1. Task detail now supports deletion behind an explicit destructive confirmation.
+2. Experiments now have readable detail, complete editing, status control, and result recording.
+3. Project cards now lead to a real project detail route with execution context and associated tasks.
+4. Successful mutations now use one accessible global feedback pattern.
+5. Codex review now exposes complete run context and consumes the existing SSE stream while a run is active.
+
+The closeout required no destructive migration. It also fixed the audit snapshot for new Codex runs so the persisted value contains the actual execution prompt rather than only the task title.
+
+Direct browser evidence covered the task deletion confirmation, experiment edit/result flow, project detail route, global success messages, Live Codex detail, mobile layout, theme rendering, and a clean browser console. Temporary task data was deleted, and the edited demonstration experiment was restored to its original state.
+
+Final automated evidence:
+
+| Gate | Result |
+|---|---|
+| Unit and integration tests | Passed: 5 files, 26 tests |
+| TypeScript | Passed |
+| ESLint | Passed |
+| Production build | Passed |
+| Dependency audit | Passed: 0 known vulnerabilities |
+| Patch hygiene | Passed |
+
+MVP1.1 verdict: **Passed - ready for user acceptance.**

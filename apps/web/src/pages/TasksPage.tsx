@@ -1,11 +1,12 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
-import { ArrowRight, PencilSimple, Plus, Robot, User } from "@phosphor-icons/react";
+import { AlertDialog, Button, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
+import { ArrowRight, PencilSimple, Plus, Robot, Trash, User } from "@phosphor-icons/react";
 import { Link } from "wouter";
 import { canTransitionTask, type DelegationMode, type Priority, type Task, type TaskInput, type TaskStatus } from "@personal-os/domain";
 import { api } from "../api";
 import { EmptyState, ErrorState, formatDate, LoadingState, SectionHeader, StatusBadge } from "../components/UI";
+import { useSuccessToast } from "../components/SuccessToast";
 
 const columns: Array<{ status: TaskStatus; label: string }> = [
   { status: "inbox", label: "Inbox" },
@@ -67,6 +68,7 @@ interface PointerDrag {
 
 export function TasksPage() {
   const queryClient = useQueryClient();
+  const { showSuccess } = useSuccessToast();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<TaskInput>(initialTask);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
@@ -87,7 +89,7 @@ export function TasksPage() {
     queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
     queryClient.invalidateQueries({ queryKey: ["runs"] })
   ]);
-  const createTask = useMutation({ mutationFn: api.createTask, onSuccess: async () => { setOpen(false); setForm(initialTask); await refresh(); } });
+  const createTask = useMutation({ mutationFn: api.createTask, onSuccess: async () => { setOpen(false); setForm(initialTask); showSuccess("任务已创建"); await refresh(); } });
   const transition = useMutation({
     mutationFn: ({ id, status }: { id: string; status: TaskStatus }) => api.transitionTask(id, status),
     onMutate: async ({ id, status }) => {
@@ -102,6 +104,7 @@ export function TasksPage() {
     onError: (_error, _variables, context) => {
       if (context?.previous) queryClient.setQueryData(["tasks"], context.previous);
     },
+    onSuccess: (updatedTask) => showSuccess(`任务已移动到${columns.find((column) => column.status === updatedTask.status)?.label ?? updatedTask.status}`),
     onSettled: async () => { await refresh(); }
   });
   const updateTask = useMutation({
@@ -110,6 +113,16 @@ export function TasksPage() {
       setDetailTask(updatedTask);
       setDetailForm(taskToForm(updatedTask));
       setEditingDetail(false);
+      showSuccess("任务详情已保存");
+      await refresh();
+    }
+  });
+  const deleteTask = useMutation({
+    mutationFn: api.deleteTask,
+    onSuccess: async () => {
+      setDetailTask(null);
+      setEditingDetail(false);
+      showSuccess("任务已删除");
       await refresh();
     }
   });
@@ -117,6 +130,7 @@ export function TasksPage() {
     mutationFn: ({ id, mode }: { id: string; mode: "demo" | "live" }) => api.assignTask(id, mode),
     onSuccess: async () => {
       setAssignmentTask(null);
+      showSuccess("任务已交给 Codex，运行状态会持续更新");
       await refresh();
     }
   });
@@ -319,7 +333,19 @@ export function TasksPage() {
 
                   <footer className="task-detail-footer">
                     <div><span>创建于 {formatTimestamp(detailTask.createdAt)}</span><span>更新于 {formatTimestamp(detailTask.updatedAt)}</span></div>
-                    <div className="task-detail-actions"><button className="secondary-button" type="button" onClick={() => setEditingDetail(true)}><PencilSimple size={15} />编辑详情</button><Dialog.Close><Button variant="soft" color="gray">关闭</Button></Dialog.Close></div>
+                    <div className="task-detail-actions">
+                      <AlertDialog.Root>
+                        <AlertDialog.Trigger><button className="danger-button" type="button"><Trash size={15} />删除任务</button></AlertDialog.Trigger>
+                        <AlertDialog.Content maxWidth="440px">
+                          <AlertDialog.Title>删除任务？</AlertDialog.Title>
+                          <AlertDialog.Description>任务“{detailTask.title}”以及关联的 Codex 运行记录会从本地数据库删除。这个操作无法从界面撤销。</AlertDialog.Description>
+                          {deleteTask.error ? <p className="inline-error">{deleteTask.error.message}</p> : null}
+                          <div className="dialog-actions"><AlertDialog.Cancel><Button variant="soft" color="gray">取消</Button></AlertDialog.Cancel><AlertDialog.Action><Button color="red" loading={deleteTask.isPending} onClick={() => deleteTask.mutate(detailTask.id)}>确认删除</Button></AlertDialog.Action></div>
+                        </AlertDialog.Content>
+                      </AlertDialog.Root>
+                      <button className="secondary-button" type="button" onClick={() => setEditingDetail(true)}><PencilSimple size={15} />编辑详情</button>
+                      <Dialog.Close><Button variant="soft" color="gray">关闭</Button></Dialog.Close>
+                    </div>
                   </footer>
                 </>
               )}

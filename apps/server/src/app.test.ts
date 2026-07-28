@@ -111,6 +111,39 @@ describe("Personal OS API", () => {
     expect(experiment.opportunityId).toBe(opportunity.id);
   });
 
+  it("reads, edits, and records an experiment result", async () => {
+    const experiment = database.listExperiments()[0]!;
+
+    const detail = await app.request(`/api/experiments/${experiment.id}`);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).id).toBe(experiment.id);
+
+    const update = await app.request(`/api/experiments/${experiment.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "running", budgetCap: 88, hypothesis: "Updated measurable hypothesis." })
+    });
+    expect(update.status).toBe(200);
+    expect(await update.json()).toEqual(expect.objectContaining({ status: "running", budgetCap: 88, hypothesis: "Updated measurable hypothesis." }));
+
+    const result = await app.request(`/api/experiments/${experiment.id}/result`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "won", resultSummary: "One customer paid for the smallest useful version." })
+    });
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual(expect.objectContaining({ status: "won", resultSummary: "One customer paid for the smallest useful version." }));
+  });
+
+  it("returns a project detail with associated tasks", async () => {
+    const task = database.listTasks().find((item) => item.projectId)!;
+    const response = await app.request(`/api/projects/${task.projectId}`);
+    expect(response.status).toBe(200);
+    const project = await response.json();
+    expect(project.id).toBe(task.projectId);
+    expect(project.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ id: task.id })]));
+  });
+
   it("creates an income asset with visible stage and maintenance burden", async () => {
     const response = await app.request("/api/assets", {
       method: "POST",
@@ -172,17 +205,23 @@ describe("Personal OS API", () => {
     expect(assignment.status).toBe(202);
     const queuedRun = await assignment.json();
     expect(queuedRun.mode).toBe("demo");
+    expect(queuedRun.promptSnapshot).toContain(`Personal OS task id: ${task.id}`);
+    expect(queuedRun.promptSnapshot).toContain(`Task: ${task.title}`);
 
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    const stream = await app.request(`/api/codex/runs/${queuedRun.id}/stream`);
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    const streamBody = await stream.text();
+    expect(streamBody).toContain("event: run");
+    expect(streamBody).toContain("running");
+    expect(streamBody).toContain("needs_review");
+
     const reviewRun = database.getCodexRun(queuedRun.id)!;
     expect(reviewRun.status).toBe("needs_review");
     expect(database.getTask(task.id)?.status).toBe("needs_review");
 
-    const stream = await app.request(`/api/codex/runs/${reviewRun.id}/stream`);
-    expect(stream.headers.get("content-type")).toContain("text/event-stream");
-    const streamBody = await stream.text();
-    expect(streamBody).toContain("event: run");
-    expect(streamBody).toContain("needs_review");
+    const events = await app.request(`/api/codex/runs/${reviewRun.id}/events`);
+    expect(events.status).toBe(200);
+    expect((await events.json()).items).toEqual(expect.arrayContaining([expect.objectContaining({ eventType: "needs_review" })]));
 
     const bypass = await app.request(`/api/tasks/${task.id}/transition`, {
       method: "POST",

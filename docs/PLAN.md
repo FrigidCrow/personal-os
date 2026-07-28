@@ -258,7 +258,34 @@ Gate: documentation has copy-pasteable setup and verification commands.
 - Loading, empty, and error state review.
 - Mechanical taste-skill pre-flight checks relevant to product UI.
 
-## 10. Definition of done
+## 10. MVP1.1 closeout
+
+Status: Implemented and verified
+Date: 2026-07-28
+
+MVP1.1 closes the remaining interaction gaps without changing the product boundary, data ownership model, or human approval gate established by MVP1.
+
+Implementation order:
+
+1. Add confirmed deletion to the task detail experience.
+2. Add experiment detail, editing, status management, and result recording.
+3. Add a real project detail route with project context and associated tasks.
+4. Add one global success-feedback system for completed mutations.
+5. Expand Codex run detail and consume the existing Server-Sent Events stream in Web.
+
+Acceptance gates:
+
+- A task can be deleted only after an explicit confirmation, and related Codex run records follow the existing database cascade rule.
+- An experiment can be opened, edited, and given a measured outcome from the Web UI.
+- `/projects/:id` renders project metadata and associated tasks, including direct navigation from the project list.
+- Successful create, update, delete, transition, conversion, generation, assignment, and approval actions show consistent accessible feedback.
+- Codex run detail exposes mode, status, task and project linkage, thread id, working directory, prompt snapshot, timestamps, result, verification, artifacts, errors, and the persisted event timeline.
+- Active Codex run detail uses `/api/codex/runs/:id/stream`; periodic list refresh remains only as a fallback for list-level freshness.
+- Desktop, mobile, light, dark, keyboard, reduced-motion, test, typecheck, lint, and production-build review gates pass.
+
+Requirement-level evidence is tracked in `docs/MVP1.1-ACCEPTANCE.md`.
+
+## 11. Definition of done
 
 MVP1 is done only when:
 

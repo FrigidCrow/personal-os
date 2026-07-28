@@ -70,3 +70,30 @@
 - Confirmed a 390px document has no horizontal overflow and that motion collapses under `prefers-reduced-motion`.
 - Final production Lighthouse: Performance 94, Accessibility 100, Best Practices 100, LCP 2499.6ms, CLS 0, and TBT 97ms.
 - Re-ran 24 tests, typecheck, lint, all production builds, dependency audit, and diff checks successfully.
+
+## 2026-07-28 - MVP1.1 closeout
+
+### Plan
+
+- Added a five-part MVP1.1 closeout section to `docs/PLAN.md` before implementation.
+- Added `docs/MVP1.1-ACCEPTANCE.md` with nine requirement-level acceptance rows.
+- Preserved the MVP1 product boundary, local-first data ownership, and human approval gate.
+
+### Work
+
+- Added confirmed task deletion to the editable task detail dialog and used the existing database cascade for related Codex run records.
+- Added experiment detail, full editing, status changes, and an explicit measured-result API and Web flow.
+- Added `/projects/:id` with outcome, next action, revenue, deadline, repository, Obsidian linkage, and associated tasks.
+- Added one accessible global success-toast provider and connected all existing successful Web mutations.
+- Added complete Codex run detail, persisted event timeline, EventSource consumption, cache updates, reconnect feedback, and terminal stream shutdown.
+- Corrected new Codex runs to store the complete execution prompt snapshot instead of only the task title.
+- Added API regression coverage for project detail hydration, experiment editing/result recording, full prompt snapshots, persisted events, and an SSE stream opened while a run is active.
+- Kept database migrations unchanged because the required experiment, project, task, run, and event fields already existed.
+
+### Review
+
+- Browser created and deleted a temporary task through the confirmation flow, then verified the record was gone.
+- Browser edited an experiment, recorded a result, and restored the demonstration record to its original title, status, and empty result.
+- Browser opened a real project detail route and a Live Codex audit dialog with thread, directory, result, verification, and four events.
+- Browser checked mobile project/detail surfaces at 390px, light and dark rendering, success feedback, and console errors; no horizontal overflow or browser error was found.
+- Final gates: 5 test files / 26 tests, TypeScript, ESLint, production build, dependency audit, and patch hygiene passed.

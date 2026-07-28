@@ -7,6 +7,7 @@ import { LoadingState } from "./components/UI";
 import { DashboardPage } from "./pages/DashboardPage";
 
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage").then((module) => ({ default: module.ProjectsPage })));
+const ProjectDetailPage = lazy(() => import("./pages/ProjectDetailPage").then((module) => ({ default: module.ProjectDetailPage })));
 const TasksPage = lazy(() => import("./pages/TasksPage").then((module) => ({ default: module.TasksPage })));
 const RadarPage = lazy(() => import("./pages/RadarPage").then((module) => ({ default: module.RadarPage })));
 const ExperimentsPage = lazy(() => import("./pages/ExperimentsPage").then((module) => ({ default: module.ExperimentsPage })));
@@ -35,6 +36,7 @@ export function App() {
           >
             <Switch>
               <Route path="/" component={DashboardPage} />
+              <Route path="/projects/:id" component={ProjectDetailPage} />
               <Route path="/projects" component={ProjectsPage} />
               <Route path="/tasks" component={TasksPage} />
               <Route path="/radar" component={RadarPage} />

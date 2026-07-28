@@ -86,6 +86,13 @@ export const experimentInputSchema = z.object({
   resultSummary: optionalText
 });
 
+export const experimentPatchSchema = experimentInputSchema.partial();
+
+export const experimentResultInputSchema = z.object({
+  status: experimentStatusSchema.extract(["measuring", "won", "lost", "pivoted"]),
+  resultSummary: z.string().trim().min(1).max(2000)
+});
+
 export const incomeAssetInputSchema = z.object({
   projectId: z.string().uuid().nullable().optional(),
   experimentId: z.string().uuid().nullable().optional(),
@@ -191,6 +198,14 @@ export interface CodexRun {
   updatedAt: string;
 }
 
+export interface CodexRunEvent {
+  id: string;
+  runId: string;
+  eventType: string;
+  message: string;
+  createdAt: string;
+}
+
 const allowedTaskTransitions: Record<TaskStatus, readonly TaskStatus[]> = {
   inbox: ["ready", "blocked"],
   ready: ["in_progress", "blocked", "inbox"],
@@ -229,4 +244,3 @@ export const laneLabels: Record<ProjectLane, string> = {
   assets: "Assets",
   life_ops: "Life & Ops"
 };
-

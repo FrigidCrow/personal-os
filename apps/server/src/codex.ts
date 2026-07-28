@@ -66,7 +66,7 @@ export class CodexOrchestrator {
       projectId: project?.id ?? null,
       mode: options.mode,
       workingDirectory,
-      promptSnapshot: task.title
+      promptSnapshot
     });
     this.database.appendCodexRunEvent(run.id, "queued", "Task entered the Codex queue.");
     this.database.transitionTask(task.id, "in_progress");

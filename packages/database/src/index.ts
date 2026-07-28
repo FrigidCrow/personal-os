@@ -12,6 +12,7 @@ import {
   projectInputSchema,
   taskInputSchema,
   type CodexRun,
+  type CodexRunEvent,
   type CodexRunStatus,
   type DailyReport,
   type DailyReportInput,
@@ -565,6 +566,33 @@ export class PersonalOsDatabase {
     return this.requireExperiment(id);
   }
 
+  updateExperiment(id: string, raw: ExperimentInput): Experiment {
+    const input = experimentInputSchema.parse(raw);
+    this.requireExperiment(id);
+    if (input.opportunityId) this.requireOpportunity(input.opportunityId);
+    this.connection.prepare(`
+      UPDATE experiments SET
+        opportunity_id = ?, title = ?, hypothesis = ?, status = ?, time_cap_hours = ?,
+        budget_cap = ?, deadline = ?, success_condition = ?, stop_condition = ?,
+        result_summary = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      input.opportunityId ?? null,
+      input.title,
+      input.hypothesis,
+      input.status,
+      input.timeCapHours,
+      input.budgetCap,
+      input.deadline ?? null,
+      input.successCondition,
+      input.stopCondition,
+      input.resultSummary ?? null,
+      now(),
+      id
+    );
+    return this.requireExperiment(id);
+  }
+
   createExperimentFromOpportunity(opportunityId: string, overrides: Partial<ExperimentInput> = {}): Experiment {
     const opportunity = this.requireOpportunity(opportunityId);
     return this.createExperiment({
@@ -724,7 +752,7 @@ export class PersonalOsDatabase {
     return row?.thread_id ?? null;
   }
 
-  appendCodexRunEvent(runId: string, eventType: string, message: string): { id: string; runId: string; eventType: string; message: string; createdAt: string } {
+  appendCodexRunEvent(runId: string, eventType: string, message: string): CodexRunEvent {
     this.requireRun(runId);
     const event = { id: randomUUID(), runId, eventType, message, createdAt: now() };
     this.connection.prepare("INSERT INTO codex_run_events (id, run_id, event_type, message, created_at) VALUES (?, ?, ?, ?, ?)").run(
@@ -737,7 +765,7 @@ export class PersonalOsDatabase {
     return event;
   }
 
-  listCodexRunEvents(runId: string): Array<{ id: string; runId: string; eventType: string; message: string; createdAt: string }> {
+  listCodexRunEvents(runId: string): CodexRunEvent[] {
     this.requireRun(runId);
     const rows = this.connection.prepare("SELECT * FROM codex_run_events WHERE run_id = ? ORDER BY created_at").all(runId) as Row[];
     return rows.map((row) => ({

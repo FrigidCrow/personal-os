@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertDialog, Button, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
-import { FolderOpen, PencilSimple, Plus, Trash } from "@phosphor-icons/react";
+import { ArrowRight, FolderOpen, PencilSimple, Plus, Trash } from "@phosphor-icons/react";
+import { Link } from "wouter";
 import type { Project, ProjectInput, ProjectLane, ProjectStatus } from "@personal-os/domain";
 import { api } from "../api";
 import { EmptyState, ErrorState, formatDate, formatMoney, LoadingState, SectionHeader, StatusBadge, laneLabels } from "../components/UI";
+import { useSuccessToast } from "../components/SuccessToast";
 
 const initialProject: ProjectInput = {
   name: "",
@@ -45,6 +47,7 @@ function projectInput(project: Project): ProjectInput {
 
 export function ProjectsPage() {
   const queryClient = useQueryClient();
+  const { showSuccess } = useSuccessToast();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ProjectInput>(initialProject);
@@ -62,12 +65,12 @@ export function ProjectsPage() {
     setForm(initialProject);
     await refresh();
   };
-  const createProject = useMutation({ mutationFn: api.createProject, onSuccess: finishEditing });
+  const createProject = useMutation({ mutationFn: api.createProject, onSuccess: async () => { showSuccess("项目已创建"); await finishEditing(); } });
   const updateProject = useMutation({
     mutationFn: ({ id, input }: { id: string; input: ProjectInput }) => api.updateProject(id, input),
-    onSuccess: finishEditing
+    onSuccess: async () => { showSuccess("项目已保存"); await finishEditing(); }
   });
-  const deleteProject = useMutation({ mutationFn: api.deleteProject, onSuccess: refresh });
+  const deleteProject = useMutation({ mutationFn: api.deleteProject, onSuccess: async () => { showSuccess("项目已删除"); await refresh(); } });
 
   const openEditor = (project?: Project) => {
     setEditingId(project?.id ?? null);
@@ -140,6 +143,7 @@ export function ProjectsPage() {
                   {project.obsidianPath ? <span title={project.obsidianPath}>Obsidian 已连接</span> : <span>未连接 Obsidian</span>}
                 </div>
                 <div className="project-actions">
+                  <Link className="text-button" href={`/projects/${project.id}`}>查看详情<ArrowRight size={15} /></Link>
                   <button className="icon-button" aria-label={`编辑 ${project.name}`} onClick={() => openEditor(project)}><PencilSimple size={17} /></button>
                   <AlertDialog.Root>
                     <AlertDialog.Trigger><button className="icon-button danger-icon" aria-label={`删除 ${project.name}`}><Trash size={17} /></button></AlertDialog.Trigger>

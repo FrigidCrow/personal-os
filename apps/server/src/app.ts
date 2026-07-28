@@ -5,6 +5,8 @@ import { streamSSE } from "hono/streaming";
 import { ZodError, z } from "zod";
 import {
   experimentInputSchema,
+  experimentPatchSchema,
+  experimentResultInputSchema,
   incomeAssetInputSchema,
   opportunityInputSchema,
   projectInputSchema,
@@ -13,6 +15,7 @@ import {
   taskPatchSchema,
   taskStatusSchema,
   type ProjectInput,
+  type ExperimentInput,
   type TaskInput
 } from "@personal-os/domain";
 import type { PersonalOsDatabase } from "@personal-os/database";
@@ -52,6 +55,22 @@ function taskToInput(task: ReturnType<PersonalOsDatabase["getTask"]>): TaskInput
     priority: task.priority,
     dueDate: task.dueDate,
     acceptanceCriteria: task.acceptanceCriteria
+  };
+}
+
+function experimentToInput(experiment: ReturnType<PersonalOsDatabase["getExperiment"]>): ExperimentInput {
+  if (!experiment) throw new Error("Experiment not found");
+  return {
+    opportunityId: experiment.opportunityId,
+    title: experiment.title,
+    hypothesis: experiment.hypothesis,
+    status: experiment.status,
+    timeCapHours: experiment.timeCapHours,
+    budgetCap: experiment.budgetCap,
+    deadline: experiment.deadline,
+    successCondition: experiment.successCondition,
+    stopCondition: experiment.stopCondition,
+    resultSummary: experiment.resultSummary
   };
 }
 
@@ -172,9 +191,26 @@ export function createApp({ database, codex = new CodexOrchestrator(database), r
   });
 
   app.get("/api/experiments", (context) => context.json({ items: database.listExperiments() }));
+  app.get("/api/experiments/:id", (context) => {
+    const experiment = database.getExperiment(context.req.param("id"));
+    if (!experiment) return context.json({ error: "NOT_FOUND", message: "Experiment not found." }, 404);
+    return context.json(experiment);
+  });
   app.post("/api/experiments", async (context) => {
     const input = experimentInputSchema.parse(await context.req.json());
     return context.json(database.createExperiment(input), 201);
+  });
+  app.patch("/api/experiments/:id", async (context) => {
+    const id = context.req.param("id");
+    const current = database.getExperiment(id);
+    if (!current) return context.json({ error: "NOT_FOUND", message: "Experiment not found." }, 404);
+    const patch = experimentPatchSchema.parse(await context.req.json());
+    const input = experimentInputSchema.parse({ ...experimentToInput(current), ...patch });
+    return context.json(database.updateExperiment(id, input));
+  });
+  app.post("/api/experiments/:id/result", async (context) => {
+    const input = experimentResultInputSchema.parse(await context.req.json());
+    return context.json(database.recordExperimentResult(context.req.param("id"), input));
   });
 
   app.get("/api/assets", (context) => context.json({ items: database.listAssets() }));
