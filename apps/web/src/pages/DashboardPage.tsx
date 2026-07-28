@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Check, Clock, CurrencyCny, Play, Robot, TrendUp } from "@phosphor-icons/react";
+import { motion, useReducedMotion } from "motion/react";
+import { ArrowRight, Check, Clock, Command, CurrencyCny, Play, Robot, TrendUp } from "@phosphor-icons/react";
 import { Link } from "wouter";
 import { api } from "../api";
-import { DemoBanner, EmptyState, ErrorState, formatMoney, LoadingState, SectionHeader, StatusBadge, laneLabels } from "../components/UI";
+import { AnimatedValue, DemoBanner, EmptyState, ErrorState, formatMoney, LoadingState, SectionHeader, StatusBadge, laneLabels } from "../components/UI";
 
 export function DashboardPage() {
+  const reduceMotion = useReducedMotion();
   const queryClient = useQueryClient();
   const dashboard = useQuery({ queryKey: ["dashboard"], queryFn: api.dashboard });
   const assign = useMutation({
@@ -25,17 +27,36 @@ export function DashboardPage() {
   const { metrics, focusTasks, projects, opportunities, runs, latestReport } = dashboard.data;
 
   return (
-    <div className="page-stack">
+    <div className="page-stack dashboard-page">
+      <motion.section
+        className="dashboard-hero"
+        initial={false}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <div className="hero-copy">
+          <span className="hero-kicker"><Command size={15} weight="bold" />EXECUTION WINDOW</span>
+          <h2>今天，闭环 <em>{metrics.openLoops}</em> 件事。</h2>
+          <p>把判断留给你，把清晰的执行交给系统。</p>
+          <Link className="hero-cta" href="/tasks">进入任务流<ArrowRight size={18} weight="bold" /></Link>
+        </div>
+        <div className="focus-orbit" aria-hidden="true">
+          <span className="orbit-ring orbit-ring-one" />
+          <span className="orbit-ring orbit-ring-two" />
+          <span className="orbit-satellite satellite-one" />
+          <span className="orbit-satellite satellite-two" />
+          <div className="orbit-core"><strong>{focusTasks.length}</strong><span>FOCUS</span></div>
+        </div>
+        <div className="hero-metrics" aria-label="关键指标">
+          <div><span>活跃项目</span><strong><AnimatedValue value={metrics.activeProjects} /></strong><small>有限在制品</small></div>
+          <div><span>当前收入</span><strong><AnimatedValue value={metrics.monthlyRevenue} format={(value) => formatMoney(Math.round(value))} /></strong><small>演示期口径</small></div>
+          <div><span>低维护收入</span><strong><AnimatedValue value={metrics.lowTouchRevenue} format={(value) => formatMoney(Math.round(value))} /></strong><small>{metrics.maintenanceHours} 小时维护</small></div>
+        </div>
+      </motion.section>
+
       {latestReport?.isDemo ? <DemoBanner /> : null}
 
-      <section className="metric-rail" aria-label="关键指标">
-        <div><span>活跃项目</span><strong>{metrics.activeProjects}</strong><small>保持有限在制品</small></div>
-        <div><span>未闭环事项</span><strong>{metrics.openLoops}</strong><small>需要下一步或判断</small></div>
-        <div><span>当前收入</span><strong>{formatMoney(metrics.monthlyRevenue)}</strong><small>演示期项目口径</small></div>
-        <div><span>低维护收入</span><strong>{formatMoney(metrics.lowTouchRevenue)}</strong><small>每月维护 {metrics.maintenanceHours} 小时</small></div>
-      </section>
-
-      <div className="dashboard-grid">
+      <motion.div className="dashboard-grid" initial={reduceMotion ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16, duration: 0.58, ease: [0.16, 1, 0.3, 1] }}>
         <section className="surface focus-surface">
           <SectionHeader
             title="今天先闭环"
@@ -48,7 +69,7 @@ export function DashboardPage() {
             <div className="focus-list">
               {focusTasks.slice(0, 5).map((task) => (
                 <article className="focus-row" key={task.id}>
-                  <div className="priority-marker" data-priority={task.priority} aria-label={`优先级 ${task.priority}`} />
+                  <div className="priority-marker" data-priority={task.priority} role="img" aria-label={`优先级 ${task.priority}`} />
                   <div className="focus-copy">
                     <div className="row-title-line"><strong>{task.title}</strong><StatusBadge status={task.status} /></div>
                     <p>{task.description || "尚未补充任务说明。"}</p>
@@ -116,7 +137,7 @@ export function DashboardPage() {
             action={<Link className="text-link" href="/radar">查看证据<ArrowRight size={15} /></Link>}
           />
           <div className="opportunity-briefs">
-            {opportunities.slice(0, 3).map((opportunity, index) => (
+            {opportunities.length === 0 ? <EmptyState title="今日没有新候选" body="所有机会都已进入实验或归档。" /> : opportunities.slice(0, 3).map((opportunity, index) => (
               <article key={opportunity.id}>
                 <span className="rank-number">{String(index + 1).padStart(2, "0")}</span>
                 <div><strong>{opportunity.title}</strong><p>{opportunity.payer}</p></div>
@@ -125,7 +146,7 @@ export function DashboardPage() {
             ))}
           </div>
         </section>
-      </div>
+      </motion.div>
 
       <section className="decision-strip">
         <div><Play size={19} weight="fill" /><span>开始</span><strong>只启动能在限定时间内验证的工作</strong></div>

@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { animate, motion, useReducedMotion } from "motion/react";
 import { ArrowClockwise, WarningCircle } from "@phosphor-icons/react";
 import type { CodexRunStatus, ProjectLane, ProjectStatus, TaskStatus } from "@personal-os/domain";
 
@@ -28,16 +29,43 @@ export const laneLabels: Record<ProjectLane, string> = {
 };
 
 export function StatusBadge({ status, demo }: { status: keyof typeof statusLabels; demo?: boolean }) {
-  return <span className={`status-badge status-${status}`}>{statusLabels[status]}{demo ? " / Demo" : ""}</span>;
+  return <motion.span layout className={`status-badge status-${status}`}>{statusLabels[status]}{demo ? " / Demo" : ""}</motion.span>;
 }
 
 export function SectionHeader({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+  const reduceMotion = useReducedMotion();
   return (
-    <div className="section-header">
+    <motion.div className="section-header" initial={reduceMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}>
       <div><h2>{title}</h2>{description ? <p>{description}</p> : null}</div>
       {action ? <div className="section-action">{action}</div> : null}
-    </div>
+    </motion.div>
   );
+}
+
+export function AnimatedValue({ value, format = (current) => Math.round(current).toLocaleString("zh-CN") }: { value: number; format?: (value: number) => string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const reduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    if (!ref.current) return;
+    if (reduceMotion) {
+      ref.current.textContent = format(value);
+      return;
+    }
+    const controls = animate(0, value, {
+      duration: 0.9,
+      ease: [0.16, 1, 0.3, 1],
+      onUpdate: (current) => {
+        if (ref.current) ref.current.textContent = format(current);
+      },
+      onComplete: () => {
+        if (ref.current) ref.current.textContent = format(value);
+      }
+    });
+    return () => controls.stop();
+  }, [format, reduceMotion, value]);
+
+  return <span ref={ref}>{format(value)}</span>;
 }
 
 export function LoadingState({ label = "正在读取本地状态" }: { label?: string }) {
@@ -64,11 +92,12 @@ export function EmptyState({ title, body, action }: { title: string; body: strin
 }
 
 export function DemoBanner() {
+  const reduceMotion = useReducedMotion();
   return (
-    <div className="demo-banner" role="note">
+    <motion.div className="demo-banner" role="note" initial={reduceMotion ? false : { opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.12, duration: 0.45 }}>
       <WarningCircle size={18} weight="fill" aria-hidden="true" />
       <span>当前包含演示数据。机会证据和收入数字仅用于界面验收，采取行动前必须替换为真实资料。</span>
-    </div>
+    </motion.div>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { Link, useLocation } from "wouter";
 import { Dialog, Theme } from "@radix-ui/themes";
 import {
@@ -10,6 +11,7 @@ import {
   Flask,
   House,
   List,
+  HardDrives,
   Monitor,
   Moon,
   Robot,
@@ -53,33 +55,44 @@ function resolveSystemTheme(): "light" | "dark" {
 
 function NavContent({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();
+  const reduceMotion = useReducedMotion();
   return (
     <>
       <div className="brand-lockup">
-        <div className="brand-mark" aria-hidden="true"><Command weight="bold" size={20} /></div>
+        <motion.div
+          className="brand-mark"
+          aria-hidden="true"
+          whileHover={reduceMotion ? undefined : { rotate: -8, scale: 1.06 }}
+          transition={{ type: "spring", stiffness: 320, damping: 18 }}
+        ><Command weight="bold" size={21} /></motion.div>
         <div>
           <strong>Personal OS</strong>
-          <span>Local control plane</span>
+          <span>Private command system</span>
         </div>
       </div>
       <nav className="primary-nav" aria-label="主导航">
-        {navItems.map(({ to, label, description, icon: NavIcon }) => (
-          <Link
-            key={to}
-            href={to}
-            onClick={onNavigate}
-            className={`nav-link${location === to ? " active" : ""}`}
-          >
-            <NavIcon size={20} weight="duotone" aria-hidden="true" />
-            <span><strong>{label}</strong><small>{description}</small></span>
-          </Link>
-        ))}
+        {navItems.map(({ to, label, description, icon: NavIcon }) => {
+          const active = location === to;
+          return (
+            <Link
+              key={to}
+              href={to}
+              onClick={onNavigate}
+              aria-current={active ? "page" : undefined}
+              className={`nav-link${active ? " active" : ""}`}
+            >
+              {active ? <motion.span className="nav-active-plane" layoutId="primary-nav-active" transition={{ type: "spring", stiffness: 360, damping: 30 }} /> : null}
+              <NavIcon size={21} weight={active ? "fill" : "duotone"} aria-hidden="true" />
+              <span className="nav-copy"><strong>{label}</strong><small>{description}</small></span>
+            </Link>
+          );
+        })}
       </nav>
       <div className="sidebar-note">
-        <span className="semantic-signal" aria-hidden="true" />
+        <HardDrives size={19} weight="duotone" aria-hidden="true" />
         <div>
-          <strong>本地优先</strong>
-          <p>结构化状态保存在本机 SQLite。</p>
+          <strong>本机数据</strong>
+          <p>SQLite 连接正常</p>
         </div>
       </div>
     </>
@@ -137,8 +150,9 @@ export function Shell({ children }: { children: ReactNode }) {
   const dateLabel = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date());
 
   return (
-    <Theme appearance={appearance} accentColor="cyan" grayColor="sage" radius="medium" scaling="100%">
+    <Theme appearance={appearance} accentColor="orange" grayColor="sand" radius="large" scaling="100%">
       <div className="app-shell" data-theme-mode={appearance}>
+        <div className="ambient-field" aria-hidden="true"><span /><span /><span /></div>
         <aside className="desktop-sidebar"><NavContent /></aside>
 
         <div className="app-stage">
@@ -163,6 +177,7 @@ export function Shell({ children }: { children: ReactNode }) {
               <p>{page.subtitle}</p>
             </div>
             <div className="header-actions">
+              <div className="local-state"><HardDrives size={15} weight="duotone" /><span>LOCAL</span></div>
               <time>{dateLabel}</time>
               <ThemeSelector value={themeMode} onChange={setThemeMode} />
             </div>

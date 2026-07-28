@@ -92,3 +92,17 @@ The frontend was implemented using the explicitly requested `design-taste-fronte
 **Passed — ready for user acceptance.**
 
 The implementation satisfies A01–A24, including the actual bidirectional Codex path and human review gate. The remaining items above are declared MVP1 boundaries, not failed acceptance requirements.
+
+## Visual redesign addendum
+
+The original MVP1 visual direction was rejected during user acceptance for weak hierarchy and insufficient motion. A follow-up redesign overhaul was completed on 2026-07-28.
+
+- Design dials changed from variance 5 / motion 3 / density 7 to variance 8 / motion 7 / density 5.
+- Information architecture, workflows, labels, form fields, and safety gates were preserved.
+- The new system uses a graphite and signal-orange palette, Geist Variable, an animated command rail, an asymmetric dashboard hero, Bento composition, route transitions, live data motion, and tactile interaction feedback.
+- Desktop, 390px mobile, light, dark, dialogs, navigation, all seven routes, and reduced-motion behavior were reviewed.
+- Portal theming and an ARIA issue found during review were fixed.
+- Production Lighthouse passed at Performance 94, Accessibility 100, Best Practices 100, LCP 2499.6ms, CLS 0, and TBT 97ms.
+- The complete visual rationale and reference list are recorded in `docs/VISUAL-REDESIGN.md`.
+
+Visual follow-up verdict: **Passed - ready for renewed user acceptance.**

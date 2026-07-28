@@ -56,3 +56,17 @@
 - Bound the unauthenticated API to `127.0.0.1` by default after the network-exposure review.
 - Re-ran 24 tests, typecheck, lint, production builds, dependency audit, diff checks, Skill validation, API smoke, and built MCP smoke.
 - Confirmed all 24 acceptance requirements passed. Final evidence is recorded in `REVIEW.md` and `docs/MVP1-ACCEPTANCE.md`.
+
+## 2026-07-28 - Visual redesign follow-up
+
+- Reopened the frontend after the first visual direction was rejected as too static and generic.
+- Applied `design-taste-frontend` again as a redesign overhaul with variance 8, motion 7, and density 5.
+- Audited the original small typography, repeated card hierarchy, wide text sidebar, flat metric rail, and weak interaction feedback.
+- Researched Morrow, Siena, Awwwards interaction design, and Raycast as references without copying assets or layouts.
+- Replaced the sage and cyan admin styling with a graphite and signal-orange product system.
+- Added a compact command rail, shared active-navigation motion, route transitions, animated dashboard orbit, count-up metrics, radar motion, tactile controls, and responsive modal navigation.
+- Self-hosted Geist Variable and retained Radix Themes plus Phosphor as the only component and icon systems.
+- Tested Dashboard, Projects, Tasks, Radar, Experiments, Assets, Review, project dialog, mobile navigation, and light/dark themes in the in-app browser.
+- Confirmed a 390px document has no horizontal overflow and that motion collapses under `prefers-reduced-motion`.
+- Final production Lighthouse: Performance 94, Accessibility 100, Best Practices 100, LCP 2499.6ms, CLS 0, and TBT 97ms.
+- Re-ran 24 tests, typecheck, lint, all production builds, dependency audit, and diff checks successfully.
