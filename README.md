@@ -43,6 +43,8 @@ npm run dev
 
 然后打开 [http://localhost:5173](http://localhost:5173)。API 默认运行在 [http://localhost:8787](http://localhost:8787)，健康检查地址是 [http://localhost:8787/api/health](http://localhost:8787/api/health)。
 
+Server 默认只监听 `127.0.0.1`。MVP1 没有账号与鉴权，请不要把 `HOST` 改为局域网或公网地址。
+
 第一次启动会在 `data/personal-os.db` 创建 SQLite 数据库，并写入明确标注为演示数据的样例。自定义数据库位置：
 
 ```bash
