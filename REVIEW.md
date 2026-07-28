@@ -155,3 +155,24 @@ The live review exposed five gaps that simulated tests had not: missing MCP atta
 All C01-C30 requirements are Passed. The complete feature inventory, gap review, request/response/database evidence and journey results are recorded in `docs/MVP2-ACCEPTANCE.md` and `docs/FULL-E2E-ACCEPTANCE.md`.
 
 MVP2 verdict: **Passed - ready for user acceptance.**
+
+## Recurring task lifecycle review
+
+Status: **Passed**
+
+The task board now treats a recurring Cron task as a persistent automation definition. It appears in the dedicated `定时任务` column after Inbox, including while paused or while its latest occurrence is being executed or reviewed. It reaches Done only through the confirmed `结束定时任务` action.
+
+Direct evidence:
+
+| Acceptance check | Result | Evidence |
+|---|---|---|
+| Dedicated scheduled column | Passed | Desktop and 390px mobile rendered screenshots show `定时任务` after Inbox |
+| One accepted run does not end the schedule | Passed | Database test verifies Agent Run Done and recurring Task Ready |
+| Pause preserves the scheduled definition | Passed | Browser test verifies the card remains in `定时任务` and SQLite stores `automation_paused = 1` |
+| Explicit completion is required for Done | Passed | Browser and API tests call `/automation/complete` and verify status Done plus `automation_completed_at` |
+| Existing recurring Done records recover safely | Passed | Migration test and live API verify active historical Cron tasks return to Ready without history deletion |
+| Full regression | Passed | 7 test files / 70 tests, 8/8 Playwright journeys, typecheck, lint, build, and patch hygiene |
+
+Frontend review used the relevant product-UI portions of `design-taste-frontend`: clear state hierarchy, one existing accent, restrained feedback, complete action states, accessible confirmation, responsive scroll-snap, and no added decorative motion or second design system.
+
+Recurring lifecycle verdict: **Passed - ready for user acceptance.**

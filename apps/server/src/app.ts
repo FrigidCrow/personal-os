@@ -245,6 +245,9 @@ export function createApp(dependencies: AppDependencies): Hono {
     const body = z.object({ paused: z.boolean() }).parse(await context.req.json());
     return context.json(dispatcher.setPaused(context.req.param("id"), body.paused));
   });
+  app.post("/api/tasks/:id/automation/complete", (context) => {
+    return context.json(database.completeRecurringTask(context.req.param("id")));
+  });
 
   app.get("/api/opportunities", (context) => context.json({ items: database.listOpportunities() }));
   app.get("/api/opportunities/:id", (context) => {

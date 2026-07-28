@@ -321,3 +321,21 @@ Plan
 ```
 
 最终结果：`MVP2-ACCEPTANCE.md` 的 C01-C30 全部 Passed；`FULL-E2E-ACCEPTANCE.md` 已完成 MVP1、MVP1.1 与 MVP2 的功能盘点、7 条浏览器级 UI -> HTTP -> backend -> SQLite 用例，以及真实 Codex/OpenWorker 全流程验收。
+
+## 13. Recurring task lifecycle correction
+
+Status: Implemented and verified
+Date: 2026-07-28
+
+Recurring cron tasks are persistent automation definitions. A successful occurrence completes its Agent Run, not the recurring task itself.
+
+Acceptance criteria:
+
+- The task board has a dedicated `定时任务` column immediately after Inbox so it is visible without searching at the end of the board.
+- Active and paused recurring cron tasks appear only in `定时任务`, regardless of the current occurrence state.
+- Accepting one recurring run returns the task definition to Ready while the accepted Agent Run remains Done.
+- Pausing a recurring task keeps it in `定时任务` and prevents future automatic dispatch.
+- A separate, confirmed `结束定时任务` action marks the automation as completed; only then may it appear in Done.
+- Existing recurring tasks whose last accepted run left them in Done are migrated by presentation and lifecycle rules without deleting history.
+- The scheduled card continues to expose its latest run state, next execution time, pause/resume control, review entry when needed, and task detail.
+- Domain, database, API, browser, mobile, typecheck, lint, build, and patch-hygiene checks pass with direct evidence recorded in `WORKLOG.md` and `REVIEW.md`.

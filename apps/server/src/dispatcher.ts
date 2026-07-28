@@ -63,6 +63,7 @@ export class AgentDispatcher {
     const task = this.database.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
     if (task.status !== "ready") throw new Error(`Task must be ready before dispatch: ${task.status}`);
+    if (task.automationCompletedAt) throw new Error("Scheduled task has ended.");
     if (task.automationPaused && options.automatic) throw new Error("Task automation is paused.");
     if (options.automatic && task.riskLevel !== "low") {
       throw new Error(`Automatic dispatch requires low risk: ${task.riskLevel}`);
@@ -118,6 +119,7 @@ export class AgentDispatcher {
   setPaused(taskId: string, paused: boolean): Task {
     const task = this.database.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
+    if (task.automationCompletedAt) throw new Error("Completed automation cannot be resumed or paused.");
     return this.database.updateTask(task.id, { ...task, automationPaused: paused });
   }
 
@@ -170,7 +172,7 @@ export class AgentDispatcher {
 
     for (const original of this.database.listTasks()) {
       let task = original;
-      if (task.executionMode !== "automatic" || task.automationPaused || task.triggerType === "manual") continue;
+      if (task.executionMode !== "automatic" || task.automationPaused || task.automationCompletedAt || task.triggerType === "manual") continue;
 
       if (task.triggerType === "event") continue;
 

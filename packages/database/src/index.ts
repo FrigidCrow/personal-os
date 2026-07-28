@@ -11,6 +11,8 @@ import {
   dailyReportInputSchema,
   experimentInputSchema,
   incomeAssetInputSchema,
+  isActiveRecurringTask,
+  isRecurringTask,
   opportunityInputSchema,
   projectInputSchema,
   radarScheduleInputSchema,
@@ -108,6 +110,7 @@ function mapTask(row: Row): Task {
     nextRunAt: nullableString(row.next_run_at),
     lastScheduledAt: nullableString(row.last_scheduled_at),
     automationPaused: booleanFromDb(row.automation_paused),
+    automationCompletedAt: nullableString(row.automation_completed_at),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -328,6 +331,7 @@ export class PersonalOsDatabase {
         next_run_at TEXT,
         last_scheduled_at TEXT,
         automation_paused INTEGER NOT NULL DEFAULT 0,
+        automation_completed_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -482,6 +486,13 @@ export class PersonalOsDatabase {
     this.ensureColumn("tasks", "next_run_at", "TEXT");
     this.ensureColumn("tasks", "last_scheduled_at", "TEXT");
     this.ensureColumn("tasks", "automation_paused", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("tasks", "automation_completed_at", "TEXT");
+    this.connection.prepare(`
+      UPDATE tasks
+      SET status = 'ready', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE execution_mode = 'automatic' AND trigger_type = 'cron'
+        AND status = 'done' AND automation_completed_at IS NULL
+    `).run();
 
     this.connection.exec(`
       CREATE TABLE IF NOT EXISTS agent_runs (
@@ -769,11 +780,31 @@ export class PersonalOsDatabase {
     if (task.executionMode !== "automatic" || task.triggerType === "manual") {
       throw new Error("Only triggered automatic tasks can be prepared for another run.");
     }
+    if (task.automationCompletedAt) throw new Error("Completed automation cannot be prepared for another run.");
     if (task.status === "ready") return task;
     if (task.status !== "done") throw new Error(`Task cannot be prepared for automation from status: ${task.status}`);
     if (this.getActiveRunForTask(id)) throw new Error("Active run already exists for task.");
     const timestamp = this.timestamp();
     this.connection.prepare("UPDATE tasks SET status = 'ready', updated_at = ? WHERE id = ?").run(timestamp, id);
+    return this.requireTask(id);
+  }
+
+  completeRecurringTask(id: string): Task {
+    const task = this.requireTask(id);
+    if (!isRecurringTask(task)) throw new Error("Only recurring cron tasks can be completed as automation.");
+    if (task.automationCompletedAt) return task;
+    const unresolvedRun = this.connection.prepare(`
+      SELECT id FROM agent_runs
+      WHERE task_id = ? AND status IN ('queued', 'claimed', 'running', 'awaiting_approval', 'needs_review')
+      ORDER BY created_at DESC LIMIT 1
+    `).get(id) as { id: string } | undefined;
+    if (unresolvedRun) throw new Error("Finish or review the current run before ending this scheduled task.");
+    const timestamp = this.timestamp();
+    this.connection.prepare(`
+      UPDATE tasks
+      SET status = 'done', automation_paused = 1, automation_completed_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(timestamp, timestamp, id);
     return this.requireTask(id);
   }
 
@@ -1475,8 +1506,9 @@ export class PersonalOsDatabase {
     const task = this.requireTask(run.taskId);
     if (task.status !== "needs_review") throw new Error(`Task is not ready for approval: ${task.status}`);
     const timestamp = this.timestamp();
+    const taskStatus = isActiveRecurringTask(task) ? "ready" : "done";
     const accept = this.connection.transaction(() => {
-      this.connection.prepare("UPDATE tasks SET status = 'done', updated_at = ? WHERE id = ?").run(timestamp, task.id);
+      this.connection.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run(taskStatus, timestamp, task.id);
       this.connection.prepare(`
         UPDATE agent_runs SET status = 'done', requires_human_review = 0,
           completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE id = ?

@@ -237,8 +237,17 @@ export interface Project extends ProjectInput {
 
 export interface Task extends TaskInput {
   id: string;
+  automationCompletedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export function isRecurringTask(task: Pick<Task, "executionMode" | "triggerType">): boolean {
+  return task.executionMode === "automatic" && task.triggerType === "cron";
+}
+
+export function isActiveRecurringTask(task: Pick<Task, "executionMode" | "triggerType" | "automationCompletedAt">): boolean {
+  return isRecurringTask(task) && task.automationCompletedAt === null;
 }
 
 export interface Evidence extends z.infer<typeof evidenceInputSchema> {

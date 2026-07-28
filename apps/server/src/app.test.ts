@@ -375,6 +375,28 @@ describe("Personal OS API", () => {
     expect(database.getTask(task.id)?.status).toBe("ready");
   });
 
+  it("ends a recurring task only through the explicit automation endpoint", async () => {
+    const task = database.createTask({
+      title: "每日 AI 新闻与新技术晨报",
+      status: "ready",
+      executor: "openworker",
+      executionMode: "automatic",
+      triggerType: "cron",
+      triggerConfig: { expression: "30 6 * * *", catchUp: true },
+      triggerTimezone: "Asia/Tokyo",
+      riskLevel: "low",
+      nextRunAt: "2026-07-29T21:30:00.000Z"
+    });
+
+    const response = await app.request(`/api/tasks/${task.id}/automation/complete`, { method: "POST" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      status: "done",
+      automationPaused: true,
+      automationCompletedAt: expect.any(String)
+    }));
+  });
+
   it("retries a failed run once without duplicating the previous attempt", async () => {
     const task = database.createTask({
       title: "Retry local worker",

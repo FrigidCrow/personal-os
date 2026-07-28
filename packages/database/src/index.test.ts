@@ -47,7 +47,8 @@ describe("PersonalOsDatabase", () => {
       triggerType: "manual",
       riskLevel: "medium",
       maxAttempts: 1,
-      automationPaused: false
+      automationPaused: false,
+      automationCompletedAt: null
     });
   });
 
@@ -138,6 +139,40 @@ describe("PersonalOsDatabase", () => {
     });
     expect(database.rejectAgentRun(rejectedRun.id, "Missing required evidence.").status).toBe("blocked");
     expect(database.getTask(rejectedTask.id)?.status).toBe("blocked");
+  });
+
+  it("keeps recurring tasks active after one accepted run and completes them only explicitly", () => {
+    const task = database.createTask({
+      title: "每日简报",
+      status: "ready",
+      executor: "openworker",
+      executionMode: "automatic",
+      triggerType: "cron",
+      triggerConfig: { expression: "30 6 * * *", catchUp: true },
+      triggerTimezone: "Asia/Tokyo",
+      riskLevel: "low",
+      nextRunAt: "2026-07-29T21:30:00.000Z"
+    });
+    const run = database.createAgentRun({
+      taskId: task.id,
+      executor: "openworker",
+      promptSnapshot: "生成今日简报",
+      idempotencyKey: "recurring:lifecycle:1"
+    });
+    database.claimAgentRun(run.id);
+    database.submitAgentRunResult(run.id, {
+      finalResponse: "今日简报已生成。",
+      verificationSummary: "内容结构已检查。"
+    });
+
+    expect(() => database.completeRecurringTask(task.id)).toThrow("Finish or review the current run");
+    expect(database.acceptAgentRun(run.id).status).toBe("done");
+    expect(database.getTask(task.id)).toMatchObject({ status: "ready", automationCompletedAt: null });
+
+    const completed = database.completeRecurringTask(task.id);
+    expect(completed).toMatchObject({ status: "done", automationPaused: true });
+    expect(completed.automationCompletedAt).not.toBeNull();
+    expect(() => database.prepareTaskForAutomation(task.id)).toThrow("Completed automation");
   });
 
   it("updates and deletes projects without deleting their tasks", () => {
@@ -276,7 +311,7 @@ describe("MVP1 database migration", () => {
       legacy.close();
 
       const migrated = new PersonalOsDatabase({ filePath, seed: false });
-      expect(migrated.getTask(taskId)).toMatchObject({ executor: "human", executionMode: "manual", riskLevel: "medium" });
+      expect(migrated.getTask(taskId)).toMatchObject({ executor: "human", executionMode: "manual", riskLevel: "medium", automationCompletedAt: null });
       expect(migrated.getAgentRun(runId)).toMatchObject({
         executor: "codex",
         externalSessionId: "legacy-thread",
@@ -315,6 +350,31 @@ describe("MVP1 database migration", () => {
 
       const migrated = new PersonalOsDatabase({ filePath, seed: false });
       expect(migrated.getAgentRun(run.id)?.mode).toBe("live");
+      migrated.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rearms legacy recurring cron tasks that were left in Done", () => {
+    const directory = mkdtempSync(join(tmpdir(), "personal-os-recurring-migration-"));
+    const filePath = join(directory, "recurring.db");
+    try {
+      const initial = new PersonalOsDatabase({ filePath, seed: false });
+      const task = initial.createTask({
+        title: "Legacy recurring report",
+        status: "ready",
+        executionMode: "automatic",
+        triggerType: "cron",
+        triggerConfig: { expression: "0 8 * * *" },
+        triggerTimezone: "Asia/Tokyo",
+        riskLevel: "low"
+      });
+      initial.connection.prepare("UPDATE tasks SET status = 'done' WHERE id = ?").run(task.id);
+      initial.close();
+
+      const migrated = new PersonalOsDatabase({ filePath, seed: false });
+      expect(migrated.getTask(task.id)).toMatchObject({ status: "ready", automationCompletedAt: null });
       migrated.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });

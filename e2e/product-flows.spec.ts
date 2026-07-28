@@ -188,6 +188,58 @@ test("task automation form, pointer drag, detail edit, pause, cancel and retry p
   expect(databaseRow<Record<string, unknown>>("SELECT executor, status, attempt FROM agent_runs WHERE id = ?", retried.body.id)).toMatchObject({ executor: "openworker", status: "queued", attempt: 2 });
 });
 
+test("recurring cron tasks stay in the scheduled column until explicitly ended", async ({ page }, testInfo) => {
+  const task = await createTaskFromUi(page, testInfo, {
+    title: `E2E 定时任务 ${Date.now()}`,
+    projectName,
+    taskType: "业务报告",
+    executor: "OpenWorker",
+    executionMode: "自动执行",
+    trigger: "定时",
+    risk: "低风险",
+    maxAttempts: 2
+  });
+  const scheduledColumn = page.locator(".task-column.is-scheduled");
+  await expect(scheduledColumn.getByRole("heading", { name: "定时任务", exact: true })).toBeVisible();
+  await expect(scheduledColumn.getByTestId(`task-card-${task.id}`)).toBeVisible();
+  await expect(page.locator('.task-column[data-status="done"]').getByTestId(`task-card-${task.id}`)).toHaveCount(0);
+
+  await tracedMutation(
+    page,
+    testInfo,
+    "scheduled-task-enable",
+    (response) => response.url().endsWith(`/api/tasks/${task.id}/transition`) && response.request().method() === "POST",
+    () => scheduledColumn.getByTestId(`task-card-${task.id}`).getByRole("button", { name: "启用定时任务" }).click()
+  );
+  expect(databaseRow<Record<string, unknown>>("SELECT status FROM tasks WHERE id = ?", task.id)?.status).toBe("ready");
+
+  await scheduledColumn.getByTestId(`task-card-${task.id}`).getByRole("button", { name: "暂停" }).click();
+  await expect.poll(() => databaseRow<Record<string, unknown>>("SELECT automation_paused FROM tasks WHERE id = ?", task.id)?.automation_paused).toBe(1);
+  await expect(scheduledColumn.getByTestId(`task-card-${task.id}`)).toBeVisible();
+
+  await scheduledColumn.getByTestId(`task-card-${task.id}`).click({ position: { x: 40, y: 55 } });
+  const detail = page.getByRole("dialog").filter({ hasText: task.title });
+  await expect(detail).toBeVisible();
+  await detail.getByRole("button", { name: "结束定时任务", exact: true }).click();
+  const confirm = page.getByRole("alertdialog");
+  await expect(confirm.getByRole("heading", { name: "结束这个定时任务？" })).toBeVisible();
+  await tracedMutation(
+    page,
+    testInfo,
+    "scheduled-task-complete",
+    (response) => response.url().endsWith(`/api/tasks/${task.id}/automation/complete`) && response.request().method() === "POST",
+    () => confirm.getByRole("button", { name: "确认结束", exact: true }).click()
+  );
+  await detail.getByRole("button", { name: "关闭", exact: true }).click();
+
+  const completed = databaseRow<Record<string, unknown>>("SELECT status, automation_paused, automation_completed_at FROM tasks WHERE id = ?", task.id);
+  expect(completed).toMatchObject({ status: "done", automation_paused: 1 });
+  expect(completed?.automation_completed_at).toEqual(expect.any(String));
+  await expect(page.locator('.task-column[data-status="done"]').getByTestId(`task-card-${task.id}`)).toBeVisible();
+  await expect(scheduledColumn.getByTestId(`task-card-${task.id}`)).toHaveCount(0);
+  await attachDatabase(testInfo, "scheduled-task-complete", completed);
+});
+
 test("Codex demo reaches review, streams audit detail and only human acceptance finishes it", async ({ page }, testInfo) => {
   const task = await createTaskFromUi(page, testInfo, {
     title: `E2E Codex 人工门 ${Date.now()}`,

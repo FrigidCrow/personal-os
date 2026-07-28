@@ -6,6 +6,8 @@ import {
   canTransitionAgentRun,
   canTransitionTask,
   dailyReportInputSchema,
+  isActiveRecurringTask,
+  isRecurringTask,
   opportunityInputSchema,
   radarScheduleInputSchema,
   taskInputSchema
@@ -58,6 +60,14 @@ describe("task automation defaults", () => {
       lastScheduledAt: null,
       automationPaused: false
     });
+  });
+
+  it("distinguishes a recurring schedule from a completed automation", () => {
+    const recurring = { executionMode: "automatic" as const, triggerType: "cron" as const };
+    expect(isRecurringTask(recurring)).toBe(true);
+    expect(isActiveRecurringTask({ ...recurring, automationCompletedAt: null })).toBe(true);
+    expect(isActiveRecurringTask({ ...recurring, automationCompletedAt: "2026-07-28T12:00:00.000Z" })).toBe(false);
+    expect(isRecurringTask({ executionMode: "automatic", triggerType: "event" })).toBe(false);
   });
 });
 

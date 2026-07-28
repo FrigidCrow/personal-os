@@ -210,3 +210,30 @@ Phase E verification so far:
 - Browser opened a real project detail route and a Live Codex audit dialog with thread, directory, result, verification, and four events.
 - Browser checked mobile project/detail surfaces at 390px, light and dark rendering, success feedback, and console errors; no horizontal overflow or browser error was found.
 - Final gates: 5 test files / 26 tests, TypeScript, ESLint, production build, dependency audit, and patch hygiene passed.
+
+## 2026-07-28 - Recurring task lifecycle correction
+
+### Plan
+
+- Defined recurring Cron tasks as persistent automation definitions rather than one-off task executions.
+- Added direct acceptance criteria to `docs/PLAN.md` before implementation, including a dedicated board column, pause behavior, explicit completion, migration, and verification.
+
+### Work
+
+- Added `automation_completed_at` as a nullable SQLite lifecycle marker. Existing databases migrate without deleting tasks, runs, or artifacts.
+- Rearmed historical automatic Cron tasks left in Done by the previous per-run acceptance behavior. The live `每日 AI 新闻与新技术晨报` task migrated to Ready with its schedule and history intact.
+- Changed recurring-run acceptance so the Agent Run becomes Done while the recurring task returns to Ready.
+- Added an explicit completion operation that rejects unresolved runs, pauses future execution, records the completion time, and then moves the task to Done.
+- Added an active-recurring domain rule and used it to prevent completed schedules from being dispatched or resumed.
+- Added a dedicated `定时任务` board column immediately after Inbox. Active and paused Cron tasks are excluded from ordinary workflow columns, remain clickable, show next-run and latest-run context, and cannot be accidentally dragged into a one-off task state.
+- Added `启用定时任务`, pause/resume, review, and confirmed `结束定时任务` controls. Long scheduled descriptions are clamped on cards while remaining complete in task detail.
+- Applied the relevant `design-taste-frontend` product-UI checks with variance 4, motion 2, and density 8, preserving Radix Themes, Phosphor icons, the current theme, compact hierarchy, focus behavior, and mobile scroll-snap navigation.
+
+### Review
+
+- Unit and integration tests: 7 files / 70 tests passed.
+- Full Playwright acceptance: 8/8 passed, including the new scheduled-column lifecycle from create to pause to explicit completion.
+- Focused recurring-task browser regression passed again after moving the column into the initial viewport.
+- TypeScript, ESLint, full production build, and patch hygiene passed.
+- Live API confirmed `每日 AI 新闻与新技术晨报` is Ready, active, not completed, and scheduled for 06:30 Asia/Tokyo.
+- Rendered desktop and 390px mobile evidence is stored in `review-artifacts/scheduled-task-column.png` and `review-artifacts/scheduled-task-column-mobile.png`.

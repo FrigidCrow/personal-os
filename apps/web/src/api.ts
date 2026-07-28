@@ -116,6 +116,7 @@ export const api = {
   assignTask: (id: string, mode: "demo" | "live" = "demo") => request<CodexRun>(`/api/tasks/${id}/assign`, { method: "POST", body: JSON.stringify({ mode, newThread: false }) }),
   dispatchTask: (id: string, input: { mode?: "demo" | "live"; forceExecutor?: "codex" | "openworker" } = {}) => request<AgentRun>(`/api/tasks/${id}/dispatch`, { method: "POST", body: JSON.stringify(input) }),
   pauseTaskAutomation: (id: string, paused: boolean) => request<Task>(`/api/tasks/${id}/automation/pause`, { method: "POST", body: JSON.stringify({ paused }) }),
+  completeTaskAutomation: (id: string) => request<Task>(`/api/tasks/${id}/automation/complete`, { method: "POST" }),
   opportunities: () => request<ItemList<Opportunity>>("/api/opportunities"),
   createExperiment: (opportunityId: string) => request<Experiment>(`/api/opportunities/${opportunityId}/experiment`, { method: "POST", body: JSON.stringify({}) }),
   experiments: () => request<ItemList<Experiment>>("/api/experiments"),

@@ -1,20 +1,23 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertDialog, Button, Checkbox, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
-import { ArrowClockwise, ArrowRight, Lightning, Pause, PencilSimple, Play, Plus, Robot, Trash, User } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowRight, Lightning, Pause, PencilSimple, Play, Plus, Robot, StopCircle, Trash, User } from "@phosphor-icons/react";
 import { Link } from "wouter";
-import { canTransitionTask, type DelegationMode, type Priority, type Task, type TaskInput, type TaskStatus } from "@personal-os/domain";
+import { canTransitionTask, isActiveRecurringTask, type DelegationMode, type Priority, type Task, type TaskInput, type TaskStatus } from "@personal-os/domain";
 import { api } from "../api";
 import { EmptyState, ErrorState, formatDate, LoadingState, SectionHeader, StatusBadge } from "../components/UI";
 import { useSuccessToast } from "../components/SuccessToast";
 
-const columns: Array<{ status: TaskStatus; label: string }> = [
-  { status: "inbox", label: "Inbox" },
-  { status: "ready", label: "Ready" },
-  { status: "in_progress", label: "In progress" },
-  { status: "needs_review", label: "Needs review" },
-  { status: "blocked", label: "Blocked" },
-  { status: "done", label: "Done" }
+type BoardColumn = { key: string; label: string; status?: TaskStatus; scheduled?: true };
+
+const columns: BoardColumn[] = [
+  { key: "inbox", status: "inbox", label: "Inbox" },
+  { key: "scheduled", label: "定时任务", scheduled: true },
+  { key: "ready", status: "ready", label: "Ready" },
+  { key: "in_progress", status: "in_progress", label: "In progress" },
+  { key: "needs_review", status: "needs_review", label: "Needs review" },
+  { key: "blocked", status: "blocked", label: "Blocked" },
+  { key: "done", status: "done", label: "Done" }
 ];
 
 const nextAction: Partial<Record<TaskStatus, { status: TaskStatus; label: string }>> = {
@@ -37,6 +40,15 @@ const interactiveSelector = "button, a, input, textarea, select, [role='button']
 
 function formatTimestamp(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function displayTaskStatus(task: Task): TaskStatus {
+  return isActiveRecurringTask(task) && task.status === "done" ? "ready" : task.status;
+}
+
+function tasksForColumn(items: Task[], column: BoardColumn): Task[] {
+  if (column.scheduled) return items.filter(isActiveRecurringTask);
+  return items.filter((task) => !isActiveRecurringTask(task) && task.status === column.status);
 }
 
 function taskToForm(task: Task): TaskInput {
@@ -209,6 +221,17 @@ export function TasksPage() {
     mutationFn: ({ id, paused }: { id: string; paused: boolean }) => api.pauseTaskAutomation(id, paused),
     onSuccess: async (task) => { showSuccess(task.automationPaused ? "自动执行已暂停" : "自动执行已恢复"); await refresh(); }
   });
+  const completeAutomation = useMutation({
+    mutationFn: api.completeTaskAutomation,
+    onSuccess: async (task) => {
+      if (detailTask?.id === task.id) {
+        setDetailTask(task);
+        setDetailForm(taskToForm(task));
+      }
+      showSuccess("定时任务已结束并移入 Done");
+      await refresh();
+    }
+  });
   const cancelRun = useMutation({
     mutationFn: api.cancelRun,
     onSuccess: async () => { showSuccess("未开始的运行已取消"); await refresh(); }
@@ -224,6 +247,8 @@ export function TasksPage() {
   const assignmentProject = assignmentTask?.projectId ? projects.data?.items.find((project) => project.id === assignmentTask.projectId) : null;
   const liveReady = Boolean(assignmentProject?.repositoryPath);
   const draggedTask = items.find((task) => task.id === draggedTaskId) ?? null;
+  const detailLatestRun = detailTask ? runs.data?.items.find((run) => run.taskId === detailTask.id) : null;
+  const detailAutomationBusy = Boolean(detailLatestRun && ["queued", "claimed", "running", "awaiting_approval", "needs_review"].includes(detailLatestRun.status));
 
   const clearDragState = () => {
     pointerDrag.current?.cleanup?.();
@@ -248,7 +273,7 @@ export function TasksPage() {
 
   const beginPointerDrag = (event: ReactPointerEvent<HTMLElement>, task: Task) => {
     const isInteractive = (event.target as HTMLElement).closest(interactiveSelector);
-    const hasDestination = columns.some((target) => canTransitionTask(task.status, target.status));
+    const hasDestination = !isActiveRecurringTask(task) && columns.some((target) => target.status && canTransitionTask(task.status, target.status));
     if (event.button !== 0 || isInteractive || transition.isPending || !hasDestination) return;
     const drag: PointerDrag = {
       task,
@@ -387,10 +412,10 @@ export function TasksPage() {
             <>
               <div className="task-detail-kicker">
                 <span className="priority-text" data-priority={detailTask.priority}>优先级 · {priorityLabels[detailTask.priority]}</span>
-                <StatusBadge status={detailTask.status} />
+                <StatusBadge status={displayTaskStatus(detailTask)} />
               </div>
               <Dialog.Title className="task-detail-title">{editingDetail ? "编辑任务详情" : detailTask.title}</Dialog.Title>
-              <Dialog.Description className="task-detail-description">{editingDetail ? "修改任务内容。状态请在看板中拖拽流转。" : detailTask.description || "这项任务还没有补充说明。"}</Dialog.Description>
+              <Dialog.Description className="task-detail-description">{editingDetail ? isActiveRecurringTask(detailTask) ? "修改任务内容和执行计划。定时任务不会参与普通看板拖拽。" : "修改任务内容。状态请在看板中拖拽流转。" : detailTask.description || "这项任务还没有补充说明。"}</Dialog.Description>
 
               {editingDetail ? (
                 <form className="task-detail-edit" onSubmit={(event) => { event.preventDefault(); saveTaskDetail(); }}>
@@ -408,7 +433,7 @@ export function TasksPage() {
                   <label><span>验收条件，每行一条</span><TextArea value={detailForm.acceptanceCriteria.join("\n")} onChange={(event) => { const value = event.target.value; setDetailForm((current) => ({ ...current, acceptanceCriteria: value.split("\n").map((item) => item.trim()).filter(Boolean) })); }} /></label>
                   {updateTask.error ? <p className="inline-error">{updateTask.error.message}</p> : null}
                   <footer className="task-detail-footer task-detail-edit-footer">
-                    <span>当前状态通过看板拖拽管理，不在详情中直接修改。</span>
+                    <span>{isActiveRecurringTask(detailTask) ? "定时任务保持在专属列中；暂停和结束需要使用对应控制。" : "当前状态通过看板拖拽管理，不在详情中直接修改。"}</span>
                     <div className="task-detail-actions"><Button type="button" variant="soft" color="gray" onClick={() => { setDetailForm(taskToForm(detailTask)); setEditingDetail(false); updateTask.reset(); }}>取消</Button><Button type="submit" loading={updateTask.isPending}>保存更改</Button></div>
                   </footer>
                 </form>
@@ -419,7 +444,7 @@ export function TasksPage() {
                     <div><dt>执行方式</dt><dd>{delegationLabels[detailTask.delegationMode]}</dd></div>
                     <div><dt>截止日期</dt><dd>{formatDate(detailTask.dueDate)}</dd></div>
                     <div><dt>Agent</dt><dd>{executorLabels[detailTask.executor]}</dd></div>
-                    <div><dt>自动化</dt><dd>{detailTask.executionMode === "automatic" ? detailTask.automationPaused ? "已暂停" : "运行中" : "手动触发"}</dd></div>
+                    <div><dt>自动化</dt><dd>{detailTask.automationCompletedAt ? "已结束" : detailTask.executionMode === "automatic" ? detailTask.automationPaused ? "已暂停" : "运行中" : "手动触发"}</dd></div>
                     <div><dt>风险 / 重试</dt><dd>{detailTask.riskLevel} / {detailTask.maxAttempts} 次</dd></div>
                   </dl>
 
@@ -433,6 +458,17 @@ export function TasksPage() {
                   <footer className="task-detail-footer">
                     <div><span>创建于 {formatTimestamp(detailTask.createdAt)}</span><span>更新于 {formatTimestamp(detailTask.updatedAt)}</span></div>
                     <div className="task-detail-actions">
+                      {isActiveRecurringTask(detailTask) ? (
+                        <AlertDialog.Root>
+                          <AlertDialog.Trigger><button className="danger-button" type="button" disabled={detailAutomationBusy} title={detailAutomationBusy ? "请先处理当前运行或审查" : undefined}><StopCircle size={15} />结束定时任务</button></AlertDialog.Trigger>
+                          <AlertDialog.Content maxWidth="460px">
+                            <AlertDialog.Title>结束这个定时任务？</AlertDialog.Title>
+                            <AlertDialog.Description>系统会停止后续自动执行，并把“{detailTask.title}”移入 Done。历史运行和结果会继续保留。</AlertDialog.Description>
+                            {completeAutomation.error ? <p className="inline-error">{completeAutomation.error.message}</p> : null}
+                            <div className="dialog-actions"><AlertDialog.Cancel><Button variant="soft" color="gray">取消</Button></AlertDialog.Cancel><AlertDialog.Action><Button color="red" loading={completeAutomation.isPending} onClick={() => completeAutomation.mutate(detailTask.id)}>确认结束</Button></AlertDialog.Action></div>
+                          </AlertDialog.Content>
+                        </AlertDialog.Root>
+                      ) : null}
                       <AlertDialog.Root>
                         <AlertDialog.Trigger><button className="danger-button" type="button"><Trash size={15} />删除任务</button></AlertDialog.Trigger>
                         <AlertDialog.Content maxWidth="440px">
@@ -456,26 +492,27 @@ export function TasksPage() {
       {items.length === 0 ? <EmptyState title="任务队列为空" body="先捕获一个事项，再决定由本人还是 Codex 处理。" /> : (
         <div className={`task-board${draggedTask ? " is-dragging" : ""}`}>
           {columns.map((column) => {
-            const columnTasks = items.filter((task) => task.status === column.status);
-            const isValidTarget = canDropTask(column.status);
+            const columnTasks = tasksForColumn(items, column);
+            const isValidTarget = column.status ? canDropTask(column.status) : false;
             return (
               <section
-                className={`task-column${dropStatus === column.status ? " is-drop-target" : ""}${draggedTask && !isValidTarget ? " is-drop-disabled" : ""}`}
+                className={`task-column${column.scheduled ? " is-scheduled" : ""}${column.status && dropStatus === column.status ? " is-drop-target" : ""}${draggedTask && !isValidTarget ? " is-drop-disabled" : ""}`}
                 data-status={column.status}
-                key={column.status}
+                key={column.key}
               >
                 <header><h2>{column.label}</h2><span>{columnTasks.length}</span></header>
                 <div className="task-column-body">
                   {columnTasks.length === 0 ? <span className="column-empty">没有任务</span> : columnTasks.map((task) => {
                     const latestRun = runs.data?.items.find((run) => run.taskId === task.id);
+                    const scheduledTask = isActiveRecurringTask(task);
                     const canLaunchAgent = task.status === "ready" && (task.executor !== "human" || task.delegationMode === "codex_ready");
                     const pendingRun = latestRun?.status === "queued" || latestRun?.status === "claimed";
                     const retryableRun = latestRun && ["failed", "blocked", "cancelled"].includes(latestRun.status) && latestRun.attempt < task.maxAttempts;
                     return <article
-                      aria-label={`查看 ${task.title} 详情；拖动可更改状态`}
+                      aria-label={scheduledTask ? `查看 ${task.title} 定时任务详情` : `查看 ${task.title} 详情；拖动可更改状态`}
                       className={`task-ticket${draggedTaskId === task.id ? " is-dragging" : ""}`}
                       data-testid={`task-card-${task.id}`}
-                      data-draggable={!transition.isPending && columns.some((target) => canTransitionTask(task.status, target.status))}
+                      data-draggable={!scheduledTask && !transition.isPending && columns.some((target) => target.status && canTransitionTask(task.status, target.status))}
                       data-task-id={task.id}
                       key={task.id}
                       onClick={(event) => openTaskDetail(event, task)}
@@ -484,20 +521,20 @@ export function TasksPage() {
                       style={draggedTaskId === task.id ? { transform: `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0) scale(0.98) rotate(1deg)`, zIndex: 3 } : undefined}
                       tabIndex={0}
                     >
-                      <div className="task-ticket-top"><span className="priority-text" data-priority={task.priority}>{task.priority}</span><StatusBadge status={task.status} /></div>
+                      <div className="task-ticket-top"><span className="priority-text" data-priority={task.priority}>{task.priority}</span><StatusBadge status={displayTaskStatus(task)} /></div>
                       <h3>{task.title}</h3>
                       <p>{task.description || "尚未补充说明。"}</p>
                       <div className="task-meta"><span>{task.executor === "human" ? <User size={15} /> : <Robot size={15} />}{executorLabels[task.executor]}</span><span>{formatDate(task.dueDate)}</span></div>
-                      <div className="agent-meta-row"><span>{task.executionMode === "automatic" ? task.automationPaused ? "自动化暂停" : "自动执行" : "手动触发"}</span><span>{task.riskLevel} risk</span>{latestRun ? <span>{latestRun.executor} · {latestRun.status}</span> : null}</div>
+                      <div className="agent-meta-row"><span>{scheduledTask ? task.automationPaused ? "定时任务已暂停" : task.nextRunAt ? `下次 ${formatTimestamp(task.nextRunAt)}` : "等待计算下次时间" : task.executionMode === "automatic" ? task.automationPaused ? "自动化暂停" : "自动执行" : "手动触发"}</span><span>{scheduledTask ? task.triggerTimezone : `${task.riskLevel} risk`}</span>{latestRun ? <span>{latestRun.executor} · {latestRun.status}</span> : null}</div>
                       {task.acceptanceCriteria.length > 0 ? <div className="acceptance-preview"><span>验收</span><p>{task.acceptanceCriteria[0]}</p></div> : null}
                       <div className="task-actions">
                         {canLaunchAgent && (task.executor === "codex" || task.delegationMode === "codex_ready") ? <button className="compact-button" disabled={assign.isPending} onClick={() => { setAssignmentMode("demo"); setAssignmentTask(task); }}><Robot size={16} />启动 Codex</button> : null}
                         {canLaunchAgent && task.executor === "openworker" ? <button className="compact-button" disabled={dispatch.isPending} onClick={() => dispatch.mutate({ id: task.id, forceExecutor: "openworker" })}><Play size={16} />交给 Worker</button> : null}
                         {canLaunchAgent && task.executor === "auto" && task.delegationMode !== "codex_ready" ? <button className="compact-button" disabled={dispatch.isPending} onClick={() => dispatch.mutate({ id: task.id })}><Lightning size={16} />自动路由</button> : null}
-                        {task.executionMode === "automatic" ? <button className="text-button" disabled={pauseAutomation.isPending} onClick={() => pauseAutomation.mutate({ id: task.id, paused: !task.automationPaused })}>{task.automationPaused ? <Play size={15} /> : <Pause size={15} />}{task.automationPaused ? "恢复" : "暂停"}</button> : null}
+                        {task.executionMode === "automatic" && !task.automationCompletedAt ? <button className="text-button" disabled={pauseAutomation.isPending} onClick={() => pauseAutomation.mutate({ id: task.id, paused: !task.automationPaused })}>{task.automationPaused ? <Play size={15} /> : <Pause size={15} />}{task.automationPaused ? "恢复" : "暂停"}</button> : null}
                         {pendingRun ? <button className="text-button" disabled={cancelRun.isPending} onClick={() => cancelRun.mutate(latestRun.id)}>取消运行</button> : null}
                         {retryableRun ? <button className="text-button" disabled={retryRun.isPending} onClick={() => retryRun.mutate(latestRun.id)}><ArrowClockwise size={15} />重试</button> : null}
-                        {task.status === "needs_review" && latestRun?.status === "needs_review" ? <Link className="text-button" href="/review">前往审查<ArrowRight size={15} /></Link> : !canLaunchAgent && !pendingRun && !retryableRun && nextAction[task.status] ? <button className="text-button" disabled={transition.isPending} onClick={() => transition.mutate({ id: task.id, status: nextAction[task.status]!.status })}>{nextAction[task.status]!.label}<ArrowRight size={15} /></button> : null}
+                        {task.status === "needs_review" && latestRun?.status === "needs_review" ? <Link className="text-button" href="/review">前往审查<ArrowRight size={15} /></Link> : (!scheduledTask || task.status === "inbox" || task.status === "blocked") && !canLaunchAgent && !pendingRun && !retryableRun && nextAction[task.status] ? <button className="text-button" disabled={transition.isPending} onClick={() => transition.mutate({ id: task.id, status: nextAction[task.status]!.status })}>{scheduledTask && task.status === "inbox" ? "启用定时任务" : nextAction[task.status]!.label}<ArrowRight size={15} /></button> : null}
                       </div>
                     </article>
                   })}
@@ -507,7 +544,7 @@ export function TasksPage() {
           })}
         </div>
       )}
-      {transition.error || dispatch.error || pauseAutomation.error || cancelRun.error || retryRun.error ? <p className="inline-error">{(transition.error ?? dispatch.error ?? pauseAutomation.error ?? cancelRun.error ?? retryRun.error)?.message}</p> : null}
+      {transition.error || dispatch.error || pauseAutomation.error || completeAutomation.error || cancelRun.error || retryRun.error ? <p className="inline-error">{(transition.error ?? dispatch.error ?? pauseAutomation.error ?? completeAutomation.error ?? cancelRun.error ?? retryRun.error)?.message}</p> : null}
     </div>
   );
 }
