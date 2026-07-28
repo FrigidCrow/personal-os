@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PersonalOsDatabase } from "./index.js";
+import { createDatabase, PersonalOsDatabase } from "./index.js";
 
 describe("PersonalOsDatabase", () => {
   let database: PersonalOsDatabase;
@@ -179,6 +179,16 @@ describe("PersonalOsDatabase", () => {
 });
 
 describe("MVP1 database migration", () => {
+  it("keeps a new database empty unless demo seeding is explicitly requested", () => {
+    const database = createDatabase(":memory:");
+
+    expect(database.listProjects()).toEqual([]);
+    expect(database.listTasks()).toEqual([]);
+    expect(database.listOpportunities()).toEqual([]);
+
+    database.close();
+  });
+
   it("preserves legacy tasks, Codex runs, thread ids, and events", () => {
     const directory = mkdtempSync(join(tmpdir(), "personal-os-mvp1-"));
     const filePath = join(directory, "legacy.db");

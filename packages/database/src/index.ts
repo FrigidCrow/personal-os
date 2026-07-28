@@ -1778,6 +1778,6 @@ export class PersonalOsDatabase {
   }
 }
 
-export function createDatabase(filePath = process.env.DATABASE_PATH ?? "./data/personal-os.db", seed = true): PersonalOsDatabase {
+export function createDatabase(filePath = process.env.DATABASE_PATH ?? "./data/personal-os.db", seed = false): PersonalOsDatabase {
   return new PersonalOsDatabase({ filePath, seed });
 }

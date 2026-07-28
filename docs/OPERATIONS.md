@@ -13,6 +13,8 @@
 
 OpenWorker 保持独立安装在 `/Users/frigidcrow/Documents/Codex/dev/openworker`。Personal OS 不复制它的源码、数据库、模型密钥或认证 Token，只通过 MCP Pull 契约交换任务和运行状态。
 
+正常启动和 MCP 连接只迁移数据库结构，不自动生成 Demo 数据。`npm run seed` 是唯一的显式演示数据入口，不应在正式个人数据库上运行。
+
 ## 2. 开发运行
 
 ```bash

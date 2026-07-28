@@ -55,7 +55,7 @@ Personal OS 固定使用 Web `5273` 和 API `8787`。独立安装的 OpenWorker 
 
 Server 默认只监听 `127.0.0.1`。MVP1 没有账号与鉴权，请不要把 `HOST` 改为局域网或公网地址。
 
-第一次启动会在 `data/personal-os.db` 创建 SQLite 数据库，并写入明确标注为演示数据的样例。自定义数据库位置：
+第一次启动会在 `data/personal-os.db` 创建一个空的 SQLite 数据库，不会自动写入演示项目或任务。只有需要体验样例时才显式执行 `npm run seed`。自定义数据库位置：
 
 ```bash
 DATABASE_PATH=/absolute/path/personal-os.db npm run dev
@@ -175,10 +175,13 @@ MVP1 的定时器运行在本地 Server 进程内，因此每日自动报告要�
 
 ## 数据与备份
 
-- 结构化状态：`data/personal-os.db`
+- 结构化状态：使用 `better-sqlite3` 写入本机 `data/personal-os.db`，包括项目、任务、机会、实验、收入资产、Agent Run、事件、产物路径与审批记录。
+- SQLite 启用外键和 WAL 模式，让 Personal OS API 与 OpenWorker MCP 可以安全地并发读取和写入同一个数据库。
+- 浏览器 LocalStorage 只保存主题偏好等界面状态，不是业务数据的真实来源；清理缓存不会删除任务，换浏览器也不会复制数据库。
 - 长文笔记：只保存 Obsidian 路径，不复制内容
 - 源码与交付物：保留在各自 Git 仓库
 - Codex 对话：保留 thread id 和摘要，不复制完整对话
+- OpenWorker 自己的自动化、会话、模型和密钥存储在它的独立状态目录中，不写入 Personal OS 数据库；两个系统只通过 MCP 交换必要的任务和运行信息。
 
 停止服务后备份 SQLite 文件即可：
 

@@ -10,7 +10,9 @@ import { startAgentDispatcher, startDailyRadarScheduler } from "./scheduler.js";
 const port = Number(process.env.PORT ?? 8787);
 const hostname = process.env.HOST ?? "127.0.0.1";
 const defaultDatabasePath = fileURLToPath(new URL("../../../data/personal-os.db", import.meta.url));
-const database = createDatabase(process.env.DATABASE_PATH ?? defaultDatabasePath, true);
+// Production and normal development starts must never repopulate an intentionally
+// emptied personal database. Demo records are opt-in through `npm run seed`.
+const database = createDatabase(process.env.DATABASE_PATH ?? defaultDatabasePath, false);
 const radar = new RadarService(database);
 const codex = new CodexOrchestrator(database);
 const dispatcher = new AgentDispatcher(database, codex);
