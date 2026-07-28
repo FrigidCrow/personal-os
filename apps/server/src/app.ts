@@ -59,7 +59,7 @@ export function createApp({ database, codex = new CodexOrchestrator(database), r
   const app = new Hono();
 
   app.use("*", logger());
-  app.use("/api/*", cors({ origin: ["http://localhost:5173", "http://127.0.0.1:5173"] }));
+  app.use("/api/*", cors({ origin: ["http://localhost:5273", "http://127.0.0.1:5273"] }));
 
   app.onError((error, context) => {
     if (error instanceof ZodError) {
