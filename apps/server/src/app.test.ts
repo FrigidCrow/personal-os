@@ -111,6 +111,36 @@ describe("Personal OS API", () => {
     expect(experiment.opportunityId).toBe(opportunity.id);
   });
 
+  it("creates an income asset with visible stage and maintenance burden", async () => {
+    const response = await app.request("/api/assets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId: null,
+        experimentId: null,
+        name: "Reusable delivery checklist",
+        stage: "revenue",
+        revenueModel: "Fixed-price template",
+        monthlyRevenue: 1500,
+        maintenanceHoursMonthly: 1.5,
+        nextAction: "Offer it to one existing client."
+      })
+    });
+
+    expect(response.status).toBe(201);
+    const asset = await response.json();
+    expect(asset.stage).toBe("revenue");
+    expect(asset.maintenanceHoursMonthly).toBe(1.5);
+
+    const list = await app.request("/api/assets");
+    expect(list.status).toBe(200);
+    expect((await list.json()).items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: asset.id, stage: "revenue", maintenanceHoursMonthly: 1.5 })
+      ])
+    );
+  });
+
   it("generates at most five opportunities in a demo report", async () => {
     const response = await app.request("/api/reports/generate-demo", { method: "POST" });
     expect(response.status).toBe(201);
