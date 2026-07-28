@@ -1,0 +1,25 @@
+{
+  "name": "@personal-os/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --clean --sourcemap",
+    "start": "node dist/index.js",
+    "seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.11",
+    "@openai/codex-sdk": "^0.145.0",
+    "@personal-os/database": "*",
+    "@personal-os/domain": "*",
+    "hono": "^4.12.32",
+    "node-cron": "^4.6.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node-cron": "^3.0.11",
+    "tsup": "^8.5.1"
+  }
+}

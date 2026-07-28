@@ -9,9 +9,16 @@
 
 ## Work
 
-Not started. Plan review must complete first.
+### Domain, database, and API foundation
+
+- Created an npm workspace for Web, API, MCP, domain, and database modules.
+- Added strict TypeScript, ESLint, Vitest, workspace build scripts, and environment examples.
+- Implemented task state-transition rules and evidence-backed opportunity validation.
+- Implemented SQLite migrations, repositories, demonstration seed data, dashboard aggregates, reports, experiments, assets, and Codex run persistence.
+- Implemented the Hono API for dashboard, projects, tasks, opportunities, experiments, assets, reports, and run reads.
+- Added domain, database, and API integration tests.
+- Verified 14 tests pass and TypeScript typecheck passes.
 
 ## Review
 
 Not started. Review evidence will be recorded after implementation.
-
