@@ -1195,6 +1195,14 @@ export class PersonalOsDatabase {
     `).all(asOf) as Row[]).map(mapAgentRun);
   }
 
+  markAgentRunRetried(runId: string): AgentRun {
+    this.requireAgentRun(runId);
+    const timestamp = this.timestamp();
+    this.connection.prepare("UPDATE agent_runs SET next_retry_at = NULL, updated_at = ? WHERE id = ?")
+      .run(timestamp, runId);
+    return this.requireAgentRun(runId);
+  }
+
   recoverExpiredAgentRuns(asOf = this.timestamp()): AgentRun[] {
     const expired = (this.connection.prepare(`
       SELECT * FROM agent_runs
@@ -1366,7 +1374,7 @@ export class PersonalOsDatabase {
     });
   }
 
-  acceptAgentRun(runId: string): AgentRun {
+  acceptAgentRun(runId: string, resolutionMessage = "Human reviewer accepted the final result."): AgentRun {
     const run = this.requireAgentRun(runId);
     if (run.status !== "needs_review") throw new Error(`Run is not ready for review: ${run.status}`);
     const task = this.requireTask(run.taskId);
@@ -1378,7 +1386,7 @@ export class PersonalOsDatabase {
         UPDATE agent_runs SET status = 'done', requires_human_review = 0,
           completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE id = ?
       `).run(timestamp, timestamp, run.id);
-      this.insertAgentRunEvent(run.id, "approval_resolved", "Human reviewer accepted the final result.", timestamp);
+      this.insertAgentRunEvent(run.id, "approval_resolved", resolutionMessage, timestamp);
     });
     accept.immediate();
     return this.requireAgentRun(runId);

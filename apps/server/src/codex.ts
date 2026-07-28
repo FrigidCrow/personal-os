@@ -30,6 +30,10 @@ export function buildTaskPrompt(task: Task, project: Project | null, additionalI
   ].filter(Boolean).join("\n\n");
 }
 
+function isAutomaticReadOnlyResearch(task: Task): boolean {
+  return task.executionMode === "automatic" && task.riskLevel === "low" && task.taskType === "business_report";
+}
+
 function extractArtifactPaths(items: ThreadItem[]): string[] {
   return Array.from(new Set(items.flatMap((item) => item.type === "file_change" ? item.changes.map((change) => change.path) : [])));
 }
@@ -123,12 +127,14 @@ export class CodexOrchestrator {
       this.database.updateCodexRun(runId, { status: "running", startedAt });
       this.database.appendCodexRunEvent(runId, "running", "Live Codex SDK execution started.");
       const codex = new Codex();
+      const automaticReadOnlyResearch = isAutomaticReadOnlyResearch(task);
       const threadOptions = {
         workingDirectory: project?.repositoryPath ?? process.cwd(),
         skipGitRepoCheck: false,
-        sandboxMode: "workspace-write" as const,
+        sandboxMode: automaticReadOnlyResearch ? "read-only" as const : "workspace-write" as const,
         approvalPolicy: "never" as const,
-        networkAccessEnabled: false
+        networkAccessEnabled: automaticReadOnlyResearch,
+        ...(automaticReadOnlyResearch ? { webSearchMode: "live" as const } : {})
       };
       const existingThreadId = !newThread && project ? this.database.findLatestThreadForProject(project.id) : null;
       const thread = existingThreadId ? codex.resumeThread(existingThreadId, threadOptions) : codex.startThread(threadOptions);
@@ -142,9 +148,13 @@ export class CodexOrchestrator {
         artifactPaths: extractArtifactPaths(result.items),
         verificationSummary: summarizeVerification(result.items),
         completedAt: new Date().toISOString(),
-        requiresHumanReview: true
+        requiresHumanReview: !automaticReadOnlyResearch
       });
-      this.database.appendCodexRunEvent(runId, "needs_review", "Live Codex result is ready for human review.");
+      if (automaticReadOnlyResearch) {
+        this.database.acceptAgentRun(runId, "Low-risk read-only research completed automatically; review the saved report before acting on it.");
+      } else {
+        this.database.appendCodexRunEvent(runId, "needs_review", "Live Codex result is ready for human review.");
+      }
     } catch (error) {
       this.failRun(runId, task.id, error);
     }

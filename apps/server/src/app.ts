@@ -196,7 +196,10 @@ export function createApp(dependencies: AppDependencies): Hono {
     const id = context.req.param("id");
     const current = database.getTask(id);
     if (!current) return context.json({ error: "NOT_FOUND", message: "Task not found." }, 404);
-    const patch = taskPatchSchema.parse(await context.req.json());
+    const rawPatch = await context.req.json();
+    const parsedPatch = taskPatchSchema.parse(rawPatch);
+    const requestedKeys = new Set(Object.keys(rawPatch as Record<string, unknown>));
+    const patch = Object.fromEntries(Object.entries(parsedPatch).filter(([key]) => requestedKeys.has(key)));
     const input = taskInputSchema.parse({ ...taskToInput(current), ...patch });
     validateTaskAutomation(input);
     if (input.triggerType === "dependency") {

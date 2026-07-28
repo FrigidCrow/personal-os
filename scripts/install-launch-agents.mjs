@@ -9,6 +9,11 @@ const launchAgentsDirectory = join(homedir(), "Library", "LaunchAgents");
 const logsDirectory = join(projectRoot, "logs");
 const apply = process.argv.includes("--apply");
 const uid = process.getuid?.() ?? 0;
+const openWorkerRoot = resolve(process.env.OPENWORKER_ROOT ?? "/Users/frigidcrow/Documents/Codex/dev/openworker");
+const openWorkerGuiRoot = join(openWorkerRoot, "surfaces", "gui");
+const includeOpenWorker = process.env.INCLUDE_OPENWORKER === "true";
+const includeOpenWorkerServer = includeOpenWorker && process.env.INCLUDE_OPENWORKER_SERVER === "true";
+const openWorkerApiToken = process.env.OPENWORKER_API_TOKEN ?? "";
 
 function xml(value) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -46,7 +51,9 @@ const services = [
       PORT: "8787",
       DATABASE_PATH: join(projectRoot, "data", "personal-os.db"),
       CODEX_MODE: process.env.CODEX_MODE === "live" ? "live" : "demo",
-      PERSONAL_OS_TIMEZONE: process.env.PERSONAL_OS_TIMEZONE ?? "Asia/Tokyo"
+      PERSONAL_OS_TIMEZONE: process.env.PERSONAL_OS_TIMEZONE ?? "Asia/Tokyo",
+      DAILY_RADAR_ENABLED: process.env.DAILY_RADAR_ENABLED === "true" ? "true" : "false",
+      DAILY_RADAR_CRON: process.env.DAILY_RADAR_CRON ?? "0 8 * * *"
     }
   },
   {
@@ -56,6 +63,30 @@ const services = [
     environment: { NODE_ENV: "production" }
   }
 ];
+
+if (includeOpenWorker) {
+  if (!openWorkerApiToken) throw new Error("OPENWORKER_API_TOKEN is required when INCLUDE_OPENWORKER=true.");
+  if (includeOpenWorkerServer) {
+    services.push({
+      label: "com.frigidcrow.personal-os.openworker-server",
+      args: [join(openWorkerRoot, ".venv", "bin", "openworker-server"), "--cwd", projectRoot, "--host", "127.0.0.1", "--port", "8765"],
+      workingDirectory: openWorkerRoot,
+      environment: {
+        COWORKER_API_TOKEN: openWorkerApiToken,
+        PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
+    });
+  }
+  services.push({
+    label: "com.frigidcrow.personal-os.openworker-web",
+    args: [process.execPath, join(openWorkerGuiRoot, "node_modules", "vite", "bin", "vite.js"), "--host", "127.0.0.1", "--port", "5274", "--strictPort"],
+    workingDirectory: openWorkerGuiRoot,
+    environment: {
+      NODE_OPTIONS: "--no-experimental-webstorage",
+      VITE_COWORKER_API_TOKEN: openWorkerApiToken
+    }
+  });
+}
 
 for (const service of services) {
   const target = join(launchAgentsDirectory, `${service.label}.plist`);

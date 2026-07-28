@@ -105,12 +105,14 @@ export class AgentDispatcher {
     if (attempt > task.maxAttempts) throw new Error("Maximum attempts reached.");
     if (task.status === "blocked") this.database.transitionTask(task.id, "ready");
     if (task.status !== "blocked" && task.status !== "ready") throw new Error(`Task is not ready for retry: ${task.status}`);
-    return this.dispatch(task.id, {
+    const retried = this.dispatch(task.id, {
       mode: run.mode,
       forceExecutor: run.executor,
       idempotencyKey: `${run.idempotencyKey}:retry:${attempt}`,
       attempt
     });
+    this.database.markAgentRunRetried(run.id);
+    return retried;
   }
 
   setPaused(taskId: string, paused: boolean): Task {

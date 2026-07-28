@@ -102,7 +102,12 @@ describe("Personal OS API", () => {
       body: JSON.stringify({ description: "Updated description", priority: "high" })
     });
     expect(updated.status).toBe(200);
-    expect((await updated.json()).priority).toBe("high");
+    expect(await updated.json()).toMatchObject({
+      title: "API task",
+      description: "Updated description",
+      priority: "high",
+      acceptanceCriteria: ["Persist the task"]
+    });
 
     const deleted = await app.request(`/api/tasks/${task.id}`, { method: "DELETE" });
     expect(deleted.status).toBe(200);

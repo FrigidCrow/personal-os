@@ -5,6 +5,8 @@ set -euo pipefail
 personal_os_root="${PERSONAL_OS_ROOT_OVERRIDE:-${0:A:h:h}}"
 openworker_root="${OPENWORKER_ROOT_OVERRIDE:-/Users/frigidcrow/Documents/Codex/dev/openworker}"
 openworker_gui_root="$openworker_root/surfaces/gui"
+openworker_state_root="${OPENWORKER_STATE_ROOT_OVERRIDE:-/Users/frigidcrow/.config/coworker}"
+openworker_token_file="$openworker_state_root/personal-os-8765.token"
 personal_web_url="http://127.0.0.1:5273"
 personal_api_health_url="http://127.0.0.1:8787/api/health"
 openworker_web_url="http://127.0.0.1:5274"
@@ -43,6 +45,22 @@ port_is_listening() {
   /usr/sbin/lsof -nP -iTCP:"$1" -sTCP:LISTEN -t >/dev/null 2>&1
 }
 
+stop_owned_listener() {
+  local port="$1"
+  local expected_path="$2"
+  local pid command
+  pid=$(/usr/sbin/lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)
+  [[ -z "$pid" ]] && return 0
+  command=$(ps -p "$pid" -o command=)
+  [[ "$command" == *"$expected_path"* ]] || fail "端口 $port 被其他程序占用：$command"
+  kill "$pid"
+  for _ in {1..30}; do
+    port_is_listening "$port" || return 0
+    sleep 0.2
+  done
+  fail "无法停止端口 $port 上的旧服务"
+}
+
 wait_for_url() {
   local url="$1"
   local label="$2"
@@ -62,6 +80,7 @@ require_command npm
 require_command /usr/bin/curl
 require_command /usr/sbin/lsof
 require_command /usr/bin/open
+require_command /usr/bin/screen
 require_command launchctl
 
 [[ -f "$personal_os_root/package.json" ]] || fail "找不到 Personal OS：$personal_os_root"
@@ -82,33 +101,56 @@ if [[ ! -d node_modules ]]; then
   npm install
 fi
 npm run build
-npm run launchagent:install -- --apply
-wait_for_url "$personal_api_health_url" "Personal OS API · 127.0.0.1:8787"
-wait_for_url "$personal_web_url" "Personal OS Web · 127.0.0.1:5273"
 
-mkdir -p "$openworker_root/logs"
+mkdir -p "$openworker_root/logs" "$openworker_state_root"
+if [[ ! -d "$openworker_gui_root/node_modules" ]]; then
+  print "首次运行：安装 OpenWorker Web 依赖…"
+  cd "$openworker_gui_root"
+  npm install
+  cd "$personal_os_root"
+fi
 
-print "\n正在启动 OpenWorker…"
-if ! port_is_listening 8765; then
-  cd "$openworker_root"
-  nohup "$openworker_root/.venv/bin/openworker-server" \
-    --cwd "$personal_os_root" \
-    --host 127.0.0.1 \
-    --port 8765 \
-    >>"$openworker_root/logs/personal-os-worker-server.log" 2>&1 </dev/null &
+openworker_api_token=""
+if [[ -f "$openworker_token_file" ]]; then
+  openworker_api_token=$(<"$openworker_token_file")
+elif port_is_listening 8765; then
+  openworker_server_pid=$(/usr/sbin/lsof -nP -iTCP:8765 -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)
+  openworker_api_token=$(ps eww -p "$openworker_server_pid" -o command= | tr ' ' '\n' | sed -n 's/^COWORKER_API_TOKEN=//p' | tail -n 1)
+fi
+if [[ -z "$openworker_api_token" ]]; then
+  openworker_api_token=$(/usr/bin/openssl rand -hex 32)
+fi
+umask 077
+print -rn -- "$openworker_api_token" > "$openworker_token_file"
+
+uid=$(/usr/bin/id -u)
+launchctl bootout "gui/$uid/com.frigidcrow.personal-os.openworker-web" >/dev/null 2>&1 || true
+launchctl bootout "gui/$uid/com.frigidcrow.personal-os.openworker-server" >/dev/null 2>&1 || true
+stop_owned_listener 5274 "$openworker_gui_root"
+
+if ! /usr/bin/curl -fsS -H "X-OpenWorker-Token: $openworker_api_token" "$openworker_health_url" >/dev/null 2>&1; then
+  /usr/bin/screen -S personal-os-openworker -X quit >/dev/null 2>&1 || true
+  if port_is_listening 8765; then
+    stop_owned_listener 8765 "openworker-server"
+  fi
+  COWORKER_API_TOKEN="$openworker_api_token" \
+    /usr/bin/screen -dmS personal-os-openworker /bin/zsh -lc \
+      "cd '$openworker_root' && exec '$openworker_root/.venv/bin/openworker-server' --cwd '$personal_os_root' --host 127.0.0.1 --port 8765 >>'$openworker_root/logs/personal-os-worker-server.log' 2>&1"
 fi
 wait_for_url "$openworker_health_url" "OpenWorker Server · 127.0.0.1:8765"
+cd "$personal_os_root"
 
-if ! port_is_listening 5274; then
-  cd "$openworker_gui_root"
-  if [[ ! -d node_modules ]]; then
-    print "首次运行：安装 OpenWorker Web 依赖…"
-    npm install
-  fi
-  NODE_OPTIONS=--no-experimental-webstorage \
-    nohup npm run dev -- --host 127.0.0.1 --port 5274 --strictPort \
-    >>"$openworker_root/logs/personal-os-worker-web.log" 2>&1 </dev/null &
-fi
+CODEX_MODE=live \
+  DAILY_RADAR_ENABLED=true \
+  DAILY_RADAR_CRON="0 8 * * *" \
+  PERSONAL_OS_TIMEZONE="Asia/Tokyo" \
+  INCLUDE_OPENWORKER=true \
+  INCLUDE_OPENWORKER_SERVER=false \
+  OPENWORKER_ROOT="$openworker_root" \
+  OPENWORKER_API_TOKEN="$openworker_api_token" \
+  npm run launchagent:install -- --apply
+wait_for_url "$personal_api_health_url" "Personal OS API · 127.0.0.1:8787"
+wait_for_url "$personal_web_url" "Personal OS Web · 127.0.0.1:5273"
 wait_for_url "$openworker_web_url" "OpenWorker Web · 127.0.0.1:5274"
 
 /usr/bin/open "$personal_web_url"
@@ -119,4 +161,3 @@ print "\n全部启动成功："
 print "  Personal OS  $personal_web_url"
 print "  OpenWorker    $openworker_web_url"
 print "\n可以关闭这个终端窗口，后台服务会继续运行。"
-

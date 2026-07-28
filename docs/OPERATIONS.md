@@ -32,10 +32,10 @@ npm run dev
 
 1. 检查 Personal OS 与 OpenWorker 的安装路径和依赖。
 2. 构建并启动 Personal OS API `8787` 与 Web `5273` 的 LaunchAgents。
-3. 在尚未运行时启动 OpenWorker Server `8765` 与 Web `5274`。
+3. 在独立的后台 `screen` 会话中启动 OpenWorker Server `8765`，并用 LaunchAgent 托管 Web `5274`。
 4. 等待四个服务通过健康检查，然后打开两个 Web 页面。
 
-启动器只绑定 `127.0.0.1`，日志分别保存在 Personal OS 和 OpenWorker 仓库的 `logs/`。可以在不启动服务的情况下验证桌面入口和依赖：
+启动器只绑定 `127.0.0.1`，会把独立 Server 的本地认证 Token 安全传给 5274 Web 进程，避免未认证健康响应导致白屏；Token 保存在 `~/.config/coworker/personal-os-8765.token`（权限 `0600`），不写入仓库或日志。由于 macOS 会阻止后台 Python 直接读取 `Documents` 中的虚拟环境，8765 使用脱离终端的 `screen` 会话，5274 仍由 launchd 保活。可以在不启动服务的情况下验证桌面入口和依赖：
 
 ```bash
 zsh -n scripts/start-personal-os.command
@@ -59,18 +59,21 @@ npm run healthcheck
 curl -fsS http://127.0.0.1:5273/ >/dev/null
 ```
 
-安装两个启动项：
+桌面入口安装三个启动项：
 
 - `com.frigidcrow.personal-os.api`
 - `com.frigidcrow.personal-os.web`
+- `com.frigidcrow.personal-os.openworker-web`
 
-它们启用 `RunAtLoad` 与 `KeepAlive`。日志写入项目的 `logs/`，不会提交到 Git。Homebrew 更新 Node 后应重新运行安装命令，使 plist 使用新的 Node 绝对路径。
+它们启用 `RunAtLoad` 与 `KeepAlive`。OpenWorker Server 位于名为 `personal-os-openworker` 的 detached screen 会话。日志写入项目的 `logs/`，不会提交到 Git。Homebrew 更新 Node 后应重新运行安装命令，使 plist 使用新的 Node 绝对路径。
 
 查看状态或主动重启：
 
 ```bash
 launchctl print gui/$(id -u)/com.frigidcrow.personal-os.api
 launchctl print gui/$(id -u)/com.frigidcrow.personal-os.web
+launchctl print gui/$(id -u)/com.frigidcrow.personal-os.openworker-web
+screen -ls
 launchctl kickstart -k gui/$(id -u)/com.frigidcrow.personal-os.api
 launchctl kickstart -k gui/$(id -u)/com.frigidcrow.personal-os.web
 ```
@@ -173,6 +176,17 @@ DATABASE_PATH=/Users/frigidcrow/Documents/Codex/dev/personal-os/data/personal-os
 WORKER_LEASE_MILLISECONDS=600000
 ```
 
-OpenWorker 自动化 `Personal OS Pull Worker` 已启用，每五分钟尝试领取一个任务，运行时 `tool_allowlist` 必须严格等于上面的十个工具。当前本地模型为 Ollama `qwen3.5:4b`；模型可在 OpenWorker Settings 中替换。不要把 OpenWorker Token、认证 seed 或模型密钥写入 Personal OS 仓库、日志、计划文档或 MCP 参数。
+OpenWorker 自动化 `Personal OS Pull Worker` 已启用，每五分钟尝试领取一个任务。运行时 `tool_allowlist` 包含上面的十个 Personal OS 控制平面工具以及只读的 `web_search` 与 `web_fetch`。当前模型为 `deepseek:deepseek-v4-pro`；已用一次真实 MCP 领取、心跳和结果回传确认配置生效。长链路、强格式约束的每日 AI 研究目前仍由 Codex 执行。模型可在 OpenWorker Settings 中替换。不要把 OpenWorker Token、认证 seed 或模型密钥写入 Personal OS 仓库、日志、计划文档或 MCP 参数。
 
 OpenWorker 的 headless automation MCP 附加与运行时 allowlist 修复记录在其独立仓库提交 `428adf4`。升级 OpenWorker 后应先运行该仓库完整测试，再验证 `/v1/mcp` 中 `personal_os` 为 connected，并执行一次无外部写操作的真实领取任务。
+
+## 9. 已配置的每日研究
+
+所有时间使用 `Asia/Tokyo`：
+
+| 时间 | 自动化 | 执行器 | 结果位置 |
+|---|---|---|---|
+| 06:30 | 最近 24 小时 AI 新闻与 AI 新技术晨报 | Codex，只读工作区 + 实时 Web 搜索 | Agent 控制面中的已完成 Run |
+| 08:00 | 最小投入赚钱机会雷达 | Codex，只读实时研究 | 机会雷达页与机会列表 |
+
+06:30 任务为低风险只读报告，成功后自动进入 Done，保留完整结果供回看，不会外联、发布、购买或登录。下一次 Cron 到期时，Dispatcher 会把 Done 任务重新准备为 Ready 后运行。08:00 雷达由 Server 内的 cron 调度，结果直接写入 SQLite。两者都要求电脑处于唤醒状态且 Personal OS API 正在运行；任务 Cron 开启 catch-up，机会雷达当前不补跑休眠期间错过的周期。

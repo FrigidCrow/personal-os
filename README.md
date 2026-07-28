@@ -154,6 +154,7 @@ CODEX_MODE=live
 - 委派模式不能是 `human_only`；
 - 项目的 `repositoryPath` 必须是本机真实 Git 仓库绝对路径；
 - MVP1 的 live 执行禁用网络，允许在工作区写文件，approval policy 为 `never`；
+- 低风险、自动执行的 `business_report` 是例外：使用只读工作区与实时 Web 搜索，成功后自动保存为 Done，且不得执行外联或其他外部写入；
 - 执行结束后仍需人工检查 Git diff 和验证结果。
 
 ## 每日机会报告
@@ -166,12 +167,12 @@ Web 的“机会雷达”页可以手动生成报告。默认是演示模式，�
 DAILY_RADAR_ENABLED=true
 DAILY_RADAR_CRON=0 8 * * *
 PERSONAL_OS_TIMEZONE=Asia/Tokyo
-CODEX_MODE=demo
+CODEX_MODE=live
 ```
 
 `CODEX_MODE=live` 时，雷达会用 Codex SDK 和实时 Web 搜索生成最多五个机会，并要求每条事实包含直接来源。它只保存研究结果，不会自动做外联、购买或发布。
 
-MVP1 的定时器运行在本地 Server 进程内，因此每日自动报告要求 `npm run dev` 或生产 Server 持续运行；电脑休眠或进程停止期间不会补跑任务。
+定时器运行在本地 Server 进程内，因此每日自动报告要求开发 Server 或生产 LaunchAgent 持续运行。机会雷达不补跑电脑休眠期间错过的周期；任务型 Cron 可单独启用一次性 catch-up。
 
 ## 数据与备份
 
@@ -206,4 +207,4 @@ MVP1 验收标准见 `docs/MVP1-ACCEPTANCE.md`，历史执行计划见 `docs/PLA
 - 没有自动付款、购买、外联、发布或生产部署。
 - 机会是待验证假设，不是收入承诺。
 - Demo 结果不会冒充真实 Codex 结果。
-- Codex 提交只能进入人工审查，不可直接完成任务。
+- 一般 Codex 提交进入人工审查；唯一例外是低风险、只读、自动化的 `business_report`，它会保存结果后自动完成，仍可在 Agent Run 中审阅。

@@ -320,6 +320,8 @@ describe("agent run leases and retry limits", () => {
       expect(recovered[0]).toMatchObject({ status: "failed", nextRetryAt: "2026-07-28T00:02:30.000Z" });
       expect(database.getTask(task.id)?.status).toBe("ready");
       expect(database.listRetryableAgentRuns()).toHaveLength(1);
+      expect(database.markAgentRunRetried(run.id).nextRetryAt).toBeNull();
+      expect(database.listRetryableAgentRuns()).toHaveLength(0);
     } finally {
       database.close();
     }

@@ -70,7 +70,7 @@ OpenWorker 保持为独立执行器，不复制或合并进 Personal OS 仓库�
 | OpenWorker 运行方式 | Python local agent server + React/Vite browser GUI |
 | 模型认证 | 由用户在 OpenWorker Settings 中配置，不写入 Personal OS、Git 或本文档 |
 
-开发时仍可用源码进程；Phase E 已定义构建产物的 macOS LaunchAgent 登录自启方式。API 与 Web 分别运行，任一进程退出后由 launchd 重启，操作手册见 `docs/OPERATIONS.md`。
+开发时仍可用源码进程。Personal OS API、Web 与 OpenWorker Web 使用 macOS LaunchAgent；受 macOS 对 `Documents` 中 Python 环境的后台访问限制，OpenWorker agent server 由桌面启动器放入 detached `screen` 会话。操作手册见 `docs/OPERATIONS.md`。
 
 #### 本机端口约定
 
@@ -118,7 +118,7 @@ GUI 当前依赖审计报告 7 项上游告警：3 moderate、3 high、1 critica
 
 #### 集成状态
 
-Phase A 至 E 已按顺序完成。OpenWorker 自动化 `Personal OS Pull Worker` 使用精确的十工具 allowlist，每五分钟领取一次任务；本机慢模型的 worker 租约设为 600000 ms。真实 Ollama 运行已完成 list、原子 claim、running event、heartbeat、context、result 和 Web 人工验收。OpenWorker 仍是独立项目，Personal OS 只保存通用 AgentRun、必要事件、产物和审批证据。
+Phase A 至 E 已按顺序完成。OpenWorker 自动化 `Personal OS Pull Worker` 对控制平面使用精确的十工具 allowlist，每五分钟领取一次任务，并允许两个只读内置工具 `web_search` 与 `web_fetch`。worker 租约设为 600000 ms。历史 Ollama 验收与当前 `deepseek:deepseek-v4-pro` 验收均已完成 list、原子 claim、running event、heartbeat、context 和 result 回传。强格式、长链路的 06:30 AI 日报由 Codex 以只读实时研究策略执行；08:00 机会雷达同样使用 Codex。OpenWorker 仍是独立项目，Personal OS 只保存通用 AgentRun、必要事件、产物和审批证据。
 
 Review 中发现并修复了五个真实集成缺口：headless automation 未附加 MCP、prompt-only 工具约束不可靠、模型易混淆 taskId/runId、两分钟租约不足以覆盖本地推理，以及 OpenWorker Live 运行被错误标为 Demo。完整证据见 `docs/FULL-E2E-ACCEPTANCE.md`。
 
