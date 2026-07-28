@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
-import { ArrowRight, Plus, Robot, User } from "@phosphor-icons/react";
+import { ArrowRight, PencilSimple, Plus, Robot, User } from "@phosphor-icons/react";
 import { Link } from "wouter";
 import { canTransitionTask, type DelegationMode, type Priority, type Task, type TaskInput, type TaskStatus } from "@personal-os/domain";
 import { api } from "../api";
@@ -32,6 +32,19 @@ function formatTimestamp(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
+function taskToForm(task: Task): TaskInput {
+  return {
+    projectId: task.projectId,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    delegationMode: task.delegationMode,
+    priority: task.priority,
+    dueDate: task.dueDate,
+    acceptanceCriteria: [...task.acceptanceCriteria]
+  };
+}
+
 const initialTask: TaskInput = {
   projectId: null,
   title: "",
@@ -57,6 +70,8 @@ export function TasksPage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<TaskInput>(initialTask);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
+  const [detailForm, setDetailForm] = useState<TaskInput>(initialTask);
+  const [editingDetail, setEditingDetail] = useState(false);
   const [assignmentTask, setAssignmentTask] = useState<Task | null>(null);
   const [assignmentMode, setAssignmentMode] = useState<"demo" | "live">("demo");
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
@@ -88,6 +103,15 @@ export function TasksPage() {
       if (context?.previous) queryClient.setQueryData(["tasks"], context.previous);
     },
     onSettled: async () => { await refresh(); }
+  });
+  const updateTask = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Omit<TaskInput, "status"> }) => api.updateTask(id, input),
+    onSuccess: async (updatedTask) => {
+      setDetailTask(updatedTask);
+      setDetailForm(taskToForm(updatedTask));
+      setEditingDetail(false);
+      await refresh();
+    }
   });
   const assign = useMutation({
     mutationFn: ({ id, mode }: { id: string; mode: "demo" | "live" }) => api.assignTask(id, mode),
@@ -173,12 +197,34 @@ export function TasksPage() {
   const openTaskDetail = (event: ReactMouseEvent<HTMLElement>, task: Task) => {
     if (Date.now() < suppressCardClickUntil.current || (event.target as HTMLElement).closest(interactiveSelector)) return;
     setDetailTask(task);
+    setDetailForm(taskToForm(task));
+    setEditingDetail(false);
+    updateTask.reset();
   };
 
   const openTaskDetailFromKeyboard = (event: ReactKeyboardEvent<HTMLElement>, task: Task) => {
     if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
     event.preventDefault();
     setDetailTask(task);
+    setDetailForm(taskToForm(task));
+    setEditingDetail(false);
+    updateTask.reset();
+  };
+
+  const saveTaskDetail = () => {
+    if (!detailTask) return;
+    updateTask.mutate({
+      id: detailTask.id,
+      input: {
+        projectId: detailForm.projectId,
+        title: detailForm.title,
+        description: detailForm.description,
+        delegationMode: detailForm.delegationMode,
+        priority: detailForm.priority,
+        dueDate: detailForm.dueDate,
+        acceptanceCriteria: detailForm.acceptanceCriteria
+      }
+    });
   };
 
   return (
@@ -226,7 +272,7 @@ export function TasksPage() {
         </Dialog.Content>
       </Dialog.Root>
 
-      <Dialog.Root open={Boolean(detailTask)} onOpenChange={(nextOpen) => { if (!nextOpen) setDetailTask(null); }}>
+      <Dialog.Root open={Boolean(detailTask)} onOpenChange={(nextOpen) => { if (!nextOpen) { setDetailTask(null); setEditingDetail(false); updateTask.reset(); } }}>
         <Dialog.Content className="form-dialog task-detail-dialog" maxWidth="700px">
           {detailTask ? (
             <>
@@ -234,26 +280,49 @@ export function TasksPage() {
                 <span className="priority-text" data-priority={detailTask.priority}>优先级 · {priorityLabels[detailTask.priority]}</span>
                 <StatusBadge status={detailTask.status} />
               </div>
-              <Dialog.Title className="task-detail-title">{detailTask.title}</Dialog.Title>
-              <Dialog.Description className="task-detail-description">{detailTask.description || "这项任务还没有补充说明。"}</Dialog.Description>
+              <Dialog.Title className="task-detail-title">{editingDetail ? "编辑任务详情" : detailTask.title}</Dialog.Title>
+              <Dialog.Description className="task-detail-description">{editingDetail ? "修改任务内容。状态请在看板中拖拽流转。" : detailTask.description || "这项任务还没有补充说明。"}</Dialog.Description>
 
-              <dl className="task-detail-facts">
-                <div><dt>所属项目</dt><dd>{detailTask.projectId ? projects.data?.items.find((project) => project.id === detailTask.projectId)?.name ?? "项目已移除" : "未归属项目"}</dd></div>
-                <div><dt>执行方式</dt><dd>{delegationLabels[detailTask.delegationMode]}</dd></div>
-                <div><dt>截止日期</dt><dd>{formatDate(detailTask.dueDate)}</dd></div>
-              </dl>
+              {editingDetail ? (
+                <form className="task-detail-edit" onSubmit={(event) => { event.preventDefault(); saveTaskDetail(); }}>
+                  <label><span>任务名称</span><TextField.Root value={detailForm.title} onChange={(event) => { const value = event.target.value; setDetailForm((current) => ({ ...current, title: value })); }} required /></label>
+                  <label><span>任务说明</span><TextArea value={detailForm.description} onChange={(event) => { const value = event.target.value; setDetailForm((current) => ({ ...current, description: value })); }} /></label>
+                  <div className="form-grid">
+                    <div className="form-field"><span>所属项目</span><Select.Root value={detailForm.projectId ?? "none"} onValueChange={(value) => setDetailForm((current) => ({ ...current, projectId: value === "none" ? null : value }))}><Select.Trigger aria-label="编辑所属项目" /><Select.Content><Select.Item value="none">暂不归属项目</Select.Item>{projects.data?.items.map((project) => <Select.Item key={project.id} value={project.id}>{project.name}</Select.Item>)}</Select.Content></Select.Root></div>
+                    <label><span>截止日期</span><TextField.Root type="date" value={detailForm.dueDate ?? ""} onInput={(event) => { const value = event.currentTarget.value || null; setDetailForm((current) => ({ ...current, dueDate: value })); }} /></label>
+                  </div>
+                  <div className="form-grid">
+                    <div className="form-field"><span>执行方式</span><Select.Root value={detailForm.delegationMode} onValueChange={(value) => setDetailForm((current) => ({ ...current, delegationMode: value as DelegationMode }))}><Select.Trigger aria-label="编辑执行方式" /><Select.Content><Select.Item value="human_only">本人处理</Select.Item><Select.Item value="codex_ready">Codex 可执行</Select.Item><Select.Item value="mixed">人机协作</Select.Item></Select.Content></Select.Root></div>
+                    <div className="form-field"><span>优先级</span><Select.Root value={detailForm.priority} onValueChange={(value) => setDetailForm((current) => ({ ...current, priority: value as Priority }))}><Select.Trigger aria-label="编辑优先级" /><Select.Content><Select.Item value="low">低</Select.Item><Select.Item value="medium">中</Select.Item><Select.Item value="high">高</Select.Item><Select.Item value="critical">关键</Select.Item></Select.Content></Select.Root></div>
+                  </div>
+                  <label><span>验收条件，每行一条</span><TextArea value={detailForm.acceptanceCriteria.join("\n")} onChange={(event) => { const value = event.target.value; setDetailForm((current) => ({ ...current, acceptanceCriteria: value.split("\n").map((item) => item.trim()).filter(Boolean) })); }} /></label>
+                  {updateTask.error ? <p className="inline-error">{updateTask.error.message}</p> : null}
+                  <footer className="task-detail-footer task-detail-edit-footer">
+                    <span>当前状态通过看板拖拽管理，不在详情中直接修改。</span>
+                    <div className="task-detail-actions"><Button type="button" variant="soft" color="gray" onClick={() => { setDetailForm(taskToForm(detailTask)); setEditingDetail(false); updateTask.reset(); }}>取消</Button><Button type="submit" loading={updateTask.isPending}>保存更改</Button></div>
+                  </footer>
+                </form>
+              ) : (
+                <>
+                  <dl className="task-detail-facts">
+                    <div><dt>所属项目</dt><dd>{detailTask.projectId ? projects.data?.items.find((project) => project.id === detailTask.projectId)?.name ?? "项目已移除" : "未归属项目"}</dd></div>
+                    <div><dt>执行方式</dt><dd>{delegationLabels[detailTask.delegationMode]}</dd></div>
+                    <div><dt>截止日期</dt><dd>{formatDate(detailTask.dueDate)}</dd></div>
+                  </dl>
 
-              <section className="task-detail-acceptance">
-                <span>验收条件</span>
-                {detailTask.acceptanceCriteria.length > 0 ? (
-                  <ol>{detailTask.acceptanceCriteria.map((criterion, index) => <li key={`${detailTask.id}-${index}`}>{criterion}</li>)}</ol>
-                ) : <p>尚未设置验收条件。</p>}
-              </section>
+                  <section className="task-detail-acceptance">
+                    <span>验收条件</span>
+                    {detailTask.acceptanceCriteria.length > 0 ? (
+                      <ol>{detailTask.acceptanceCriteria.map((criterion, index) => <li key={`${detailTask.id}-${index}`}>{criterion}</li>)}</ol>
+                    ) : <p>尚未设置验收条件。</p>}
+                  </section>
 
-              <footer className="task-detail-footer">
-                <div><span>创建于 {formatTimestamp(detailTask.createdAt)}</span><span>更新于 {formatTimestamp(detailTask.updatedAt)}</span></div>
-                <Dialog.Close><Button variant="soft" color="gray">关闭</Button></Dialog.Close>
-              </footer>
+                  <footer className="task-detail-footer">
+                    <div><span>创建于 {formatTimestamp(detailTask.createdAt)}</span><span>更新于 {formatTimestamp(detailTask.updatedAt)}</span></div>
+                    <div className="task-detail-actions"><button className="secondary-button" type="button" onClick={() => setEditingDetail(true)}><PencilSimple size={15} />编辑详情</button><Dialog.Close><Button variant="soft" color="gray">关闭</Button></Dialog.Close></div>
+                  </footer>
+                </>
+              )}
             </>
           ) : null}
         </Dialog.Content>

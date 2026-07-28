@@ -33,6 +33,8 @@ interface ItemList<T> {
   items: T[];
 }
 
+export type TaskPatch = Partial<Omit<TaskInput, "status">>;
+
 interface ApiErrorBody {
   message?: string;
 }
@@ -62,6 +64,7 @@ export const api = {
   deleteProject: (id: string) => request<Project>(`/api/projects/${id}`, { method: "DELETE" }),
   tasks: () => request<ItemList<Task>>("/api/tasks"),
   createTask: (input: TaskInput) => request<Task>("/api/tasks", { method: "POST", body: JSON.stringify(input) }),
+  updateTask: (id: string, input: TaskPatch) => request<Task>(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   transitionTask: (id: string, status: TaskStatus) => request<Task>(`/api/tasks/${id}/transition`, { method: "POST", body: JSON.stringify({ status }) }),
   assignTask: (id: string, mode: "demo" | "live" = "demo") => request<CodexRun>(`/api/tasks/${id}/assign`, { method: "POST", body: JSON.stringify({ mode, newThread: false }) }),
   opportunities: () => request<ItemList<Opportunity>>("/api/opportunities"),

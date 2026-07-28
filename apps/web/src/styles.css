@@ -524,9 +524,15 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .task-detail-acceptance li { padding-left: 5px; color: var(--ink); font-size: 11px; line-height: 1.55; }
 .task-detail-acceptance li::marker { color: var(--accent); font-family: "Geist Mono Variable", monospace; font-size: 9px; }
 .task-detail-acceptance p { margin: 10px 0 0; color: var(--ink-faint); font-size: 10.5px; }
+.task-detail-edit { position: relative; display: flex; flex-direction: column; gap: 15px; margin: 24px 28px 0; }
+.task-detail-edit label, .task-detail-edit .form-field { display: flex; flex-direction: column; gap: 8px; }
+.task-detail-edit label > span, .task-detail-edit .form-field > span { color: var(--ink-soft); font-size: 10.5px; font-weight: 650; }
 .task-detail-footer { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 22px; padding: 17px 28px 22px; border-top: 1px solid var(--line); background: var(--surface-strong); }
 .task-detail-footer > div { display: flex; flex-wrap: wrap; gap: 7px 15px; }
 .task-detail-footer span { color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 8.5px; }
+.task-detail-actions { align-items: center; justify-content: flex-end; flex: 0 0 auto; gap: 8px !important; }
+.task-detail-edit-footer { margin-inline: -28px; margin-top: 5px; }
+.task-detail-edit-footer > span { max-width: 48ch; line-height: 1.5; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 8px; }
 .inline-error { margin: 8px 0 0; color: var(--danger); font-size: 10.5px; }
 
