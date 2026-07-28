@@ -51,4 +51,8 @@
 
 ## Review
 
-In progress. Final gate output and requirement evidence are recorded in `REVIEW.md` and `docs/MVP1-ACCEPTANCE.md`.
+- Audited the full A01–A24 acceptance matrix and recorded requirement-level evidence.
+- Added a missing API regression test for income-asset stage and maintenance visibility.
+- Bound the unauthenticated API to `127.0.0.1` by default after the network-exposure review.
+- Re-ran 24 tests, typecheck, lint, production builds, dependency audit, diff checks, Skill validation, API smoke, and built MCP smoke.
+- Confirmed all 24 acceptance requirements passed. Final evidence is recorded in `REVIEW.md` and `docs/MVP1-ACCEPTANCE.md`.
