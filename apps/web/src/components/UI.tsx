@@ -16,7 +16,9 @@ const statusLabels: Record<TaskStatus | ProjectStatus | CodexRunStatus, string> 
   completed: "已结束",
   archived: "已归档",
   queued: "排队中",
+  claimed: "已领取",
   running: "运行中",
+  awaiting_approval: "等待审批",
   failed: "失败",
   cancelled: "已取消"
 };

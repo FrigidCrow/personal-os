@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PersonalOsDatabase } from "./index.js";
 
@@ -36,6 +40,54 @@ describe("PersonalOsDatabase", () => {
 
     expect(database.getProject(project.id)?.name).toBe("Test project");
     expect(database.getTask(task.id)?.projectId).toBe(project.id);
+    expect(task).toMatchObject({
+      taskType: "other",
+      executor: "human",
+      executionMode: "manual",
+      triggerType: "manual",
+      riskLevel: "medium",
+      maxAttempts: 1,
+      automationPaused: false
+    });
+  });
+
+  it("creates one auditable active agent run per task and enforces review", () => {
+    const task = database.listTasks().find((item) => item.status === "ready")!;
+    const run = database.createAgentRun({
+      taskId: task.id,
+      projectId: task.projectId,
+      executor: "openworker",
+      promptSnapshot: "Prepare a local draft.",
+      idempotencyKey: "openworker:test:1"
+    });
+
+    expect(run).toMatchObject({ executor: "openworker", status: "queued", attempt: 1 });
+    expect(database.listAgentRunEvents(run.id).map((event) => event.eventType)).toEqual(["queued"]);
+    expect(() => database.createAgentRun({
+      taskId: task.id,
+      executor: "openworker",
+      promptSnapshot: "Duplicate key.",
+      idempotencyKey: "openworker:test:1"
+    })).toThrow("Duplicate idempotency key");
+    expect(() => database.createAgentRun({
+      taskId: task.id,
+      executor: "openworker",
+      promptSnapshot: "Second active run.",
+      idempotencyKey: "openworker:test:2"
+    })).toThrow("Active run already exists");
+
+    database.updateAgentRun(run.id, { status: "running", startedAt: new Date().toISOString() });
+    expect(() => database.updateAgentRun(run.id, { status: "done" })).toThrow("Invalid agent run transition");
+    const approval = database.createApprovalRequest({
+      runId: run.id,
+      actionType: "send_message",
+      destination: "draft@example.com",
+      summary: "Send the prepared draft",
+      payloadPreview: "Draft only"
+    });
+    expect(approval.status).toBe("pending");
+    expect(database.getAgentRun(run.id)?.status).toBe("awaiting_approval");
+    expect(database.listAgentRunEvents(run.id).at(-1)?.eventType).toBe("approval_requested");
   });
 
   it("updates and deletes projects without deleting their tasks", () => {
@@ -73,5 +125,71 @@ describe("PersonalOsDatabase", () => {
     const report = database.getLatestDailyReport();
     expect(report).not.toBeNull();
     expect(report!.opportunities.length).toBeLessThanOrEqual(5);
+  });
+});
+
+describe("MVP1 database migration", () => {
+  it("preserves legacy tasks, Codex runs, thread ids, and events", () => {
+    const directory = mkdtempSync(join(tmpdir(), "personal-os-mvp1-"));
+    const filePath = join(directory, "legacy.db");
+    const taskId = "10000000-0000-4000-8000-000000000001";
+    const runId = "20000000-0000-4000-8000-000000000001";
+    const eventId = "30000000-0000-4000-8000-000000000001";
+    const timestamp = "2026-07-28T00:00:00.000Z";
+
+    try {
+      const legacy = new Database(filePath);
+      legacy.exec(`
+        CREATE TABLE projects (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, lane TEXT NOT NULL,
+          status TEXT NOT NULL, outcome TEXT NOT NULL, next_action TEXT NOT NULL,
+          deadline TEXT, expected_revenue REAL, actual_revenue REAL,
+          repository_path TEXT, obsidian_path TEXT, created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE tasks (
+          id TEXT PRIMARY KEY, project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+          title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+          delegation_mode TEXT NOT NULL, priority TEXT NOT NULL, due_date TEXT,
+          acceptance_criteria TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE codex_runs (
+          id TEXT PRIMARY KEY, project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, thread_id TEXT,
+          status TEXT NOT NULL, mode TEXT NOT NULL, working_directory TEXT,
+          prompt_snapshot TEXT NOT NULL, final_response TEXT,
+          artifact_paths TEXT NOT NULL DEFAULT '[]', verification_summary TEXT,
+          error_message TEXT, requires_human_review INTEGER NOT NULL DEFAULT 1,
+          started_at TEXT, completed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE codex_run_events (
+          id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES codex_runs(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+      `);
+      legacy.prepare("INSERT INTO tasks VALUES (?, NULL, ?, '', 'needs_review', 'codex_ready', 'medium', NULL, '[]', ?, ?)")
+        .run(taskId, "Legacy task", timestamp, timestamp);
+      legacy.prepare("INSERT INTO codex_runs VALUES (?, NULL, ?, ?, 'needs_review', 'live', NULL, ?, ?, '[]', ?, NULL, 1, ?, ?, ?, ?)")
+        .run(runId, taskId, "legacy-thread", "Legacy prompt", "Legacy result", "Passed", timestamp, timestamp, timestamp, timestamp);
+      legacy.prepare("INSERT INTO codex_run_events VALUES (?, ?, 'needs_review', ?, ?)")
+        .run(eventId, runId, "Legacy result ready", timestamp);
+      legacy.close();
+
+      const migrated = new PersonalOsDatabase({ filePath, seed: false });
+      expect(migrated.getTask(taskId)).toMatchObject({ executor: "human", executionMode: "manual", riskLevel: "medium" });
+      expect(migrated.getAgentRun(runId)).toMatchObject({
+        executor: "codex",
+        externalSessionId: "legacy-thread",
+        finalResponse: "Legacy result",
+        idempotencyKey: `legacy-codex:${runId}`
+      });
+      expect(migrated.getCodexRun(runId)?.threadId).toBe("legacy-thread");
+      expect(migrated.listAgentRunEvents(runId)).toHaveLength(1);
+      expect((migrated.connection.prepare("SELECT COUNT(*) AS count FROM codex_runs").get() as { count: number }).count).toBe(1);
+      migrated.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

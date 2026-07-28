@@ -19,6 +19,10 @@ export function createPersonalOsTools(database: PersonalOsDatabase) {
     markTaskBlocked: (taskId: string, reason: string, runId?: string) => {
       const task = database.transitionTask(taskId, "blocked");
       if (runId) {
+        const run = database.getCodexRun(runId);
+        if (run?.status === "queued" || run?.status === "claimed") {
+          database.updateCodexRun(runId, { status: "running", startedAt: new Date().toISOString() });
+        }
         database.appendCodexRunEvent(runId, "blocked", reason);
         database.updateCodexRun(runId, { status: "blocked", errorMessage: reason });
       }
@@ -28,6 +32,11 @@ export function createPersonalOsTools(database: PersonalOsDatabase) {
       const task = database.getTask(input.taskId);
       if (!task) throw new Error(`Task not found: ${input.taskId}`);
       if (task.status !== "in_progress") throw new Error(`Task must be in progress before Codex completion: ${task.status}`);
+      const currentRun = database.getCodexRun(input.runId);
+      if (!currentRun) throw new Error(`Codex run not found: ${input.runId}`);
+      if (currentRun.status === "queued" || currentRun.status === "claimed") {
+        database.updateCodexRun(input.runId, { status: "running", startedAt: new Date().toISOString() });
+      }
       const transitioned = database.transitionTask(input.taskId, "needs_review");
       const run = database.updateCodexRun(input.runId, {
         status: "needs_review",

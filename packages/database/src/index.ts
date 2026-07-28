@@ -3,6 +3,9 @@ import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import {
+  agentRunEventTypeSchema,
+  approvalRequestInputSchema,
+  assertAgentRunTransition,
   assertTaskTransition,
   calculateOpportunityScore,
   dailyReportInputSchema,
@@ -11,9 +14,15 @@ import {
   opportunityInputSchema,
   projectInputSchema,
   taskInputSchema,
+  type AgentExecutor,
+  type AgentRun,
+  type AgentRunEvent,
+  type AgentRunEventType,
+  type AgentRunStatus,
+  type ApprovalRequest,
+  type ApprovalStatus,
   type CodexRun,
   type CodexRunEvent,
-  type CodexRunStatus,
   type DailyReport,
   type DailyReportInput,
   type Evidence,
@@ -26,6 +35,7 @@ import {
   type Project,
   type ProjectInput,
   type Task,
+  type TaskCreateInput,
   type TaskInput,
   type TaskStatus
 } from "@personal-os/domain";
@@ -47,6 +57,11 @@ function nullableString(value: unknown): string | null {
 
 function nullableNumber(value: unknown): number | null {
   return typeof value === "number" ? value : null;
+}
+
+function nullableJson(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  return JSON.parse(value) as Record<string, unknown>;
 }
 
 function mapProject(row: Row): Project {
@@ -78,6 +93,17 @@ function mapTask(row: Row): Task {
     priority: row.priority as Task["priority"],
     dueDate: nullableString(row.due_date),
     acceptanceCriteria: JSON.parse(String(row.acceptance_criteria)) as string[],
+    taskType: row.task_type as Task["taskType"],
+    executor: row.executor as Task["executor"],
+    executionMode: row.execution_mode as Task["executionMode"],
+    triggerType: row.trigger_type as Task["triggerType"],
+    triggerConfig: nullableJson(row.trigger_config),
+    triggerTimezone: String(row.trigger_timezone),
+    riskLevel: row.risk_level as Task["riskLevel"],
+    maxAttempts: Number(row.max_attempts),
+    nextRunAt: nullableString(row.next_run_at),
+    lastScheduledAt: nullableString(row.last_scheduled_at),
+    automationPaused: booleanFromDb(row.automation_paused),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -128,37 +154,94 @@ function mapAsset(row: Row): IncomeAsset {
   };
 }
 
-function mapRun(row: Row): CodexRun {
+function mapAgentRun(row: Row): AgentRun {
   return {
     id: String(row.id),
     projectId: nullableString(row.project_id),
     taskId: String(row.task_id),
-    threadId: nullableString(row.thread_id),
-    status: row.status as CodexRunStatus,
-    mode: row.mode as CodexRun["mode"],
-    workingDirectory: nullableString(row.working_directory),
+    executor: row.executor as AgentExecutor,
+    externalSessionId: nullableString(row.external_session_id),
+    status: row.status as AgentRunStatus,
+    mode: row.mode as AgentRun["mode"],
+    attempt: Number(row.attempt),
+    idempotencyKey: String(row.idempotency_key),
     promptSnapshot: String(row.prompt_snapshot),
+    workingDirectory: nullableString(row.working_directory),
     finalResponse: nullableString(row.final_response),
     artifactPaths: JSON.parse(String(row.artifact_paths)) as string[],
     verificationSummary: nullableString(row.verification_summary),
     errorMessage: nullableString(row.error_message),
     requiresHumanReview: booleanFromDb(row.requires_human_review),
+    claimedAt: nullableString(row.claimed_at),
+    leaseExpiresAt: nullableString(row.lease_expires_at),
+    heartbeatAt: nullableString(row.heartbeat_at),
     startedAt: nullableString(row.started_at),
     completedAt: nullableString(row.completed_at),
+    nextRetryAt: nullableString(row.next_retry_at),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
+  };
+}
+
+function toCodexRun(run: AgentRun): CodexRun {
+  return {
+    id: run.id,
+    projectId: run.projectId,
+    taskId: run.taskId,
+    threadId: run.externalSessionId,
+    status: run.status,
+    mode: run.mode,
+    workingDirectory: run.workingDirectory,
+    promptSnapshot: run.promptSnapshot,
+    finalResponse: run.finalResponse,
+    artifactPaths: run.artifactPaths,
+    verificationSummary: run.verificationSummary,
+    errorMessage: run.errorMessage,
+    requiresHumanReview: run.requiresHumanReview,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt
+  };
+}
+
+function mapAgentRunEvent(row: Row): AgentRunEvent {
+  return {
+    id: String(row.id),
+    runId: String(row.run_id),
+    eventType: row.event_type as AgentRunEventType,
+    message: String(row.message),
+    createdAt: String(row.created_at)
+  };
+}
+
+function mapApprovalRequest(row: Row): ApprovalRequest {
+  return {
+    id: String(row.id),
+    runId: String(row.run_id),
+    actionType: row.action_type as ApprovalRequest["actionType"],
+    destination: String(row.destination),
+    summary: String(row.summary),
+    payloadPreview: nullableString(row.payload_preview),
+    status: row.status as ApprovalStatus,
+    expiresAt: nullableString(row.expires_at),
+    resolvedAt: nullableString(row.resolved_at),
+    createdAt: String(row.created_at)
   };
 }
 
 export interface PersonalOsDatabaseOptions {
   filePath: string;
   seed?: boolean;
+  clock?: () => Date;
 }
 
 export class PersonalOsDatabase {
   readonly connection: Sqlite;
+  private readonly clock: () => Date;
 
   constructor(options: PersonalOsDatabaseOptions) {
+    this.clock = options.clock ?? (() => new Date());
     if (options.filePath !== ":memory:") {
       const absolutePath = resolve(options.filePath);
       mkdirSync(dirname(absolutePath), { recursive: true });
@@ -180,6 +263,10 @@ export class PersonalOsDatabase {
 
   close(): void {
     this.connection.close();
+  }
+
+  private timestamp(): string {
+    return this.clock().toISOString();
   }
 
   migrate(): void {
@@ -210,6 +297,17 @@ export class PersonalOsDatabase {
         priority TEXT NOT NULL,
         due_date TEXT,
         acceptance_criteria TEXT NOT NULL DEFAULT '[]',
+        task_type TEXT NOT NULL DEFAULT 'other',
+        executor TEXT NOT NULL DEFAULT 'human',
+        execution_mode TEXT NOT NULL DEFAULT 'manual',
+        trigger_type TEXT NOT NULL DEFAULT 'manual',
+        trigger_config TEXT,
+        trigger_timezone TEXT NOT NULL DEFAULT 'UTC',
+        risk_level TEXT NOT NULL DEFAULT 'medium',
+        max_attempts INTEGER NOT NULL DEFAULT 1,
+        next_run_at TEXT,
+        last_scheduled_at TEXT,
+        automation_paused INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -329,6 +427,108 @@ export class PersonalOsDatabase {
       CREATE INDEX IF NOT EXISTS idx_runs_status ON codex_runs(status);
       CREATE INDEX IF NOT EXISTS idx_run_events_run ON codex_run_events(run_id);
     `);
+
+    this.ensureColumn("tasks", "task_type", "TEXT NOT NULL DEFAULT 'other'");
+    this.ensureColumn("tasks", "executor", "TEXT NOT NULL DEFAULT 'human'");
+    this.ensureColumn("tasks", "execution_mode", "TEXT NOT NULL DEFAULT 'manual'");
+    this.ensureColumn("tasks", "trigger_type", "TEXT NOT NULL DEFAULT 'manual'");
+    this.ensureColumn("tasks", "trigger_config", "TEXT");
+    this.ensureColumn("tasks", "trigger_timezone", "TEXT NOT NULL DEFAULT 'UTC'");
+    this.ensureColumn("tasks", "risk_level", "TEXT NOT NULL DEFAULT 'medium'");
+    this.ensureColumn("tasks", "max_attempts", "INTEGER NOT NULL DEFAULT 1");
+    this.ensureColumn("tasks", "next_run_at", "TEXT");
+    this.ensureColumn("tasks", "last_scheduled_at", "TEXT");
+    this.ensureColumn("tasks", "automation_paused", "INTEGER NOT NULL DEFAULT 0");
+
+    this.connection.exec(`
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        executor TEXT NOT NULL CHECK (executor IN ('codex', 'openworker')),
+        external_session_id TEXT,
+        status TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'live',
+        attempt INTEGER NOT NULL DEFAULT 1,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        prompt_snapshot TEXT NOT NULL,
+        working_directory TEXT,
+        final_response TEXT,
+        artifact_paths TEXT NOT NULL DEFAULT '[]',
+        verification_summary TEXT,
+        error_message TEXT,
+        requires_human_review INTEGER NOT NULL DEFAULT 1,
+        claimed_at TEXT,
+        lease_expires_at TEXT,
+        heartbeat_at TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        next_retry_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_run_events (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS approval_requests (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        action_type TEXT NOT NULL,
+        destination TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        payload_preview TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        expires_at TEXT,
+        resolved_at TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      INSERT OR IGNORE INTO agent_runs (
+        id, project_id, task_id, executor, external_session_id, status, mode,
+        attempt, idempotency_key, prompt_snapshot, working_directory,
+        final_response, artifact_paths, verification_summary, error_message,
+        requires_human_review, started_at, completed_at, created_at, updated_at
+      )
+      SELECT
+        id, project_id, task_id, 'codex', thread_id, status, mode,
+        1, 'legacy-codex:' || id, prompt_snapshot, working_directory,
+        final_response, artifact_paths, verification_summary, error_message,
+        requires_human_review, started_at, completed_at, created_at, updated_at
+      FROM codex_runs;
+
+      INSERT OR IGNORE INTO agent_run_events (id, run_id, event_type, message, created_at)
+      SELECT id, run_id,
+        CASE
+          WHEN event_type IN (
+            'queued', 'claimed', 'running', 'heartbeat', 'tool_request',
+            'approval_requested', 'approval_resolved', 'artifact_saved',
+            'verification', 'needs_review', 'failed', 'cancelled'
+          ) THEN event_type
+          ELSE 'verification'
+        END,
+        message,
+        created_at
+      FROM codex_run_events;
+
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_task ON agent_runs(task_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_executor_status ON agent_runs(executor, status);
+      CREATE INDEX IF NOT EXISTS idx_agent_run_events_run ON agent_run_events(run_id);
+      CREATE INDEX IF NOT EXISTS idx_approval_requests_status ON approval_requests(status);
+    `);
+  }
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const columns = this.connection.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!columns.some((item) => item.name === column)) {
+      this.connection.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
   }
 
   listProjects(): Project[] {
@@ -423,15 +623,17 @@ export class PersonalOsDatabase {
     return row ? mapTask(row) : null;
   }
 
-  createTask(raw: TaskInput, id = randomUUID()): Task {
+  createTask(raw: TaskCreateInput, id = randomUUID()): Task {
     const input = taskInputSchema.parse(raw);
     if (input.projectId) this.requireProject(input.projectId);
     const timestamp = now();
     this.connection.prepare(`
       INSERT INTO tasks (
         id, project_id, title, description, status, delegation_mode, priority,
-        due_date, acceptance_criteria, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        due_date, acceptance_criteria, task_type, executor, execution_mode,
+        trigger_type, trigger_config, trigger_timezone, risk_level, max_attempts,
+        next_run_at, last_scheduled_at, automation_paused, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.projectId ?? null,
@@ -442,6 +644,17 @@ export class PersonalOsDatabase {
       input.priority,
       input.dueDate ?? null,
       JSON.stringify(input.acceptanceCriteria),
+      input.taskType,
+      input.executor,
+      input.executionMode,
+      input.triggerType,
+      input.triggerConfig ? JSON.stringify(input.triggerConfig) : null,
+      input.triggerTimezone,
+      input.riskLevel,
+      input.maxAttempts,
+      input.nextRunAt ?? null,
+      input.lastScheduledAt ?? null,
+      input.automationPaused ? 1 : 0,
       timestamp,
       timestamp
     );
@@ -458,7 +671,10 @@ export class PersonalOsDatabase {
     this.connection.prepare(`
       UPDATE tasks SET
         project_id = ?, title = ?, description = ?, status = ?, delegation_mode = ?,
-        priority = ?, due_date = ?, acceptance_criteria = ?, updated_at = ?
+        priority = ?, due_date = ?, acceptance_criteria = ?, task_type = ?, executor = ?,
+        execution_mode = ?, trigger_type = ?, trigger_config = ?, trigger_timezone = ?,
+        risk_level = ?, max_attempts = ?, next_run_at = ?, last_scheduled_at = ?,
+        automation_paused = ?, updated_at = ?
       WHERE id = ?
     `).run(
       input.projectId ?? null,
@@ -469,6 +685,17 @@ export class PersonalOsDatabase {
       input.priority,
       input.dueDate ?? null,
       JSON.stringify(input.acceptanceCriteria),
+      input.taskType,
+      input.executor,
+      input.executionMode,
+      input.triggerType,
+      input.triggerConfig ? JSON.stringify(input.triggerConfig) : null,
+      input.triggerTimezone,
+      input.riskLevel,
+      input.maxAttempts,
+      input.nextRunAt ?? null,
+      input.lastScheduledAt ?? null,
+      input.automationPaused ? 1 : 0,
       now(),
       id
     );
@@ -686,6 +913,175 @@ export class PersonalOsDatabase {
     return row ? this.hydrateDailyReport(row) : null;
   }
 
+  createAgentRun(input: {
+    taskId: string;
+    projectId?: string | null;
+    executor: AgentExecutor;
+    mode?: "demo" | "live";
+    workingDirectory?: string | null;
+    promptSnapshot: string;
+    idempotencyKey: string;
+    attempt?: number;
+  }, id = randomUUID()): AgentRun {
+    const task = this.requireTask(input.taskId);
+    if (input.projectId) this.requireProject(input.projectId);
+    if (input.idempotencyKey.trim().length === 0) throw new Error("Idempotency key is required");
+    const timestamp = this.timestamp();
+    const create = this.connection.transaction(() => {
+      const duplicate = this.connection.prepare("SELECT id FROM agent_runs WHERE idempotency_key = ?").get(input.idempotencyKey) as { id: string } | undefined;
+      if (duplicate) throw new Error(`Duplicate idempotency key: ${input.idempotencyKey}`);
+      const active = this.connection.prepare(`
+        SELECT id FROM agent_runs
+        WHERE task_id = ? AND status IN ('queued', 'claimed', 'running', 'awaiting_approval')
+        LIMIT 1
+      `).get(input.taskId) as { id: string } | undefined;
+      if (active) throw new Error(`Active run already exists for task: ${input.taskId}`);
+      this.connection.prepare(`
+        INSERT INTO agent_runs (
+          id, project_id, task_id, executor, status, mode, attempt,
+          idempotency_key, prompt_snapshot, working_directory, artifact_paths,
+          requires_human_review, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, '[]', 1, ?, ?)
+      `).run(
+        id,
+        input.projectId ?? task.projectId ?? null,
+        input.taskId,
+        input.executor,
+        input.mode ?? "live",
+        input.attempt ?? 1,
+        input.idempotencyKey,
+        input.promptSnapshot,
+        input.workingDirectory ?? null,
+        timestamp,
+        timestamp
+      );
+      this.insertAgentRunEvent(id, "queued", `Task queued for ${input.executor}.`, timestamp);
+    });
+    create.immediate();
+    return this.requireAgentRun(id);
+  }
+
+  updateAgentRun(id: string, patch: Partial<Pick<AgentRun,
+    "externalSessionId" | "status" | "finalResponse" | "artifactPaths" |
+    "verificationSummary" | "errorMessage" | "requiresHumanReview" |
+    "claimedAt" | "leaseExpiresAt" | "heartbeatAt" | "startedAt" |
+    "completedAt" | "nextRetryAt"
+  >>): AgentRun {
+    const current = this.requireAgentRun(id);
+    const definedPatch = Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => value !== undefined)
+    ) as typeof patch;
+    if (definedPatch.status && definedPatch.status !== current.status) {
+      assertAgentRunTransition(current.status, definedPatch.status);
+    }
+    const next = { ...current, ...definedPatch, updatedAt: this.timestamp() };
+    this.connection.prepare(`
+      UPDATE agent_runs SET
+        external_session_id = ?, status = ?, final_response = ?, artifact_paths = ?,
+        verification_summary = ?, error_message = ?, requires_human_review = ?,
+        claimed_at = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = ?,
+        completed_at = ?, next_retry_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      next.externalSessionId,
+      next.status,
+      next.finalResponse,
+      JSON.stringify(next.artifactPaths),
+      next.verificationSummary,
+      next.errorMessage,
+      next.requiresHumanReview ? 1 : 0,
+      next.claimedAt,
+      next.leaseExpiresAt,
+      next.heartbeatAt,
+      next.startedAt,
+      next.completedAt,
+      next.nextRetryAt,
+      next.updatedAt,
+      id
+    );
+    return this.requireAgentRun(id);
+  }
+
+  listAgentRuns(filters: { executor?: AgentExecutor; status?: AgentRunStatus; limit?: number } = {}): AgentRun[] {
+    const clauses: string[] = [];
+    const values: Array<string | number> = [];
+    if (filters.executor) {
+      clauses.push("executor = ?");
+      values.push(filters.executor);
+    }
+    if (filters.status) {
+      clauses.push("status = ?");
+      values.push(filters.status);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    values.push(filters.limit ?? 50);
+    return (this.connection.prepare(`SELECT * FROM agent_runs ${where} ORDER BY created_at DESC LIMIT ?`).all(...values) as Row[]).map(mapAgentRun);
+  }
+
+  getAgentRun(id: string): AgentRun | null {
+    const row = this.connection.prepare("SELECT * FROM agent_runs WHERE id = ?").get(id) as Row | undefined;
+    return row ? mapAgentRun(row) : null;
+  }
+
+  appendAgentRunEvent(runId: string, eventType: AgentRunEventType, message: string): AgentRunEvent {
+    this.requireAgentRun(runId);
+    const parsedType = agentRunEventTypeSchema.parse(eventType);
+    return this.insertAgentRunEvent(runId, parsedType, message, this.timestamp());
+  }
+
+  listAgentRunEvents(runId: string): AgentRunEvent[] {
+    this.requireAgentRun(runId);
+    const rows = this.connection.prepare("SELECT * FROM agent_run_events WHERE run_id = ? ORDER BY created_at, rowid").all(runId) as Row[];
+    return rows.map(mapAgentRunEvent);
+  }
+
+  createApprovalRequest(raw: {
+    runId: string;
+    actionType: ApprovalRequest["actionType"];
+    destination: string;
+    summary: string;
+    payloadPreview?: string | null;
+    expiresAt?: string | null;
+  }, id = randomUUID()): ApprovalRequest {
+    const input = approvalRequestInputSchema.parse(raw);
+    const run = this.requireAgentRun(input.runId);
+    if (run.status !== "running") throw new Error(`Run must be running to request approval: ${run.id}`);
+    const timestamp = this.timestamp();
+    const create = this.connection.transaction(() => {
+      this.connection.prepare(`
+        INSERT INTO approval_requests (
+          id, run_id, action_type, destination, summary, payload_preview,
+          status, expires_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+      `).run(
+        id,
+        input.runId,
+        input.actionType,
+        input.destination,
+        input.summary,
+        input.payloadPreview,
+        input.expiresAt ?? null,
+        timestamp
+      );
+      this.connection.prepare("UPDATE agent_runs SET status = 'awaiting_approval', updated_at = ? WHERE id = ?").run(timestamp, input.runId);
+      this.insertAgentRunEvent(input.runId, "approval_requested", `${input.actionType}: ${input.summary}`, timestamp);
+    });
+    create.immediate();
+    return this.requireApprovalRequest(id);
+  }
+
+  listApprovalRequests(status?: ApprovalStatus): ApprovalRequest[] {
+    const rows = status
+      ? this.connection.prepare("SELECT * FROM approval_requests WHERE status = ? ORDER BY created_at DESC").all(status) as Row[]
+      : this.connection.prepare("SELECT * FROM approval_requests ORDER BY created_at DESC").all() as Row[];
+    return rows.map(mapApprovalRequest);
+  }
+
+  getApprovalRequest(id: string): ApprovalRequest | null {
+    const row = this.connection.prepare("SELECT * FROM approval_requests WHERE id = ?").get(id) as Row | undefined;
+    return row ? mapApprovalRequest(row) : null;
+  }
+
   createCodexRun(input: {
     taskId: string;
     projectId?: string | null;
@@ -693,93 +1089,59 @@ export class PersonalOsDatabase {
     workingDirectory?: string | null;
     promptSnapshot: string;
   }, id = randomUUID()): CodexRun {
-    this.requireTask(input.taskId);
-    if (input.projectId) this.requireProject(input.projectId);
-    const timestamp = now();
-    this.connection.prepare(`
-      INSERT INTO codex_runs (
-        id, project_id, task_id, thread_id, status, mode, working_directory,
-        prompt_snapshot, artifact_paths, requires_human_review, created_at, updated_at
-      ) VALUES (?, ?, ?, NULL, 'queued', ?, ?, ?, '[]', 1, ?, ?)
-    `).run(
-      id,
-      input.projectId ?? null,
-      input.taskId,
-      input.mode,
-      input.workingDirectory ?? null,
-      input.promptSnapshot,
-      timestamp,
-      timestamp
-    );
-    return this.requireRun(id);
+    const run = this.createAgentRun({
+      ...input,
+      executor: "codex",
+      idempotencyKey: `codex:${id}`
+    }, id);
+    return toCodexRun(run);
   }
 
   updateCodexRun(id: string, patch: Partial<Pick<CodexRun, "threadId" | "status" | "finalResponse" | "artifactPaths" | "verificationSummary" | "errorMessage" | "requiresHumanReview" | "startedAt" | "completedAt">>): CodexRun {
-    const current = this.requireRun(id);
-    const next = { ...current, ...patch, updatedAt: now() };
-    this.connection.prepare(`
-      UPDATE codex_runs SET
-        thread_id = ?, status = ?, final_response = ?, artifact_paths = ?,
-        verification_summary = ?, error_message = ?, requires_human_review = ?,
-        started_at = ?, completed_at = ?, updated_at = ?
-      WHERE id = ?
-    `).run(
-      next.threadId,
-      next.status,
-      next.finalResponse,
-      JSON.stringify(next.artifactPaths),
-      next.verificationSummary,
-      next.errorMessage,
-      next.requiresHumanReview ? 1 : 0,
-      next.startedAt,
-      next.completedAt,
-      next.updatedAt,
-      id
-    );
-    return this.requireRun(id);
+    const run = this.updateAgentRun(id, {
+      externalSessionId: patch.threadId,
+      status: patch.status,
+      finalResponse: patch.finalResponse,
+      artifactPaths: patch.artifactPaths,
+      verificationSummary: patch.verificationSummary,
+      errorMessage: patch.errorMessage,
+      requiresHumanReview: patch.requiresHumanReview,
+      startedAt: patch.startedAt,
+      completedAt: patch.completedAt
+    });
+    return toCodexRun(run);
   }
 
   listCodexRuns(limit = 50): CodexRun[] {
-    return (this.connection.prepare("SELECT * FROM codex_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(mapRun);
+    return this.listAgentRuns({ executor: "codex", limit }).map(toCodexRun);
   }
 
   findLatestThreadForProject(projectId: string): string | null {
     const row = this.connection.prepare(`
-      SELECT thread_id FROM codex_runs
-      WHERE project_id = ? AND thread_id IS NOT NULL
+      SELECT external_session_id FROM agent_runs
+      WHERE project_id = ? AND executor = 'codex' AND external_session_id IS NOT NULL
       ORDER BY updated_at DESC LIMIT 1
-    `).get(projectId) as { thread_id: string } | undefined;
-    return row?.thread_id ?? null;
+    `).get(projectId) as { external_session_id: string } | undefined;
+    return row?.external_session_id ?? null;
   }
 
   appendCodexRunEvent(runId: string, eventType: string, message: string): CodexRunEvent {
-    this.requireRun(runId);
-    const event = { id: randomUUID(), runId, eventType, message, createdAt: now() };
-    this.connection.prepare("INSERT INTO codex_run_events (id, run_id, event_type, message, created_at) VALUES (?, ?, ?, ?, ?)").run(
-      event.id,
-      event.runId,
-      event.eventType,
-      event.message,
-      event.createdAt
-    );
+    const aliases: Record<string, AgentRunEventType> = {
+      accepted: "approval_resolved",
+      blocked: "failed"
+    };
+    const parsed = agentRunEventTypeSchema.safeParse(eventType);
+    const event = this.appendAgentRunEvent(runId, parsed.success ? parsed.data : (aliases[eventType] ?? "tool_request"), message);
     return event;
   }
 
   listCodexRunEvents(runId: string): CodexRunEvent[] {
-    this.requireRun(runId);
-    const rows = this.connection.prepare("SELECT * FROM codex_run_events WHERE run_id = ? ORDER BY created_at").all(runId) as Row[];
-    return rows.map((row) => ({
-      id: String(row.id),
-      runId: String(row.run_id),
-      eventType: String(row.event_type),
-      message: String(row.message),
-      createdAt: String(row.created_at)
-    }));
+    return this.listAgentRunEvents(runId);
   }
 
   getCodexRun(id: string): CodexRun | null {
-    const row = this.connection.prepare("SELECT * FROM codex_runs WHERE id = ?").get(id) as Row | undefined;
-    return row ? mapRun(row) : null;
+    const run = this.getAgentRun(id);
+    return run?.executor === "codex" ? toCodexRun(run) : null;
   }
 
   getDashboard(): {
@@ -1068,6 +1430,30 @@ export class PersonalOsDatabase {
     const run = this.getCodexRun(id);
     if (!run) throw new Error(`Codex run not found: ${id}`);
     return run;
+  }
+
+  private requireAgentRun(id: string): AgentRun {
+    const run = this.getAgentRun(id);
+    if (!run) throw new Error(`Agent run not found: ${id}`);
+    return run;
+  }
+
+  private requireApprovalRequest(id: string): ApprovalRequest {
+    const approval = this.getApprovalRequest(id);
+    if (!approval) throw new Error(`Approval request not found: ${id}`);
+    return approval;
+  }
+
+  private insertAgentRunEvent(runId: string, eventType: AgentRunEventType, message: string, createdAt: string): AgentRunEvent {
+    const event = { id: randomUUID(), runId, eventType, message, createdAt };
+    this.connection.prepare("INSERT INTO agent_run_events (id, run_id, event_type, message, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      event.id,
+      event.runId,
+      event.eventType,
+      event.message,
+      event.createdAt
+    );
+    return event;
   }
 }
 

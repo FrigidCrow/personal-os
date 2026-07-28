@@ -42,7 +42,18 @@ function taskToForm(task: Task): TaskInput {
     delegationMode: task.delegationMode,
     priority: task.priority,
     dueDate: task.dueDate,
-    acceptanceCriteria: [...task.acceptanceCriteria]
+    acceptanceCriteria: [...task.acceptanceCriteria],
+    taskType: task.taskType,
+    executor: task.executor,
+    executionMode: task.executionMode,
+    triggerType: task.triggerType,
+    triggerConfig: task.triggerConfig,
+    triggerTimezone: task.triggerTimezone,
+    riskLevel: task.riskLevel,
+    maxAttempts: task.maxAttempts,
+    nextRunAt: task.nextRunAt,
+    lastScheduledAt: task.lastScheduledAt,
+    automationPaused: task.automationPaused
   };
 }
 
@@ -54,7 +65,18 @@ const initialTask: TaskInput = {
   delegationMode: "mixed",
   priority: "medium",
   dueDate: null,
-  acceptanceCriteria: []
+  acceptanceCriteria: [],
+  taskType: "other",
+  executor: "human",
+  executionMode: "manual",
+  triggerType: "manual",
+  triggerConfig: null,
+  triggerTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  riskLevel: "medium",
+  maxAttempts: 1,
+  nextRunAt: null,
+  lastScheduledAt: null,
+  automationPaused: false
 };
 
 interface PointerDrag {
@@ -236,7 +258,18 @@ export function TasksPage() {
         delegationMode: detailForm.delegationMode,
         priority: detailForm.priority,
         dueDate: detailForm.dueDate,
-        acceptanceCriteria: detailForm.acceptanceCriteria
+        acceptanceCriteria: detailForm.acceptanceCriteria,
+        taskType: detailForm.taskType,
+        executor: detailForm.executor,
+        executionMode: detailForm.executionMode,
+        triggerType: detailForm.triggerType,
+        triggerConfig: detailForm.triggerConfig,
+        triggerTimezone: detailForm.triggerTimezone,
+        riskLevel: detailForm.riskLevel,
+        maxAttempts: detailForm.maxAttempts,
+        nextRunAt: detailForm.nextRunAt,
+        lastScheduledAt: detailForm.lastScheduledAt,
+        automationPaused: detailForm.automationPaused
       }
     });
   };

@@ -5,16 +5,69 @@ export const projectStatusSchema = z.enum(["planned", "active", "paused", "block
 export const taskStatusSchema = z.enum(["inbox", "ready", "in_progress", "needs_review", "done", "blocked"]);
 export const delegationModeSchema = z.enum(["human_only", "codex_ready", "mixed"]);
 export const prioritySchema = z.enum(["low", "medium", "high", "critical"]);
+export const executorSchema = z.enum(["auto", "human", "codex", "openworker"]);
+export const agentExecutorSchema = executorSchema.exclude(["auto", "human"]);
+export const executionModeSchema = z.enum(["manual", "automatic"]);
+export const triggerTypeSchema = z.enum(["manual", "cron", "event", "dependency"]);
+export const riskLevelSchema = z.enum(["low", "medium", "high"]);
+export const taskTypeSchema = z.enum([
+  "coding",
+  "testing",
+  "code_review",
+  "technical_docs",
+  "email",
+  "calendar",
+  "slack",
+  "notion",
+  "business_report",
+  "general_writing",
+  "other"
+]);
 export const opportunityStatusSchema = z.enum(["candidate", "shortlisted", "dismissed", "experiment", "validated", "rejected"]);
 export const evidenceTypeSchema = z.enum(["fact", "inference"]);
 export const experimentStatusSchema = z.enum(["hypothesis", "preparing", "running", "measuring", "won", "lost", "pivoted"]);
 export const assetStageSchema = z.enum(["idea", "evidence", "experiment", "building", "launched", "revenue", "systemized"]);
-export const codexRunStatusSchema = z.enum(["queued", "running", "needs_review", "done", "blocked", "failed", "cancelled"]);
+export const agentRunStatusSchema = z.enum([
+  "queued",
+  "claimed",
+  "running",
+  "awaiting_approval",
+  "needs_review",
+  "done",
+  "blocked",
+  "failed",
+  "cancelled"
+]);
+export const codexRunStatusSchema = agentRunStatusSchema;
+export const agentRunEventTypeSchema = z.enum([
+  "queued",
+  "claimed",
+  "running",
+  "heartbeat",
+  "tool_request",
+  "approval_requested",
+  "approval_resolved",
+  "artifact_saved",
+  "verification",
+  "needs_review",
+  "failed",
+  "cancelled"
+]);
+export const approvalActionTypeSchema = z.enum([
+  "send_message",
+  "calendar_write",
+  "publish",
+  "shell",
+  "external_write",
+  "other"
+]);
+export const approvalStatusSchema = z.enum(["pending", "approved", "rejected", "expired"]);
 export const generatedBySchema = z.enum(["demo", "codex", "manual"]);
 
 const optionalText = z.string().trim().max(2000).nullable().optional();
 const optionalDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional();
 const optionalMoney = z.number().finite().min(0).nullable().optional();
+const optionalDateTime = z.string().datetime({ offset: true }).nullable().optional();
 
 export const projectInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -39,7 +92,18 @@ export const taskInputSchema = z.object({
   delegationMode: delegationModeSchema.default("mixed"),
   priority: prioritySchema.default("medium"),
   dueDate: optionalDate,
-  acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).max(20).default([])
+  acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).max(20).default([]),
+  taskType: taskTypeSchema.default("other"),
+  executor: executorSchema.default("human"),
+  executionMode: executionModeSchema.default("manual"),
+  triggerType: triggerTypeSchema.default("manual"),
+  triggerConfig: z.record(z.string(), z.unknown()).nullable().default(null),
+  triggerTimezone: z.string().trim().min(1).max(100).default("UTC"),
+  riskLevel: riskLevelSchema.default("medium"),
+  maxAttempts: z.number().int().min(1).max(10).default(1),
+  nextRunAt: optionalDateTime.default(null),
+  lastScheduledAt: optionalDateTime.default(null),
+  automationPaused: z.boolean().default(false)
 });
 
 export const taskPatchSchema = taskInputSchema.partial().omit({ status: true });
@@ -110,6 +174,15 @@ export const codexAssignmentSchema = z.object({
   additionalInstructions: z.string().trim().max(2000).optional()
 });
 
+export const approvalRequestInputSchema = z.object({
+  runId: z.string().uuid(),
+  actionType: approvalActionTypeSchema,
+  destination: z.string().trim().min(1).max(500),
+  summary: z.string().trim().min(1).max(1000),
+  payloadPreview: z.string().trim().max(4000).nullable().default(null),
+  expiresAt: optionalDateTime
+});
+
 export const dailyReportInputSchema = z.object({
   reportDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   title: z.string().trim().min(1).max(180),
@@ -124,12 +197,23 @@ export type ProjectStatus = z.infer<typeof projectStatusSchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type DelegationMode = z.infer<typeof delegationModeSchema>;
 export type Priority = z.infer<typeof prioritySchema>;
+export type Executor = z.infer<typeof executorSchema>;
+export type AgentExecutor = z.infer<typeof agentExecutorSchema>;
+export type ExecutionMode = z.infer<typeof executionModeSchema>;
+export type TriggerType = z.infer<typeof triggerTypeSchema>;
+export type RiskLevel = z.infer<typeof riskLevelSchema>;
+export type TaskType = z.infer<typeof taskTypeSchema>;
 export type OpportunityStatus = z.infer<typeof opportunityStatusSchema>;
 export type ExperimentStatus = z.infer<typeof experimentStatusSchema>;
 export type AssetStage = z.infer<typeof assetStageSchema>;
 export type CodexRunStatus = z.infer<typeof codexRunStatusSchema>;
+export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
+export type AgentRunEventType = z.infer<typeof agentRunEventTypeSchema>;
+export type ApprovalActionType = z.infer<typeof approvalActionTypeSchema>;
+export type ApprovalStatus = z.infer<typeof approvalStatusSchema>;
 export type ProjectInput = z.infer<typeof projectInputSchema>;
-export type TaskInput = z.infer<typeof taskInputSchema>;
+export type TaskCreateInput = z.input<typeof taskInputSchema>;
+export type TaskInput = z.output<typeof taskInputSchema>;
 export type OpportunityInput = z.infer<typeof opportunityInputSchema>;
 export type ExperimentInput = z.infer<typeof experimentInputSchema>;
 export type IncomeAssetInput = z.infer<typeof incomeAssetInputSchema>;
@@ -198,11 +282,59 @@ export interface CodexRun {
   updatedAt: string;
 }
 
+export interface AgentRun {
+  id: string;
+  projectId: string | null;
+  taskId: string;
+  executor: AgentExecutor;
+  externalSessionId: string | null;
+  status: AgentRunStatus;
+  mode: "demo" | "live";
+  attempt: number;
+  idempotencyKey: string;
+  promptSnapshot: string;
+  workingDirectory: string | null;
+  finalResponse: string | null;
+  artifactPaths: string[];
+  verificationSummary: string | null;
+  errorMessage: string | null;
+  requiresHumanReview: boolean;
+  claimedAt: string | null;
+  leaseExpiresAt: string | null;
+  heartbeatAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  nextRetryAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CodexRunEvent {
   id: string;
   runId: string;
   eventType: string;
   message: string;
+  createdAt: string;
+}
+
+export interface AgentRunEvent {
+  id: string;
+  runId: string;
+  eventType: AgentRunEventType;
+  message: string;
+  createdAt: string;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  runId: string;
+  actionType: ApprovalActionType;
+  destination: string;
+  summary: string;
+  payloadPreview: string | null;
+  status: ApprovalStatus;
+  expiresAt: string | null;
+  resolvedAt: string | null;
   createdAt: string;
 }
 
@@ -222,6 +354,28 @@ export function canTransitionTask(from: TaskStatus, to: TaskStatus): boolean {
 export function assertTaskTransition(from: TaskStatus, to: TaskStatus): void {
   if (!canTransitionTask(from, to)) {
     throw new Error(`Invalid task transition: ${from} -> ${to}`);
+  }
+}
+
+const allowedAgentRunTransitions: Record<AgentRunStatus, readonly AgentRunStatus[]> = {
+  queued: ["claimed", "running", "failed", "cancelled"],
+  claimed: ["running", "failed", "cancelled"],
+  running: ["awaiting_approval", "needs_review", "blocked", "failed", "cancelled"],
+  awaiting_approval: ["running", "needs_review", "blocked", "failed", "cancelled"],
+  needs_review: ["done", "blocked"],
+  done: [],
+  blocked: [],
+  failed: [],
+  cancelled: []
+};
+
+export function canTransitionAgentRun(from: AgentRunStatus, to: AgentRunStatus): boolean {
+  return allowedAgentRunTransitions[from].includes(to);
+}
+
+export function assertAgentRunTransition(from: AgentRunStatus, to: AgentRunStatus): void {
+  if (!canTransitionAgentRun(from, to)) {
+    throw new Error(`Invalid agent run transition: ${from} -> ${to}`);
   }
 }
 

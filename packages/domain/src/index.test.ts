@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertAgentRunTransition,
   assertTaskTransition,
   calculateOpportunityScore,
+  canTransitionAgentRun,
   canTransitionTask,
   dailyReportInputSchema,
-  opportunityInputSchema
+  opportunityInputSchema,
+  taskInputSchema
 } from "./index.js";
 
 describe("task transitions", () => {
@@ -18,6 +21,42 @@ describe("task transitions", () => {
     expect(() => assertTaskTransition("in_progress", "done")).toThrow(
       "Invalid task transition"
     );
+  });
+});
+
+describe("agent run transitions", () => {
+  it("supports claim, approval, review, and human acceptance", () => {
+    expect(canTransitionAgentRun("queued", "claimed")).toBe(true);
+    expect(canTransitionAgentRun("claimed", "running")).toBe(true);
+    expect(canTransitionAgentRun("running", "awaiting_approval")).toBe(true);
+    expect(canTransitionAgentRun("awaiting_approval", "running")).toBe(true);
+    expect(canTransitionAgentRun("running", "needs_review")).toBe(true);
+    expect(canTransitionAgentRun("needs_review", "done")).toBe(true);
+  });
+
+  it("does not let an agent skip human review", () => {
+    expect(() => assertAgentRunTransition("running", "done")).toThrow(
+      "Invalid agent run transition"
+    );
+  });
+});
+
+describe("task automation defaults", () => {
+  it("preserves the manual human behavior for existing callers", () => {
+    const task = taskInputSchema.parse({ title: "Legacy task" });
+    expect(task).toMatchObject({
+      taskType: "other",
+      executor: "human",
+      executionMode: "manual",
+      triggerType: "manual",
+      triggerConfig: null,
+      triggerTimezone: "UTC",
+      riskLevel: "medium",
+      maxAttempts: 1,
+      nextRunAt: null,
+      lastScheduledAt: null,
+      automationPaused: false
+    });
   });
 });
 

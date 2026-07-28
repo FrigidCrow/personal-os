@@ -10,6 +10,22 @@
 - Preserved the independent OpenWorker installation and loopback-only port baseline in `docs/AUTOMATION-PLAN.md`; installation alone is not treated as integration evidence.
 - Kept every MVP2 acceptance row Pending until Work and Review produce direct evidence.
 
+### Work - Phase A: common run model
+
+- Extended Task with typed task kind, executor, execution mode, trigger configuration and timezone, risk, retry count, scheduling timestamps, and pause state while preserving manual/human defaults for MVP1 records.
+- Added the generic AgentRun, typed event, approval request, and run-state transition contracts in the domain package. A running agent cannot transition directly to Done.
+- Added additive SQLite migration logic for existing task tables and created `agent_runs`, `agent_run_events`, and `approval_requests` without deleting the legacy Codex tables.
+- Migrated legacy Codex runs and events into the generic tables with preserved ids, thread ids, result data, timestamps, and a deterministic legacy idempotency key.
+- Changed the Codex database compatibility methods to read and write the generic tables. The old `/api/codex/runs` surface remains compatible, while new runs no longer write `codex_runs`.
+- Added immediate transactions that reject duplicate idempotency keys and a second active run for the same task.
+- Added migration, compatibility, duplicate-run, approval-audit, default-value, and illegal-transition tests.
+
+Phase A verification:
+
+- Full automated gates passed with 5 test files / 31 tests.
+- A SQLite backup of the current development database migrated with 4 tasks, 2 legacy Codex runs, and 2 matching generic runs; `PRAGMA integrity_check` returned `ok` and `foreign_key_check` returned no rows.
+- TypeScript, ESLint, all production builds, and `git diff --check` passed.
+
 ## 2026-07-28 - Plan
 
 - Cloned the empty remote repository into `/Users/frigidcrow/Documents/Codex/dev/personal-os`.

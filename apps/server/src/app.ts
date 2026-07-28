@@ -54,7 +54,18 @@ function taskToInput(task: ReturnType<PersonalOsDatabase["getTask"]>): TaskInput
     delegationMode: task.delegationMode,
     priority: task.priority,
     dueDate: task.dueDate,
-    acceptanceCriteria: task.acceptanceCriteria
+    acceptanceCriteria: task.acceptanceCriteria,
+    taskType: task.taskType,
+    executor: task.executor,
+    executionMode: task.executionMode,
+    triggerType: task.triggerType,
+    triggerConfig: task.triggerConfig,
+    triggerTimezone: task.triggerTimezone,
+    riskLevel: task.riskLevel,
+    maxAttempts: task.maxAttempts,
+    nextRunAt: task.nextRunAt,
+    lastScheduledAt: task.lastScheduledAt,
+    automationPaused: task.automationPaused
   };
 }
 
