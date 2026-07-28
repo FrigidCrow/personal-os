@@ -185,7 +185,7 @@ npm run lint
 npm run build
 ```
 
-验收标准见 `docs/MVP1-ACCEPTANCE.md`，完整执行计划见 `docs/PLAN.md`，实现记录见 `WORKLOG.md`，最终审查结论见 `REVIEW.md`。
+MVP1 验收标准见 `docs/MVP1-ACCEPTANCE.md`，历史执行计划见 `docs/PLAN.md`，下一阶段的 Codex / OpenWorker 自动调度方案见 `docs/AUTOMATION-PLAN.md`，实现记录见 `WORKLOG.md`，最终审查结论见 `REVIEW.md`。
 
 ## MVP1 安全边界
 

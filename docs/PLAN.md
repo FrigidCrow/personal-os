@@ -271,3 +271,6 @@ MVP1 is done only when:
 7. Remaining limitations are explicit and do not contradict an acceptance requirement.
 8. The implementation is committed to Git.
 
+## 11. Next phase
+
+MVP1 已完成并保留为历史执行基线。下一阶段的自动多执行器方案见 [`AUTOMATION-PLAN.md`](./AUTOMATION-PLAN.md)，覆盖 Personal OS 自动调度 Codex 与 OpenWorker、通用 Agent Run、任务租约、审批 Inbox 和可靠恢复。
