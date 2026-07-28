@@ -24,6 +24,24 @@ npm run dev
 
 ## 3. 构建与登录自启
 
+### 桌面一键启动
+
+双击桌面的 `启动 Personal OS.command` 会执行版本库中的 `scripts/start-personal-os.command`。桌面入口的可恢复副本保存在 `desktop/启动 Personal OS.command`：
+
+1. 检查 Personal OS 与 OpenWorker 的安装路径和依赖。
+2. 构建并启动 Personal OS API `8787` 与 Web `5273` 的 LaunchAgents。
+3. 在尚未运行时启动 OpenWorker Server `8765` 与 Web `5274`。
+4. 等待四个服务通过健康检查，然后打开两个 Web 页面。
+
+启动器只绑定 `127.0.0.1`，日志分别保存在 Personal OS 和 OpenWorker 仓库的 `logs/`。可以在不启动服务的情况下验证桌面入口和依赖：
+
+```bash
+zsh -n scripts/start-personal-os.command
+scripts/start-personal-os.command --check
+```
+
+### 手动构建与 LaunchAgent
+
 先构建，再预览即将写入的启动项：
 
 ```bash
