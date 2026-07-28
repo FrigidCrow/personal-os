@@ -13,6 +13,8 @@ import {
   incomeAssetInputSchema,
   opportunityInputSchema,
   projectInputSchema,
+  radarScheduleInputSchema,
+  radarScheduleStatusSchema,
   taskInputSchema,
   type AgentExecutor,
   type AgentRun,
@@ -34,6 +36,8 @@ import {
   type OpportunityInput,
   type Project,
   type ProjectInput,
+  type RadarSchedule,
+  type RadarScheduleInput,
   type Task,
   type TaskCreateInput,
   type TaskInput,
@@ -104,6 +108,22 @@ function mapTask(row: Row): Task {
     nextRunAt: nullableString(row.next_run_at),
     lastScheduledAt: nullableString(row.last_scheduled_at),
     automationPaused: booleanFromDb(row.automation_paused),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function mapRadarSchedule(row: Row): RadarSchedule {
+  return {
+    enabled: booleanFromDb(row.enabled),
+    expression: String(row.expression),
+    timezone: String(row.timezone),
+    catchUp: booleanFromDb(row.catch_up),
+    nextRunAt: nullableString(row.next_run_at),
+    lastStartedAt: nullableString(row.last_started_at),
+    lastCompletedAt: nullableString(row.last_completed_at),
+    lastStatus: row.last_status as RadarSchedule["lastStatus"],
+    lastError: nullableString(row.last_error),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -383,6 +403,29 @@ export class PersonalOsDatabase {
         generated_by TEXT NOT NULL,
         is_demo INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS radar_schedule (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        enabled INTEGER NOT NULL DEFAULT 1,
+        expression TEXT NOT NULL DEFAULT '0 8 * * *',
+        timezone TEXT NOT NULL DEFAULT 'Asia/Tokyo',
+        catch_up INTEGER NOT NULL DEFAULT 1,
+        next_run_at TEXT,
+        last_started_at TEXT,
+        last_completed_at TEXT,
+        last_status TEXT NOT NULL DEFAULT 'idle',
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT OR IGNORE INTO radar_schedule (
+        id, enabled, expression, timezone, catch_up, last_status, created_at, updated_at
+      ) VALUES (
+        1, 1, '0 8 * * *', 'Asia/Tokyo', 1, 'idle',
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       );
 
       CREATE TABLE IF NOT EXISTS daily_report_opportunities (
@@ -966,6 +1009,52 @@ export class PersonalOsDatabase {
   getReportByDate(reportDate: string): DailyReport | null {
     const row = this.connection.prepare("SELECT * FROM daily_reports WHERE report_date = ?").get(reportDate) as Row | undefined;
     return row ? this.hydrateDailyReport(row) : null;
+  }
+
+  getRadarSchedule(): RadarSchedule {
+    const row = this.connection.prepare("SELECT * FROM radar_schedule WHERE id = 1").get() as Row | undefined;
+    if (!row) throw new Error("Radar schedule is not initialized.");
+    return mapRadarSchedule(row);
+  }
+
+  configureRadarSchedule(raw: RadarScheduleInput, nextRunAt: string | null): RadarSchedule {
+    const input = radarScheduleInputSchema.parse(raw);
+    this.connection.prepare(`
+      UPDATE radar_schedule SET
+        enabled = ?, expression = ?, timezone = ?, catch_up = ?, next_run_at = ?,
+        last_status = 'idle', last_error = NULL, updated_at = ?
+      WHERE id = 1
+    `).run(
+      input.enabled ? 1 : 0,
+      input.expression,
+      input.timezone,
+      input.catchUp ? 1 : 0,
+      nextRunAt,
+      this.timestamp()
+    );
+    return this.getRadarSchedule();
+  }
+
+  updateRadarScheduleRuntime(patch: Partial<Pick<RadarSchedule,
+    "nextRunAt" | "lastStartedAt" | "lastCompletedAt" | "lastStatus" | "lastError"
+  >>): RadarSchedule {
+    const current = this.getRadarSchedule();
+    const lastStatus = patch.lastStatus ?? current.lastStatus;
+    radarScheduleStatusSchema.parse(lastStatus);
+    this.connection.prepare(`
+      UPDATE radar_schedule SET
+        next_run_at = ?, last_started_at = ?, last_completed_at = ?,
+        last_status = ?, last_error = ?, updated_at = ?
+      WHERE id = 1
+    `).run(
+      patch.nextRunAt !== undefined ? patch.nextRunAt : current.nextRunAt,
+      patch.lastStartedAt !== undefined ? patch.lastStartedAt : current.lastStartedAt,
+      patch.lastCompletedAt !== undefined ? patch.lastCompletedAt : current.lastCompletedAt,
+      lastStatus,
+      patch.lastError !== undefined ? patch.lastError : current.lastError,
+      this.timestamp()
+    );
+    return this.getRadarSchedule();
   }
 
   createAgentRun(input: {

@@ -141,8 +141,6 @@ wait_for_url "$openworker_health_url" "OpenWorker Server · 127.0.0.1:8765"
 cd "$personal_os_root"
 
 CODEX_MODE=live \
-  DAILY_RADAR_ENABLED=true \
-  DAILY_RADAR_CRON="0 8 * * *" \
   PERSONAL_OS_TIMEZONE="Asia/Tokyo" \
   INCLUDE_OPENWORKER=true \
   INCLUDE_OPENWORKER_SERVER=false \

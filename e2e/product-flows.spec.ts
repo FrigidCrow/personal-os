@@ -41,9 +41,21 @@ test("shell, dashboard, themes, mobile navigation and accessibility states", asy
     await page.locator(`.desktop-sidebar a[href="${href}"]`).click();
     await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
     if (href === "/radar") {
-      await expect(page.getByText("每日自动调研未开启", { exact: true })).toBeVisible();
+      await expect(page.getByText("每日自动调研已开启", { exact: true })).toBeVisible();
       await expect(page.getByRole("heading", { name: "每日机会报告", exact: true })).toBeVisible();
       await expect(page.getByText("0 份", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "定时设置", exact: true }).click();
+      const scheduleDialog = page.getByRole("dialog", { name: "机会雷达自动调研" });
+      await expect(scheduleDialog.getByLabel("每天执行时间", { exact: true })).toHaveValue("08:00");
+      await scheduleDialog.getByLabel("每天执行时间", { exact: true }).fill("09:15");
+      await tracedMutation(
+        page,
+        testInfo,
+        "radar-schedule-update",
+        (response) => response.url().endsWith("/api/reports/schedule") && response.request().method() === "PATCH",
+        () => scheduleDialog.getByRole("button", { name: "保存定时设置", exact: true }).click()
+      );
+      await expect(page.getByRole("heading", { name: "每天 09:15 自动寻找低成本机会", exact: true })).toBeVisible();
     }
   }
 

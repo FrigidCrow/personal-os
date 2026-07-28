@@ -191,6 +191,30 @@ describe("PersonalOsDatabase", () => {
     expect(database.listDailyReports().map((report) => report.id)).toEqual([newer.id, database.getReportByDate("2026-07-28")!.id]);
     expect(database.listDailyReports(1)).toHaveLength(1);
   });
+
+  it("persists the default editable radar schedule", () => {
+    expect(database.getRadarSchedule()).toEqual(expect.objectContaining({
+      enabled: true,
+      expression: "0 8 * * *",
+      timezone: "Asia/Tokyo",
+      catchUp: true,
+      nextRunAt: null,
+      lastStatus: "idle"
+    }));
+
+    const updated = database.configureRadarSchedule({
+      enabled: true,
+      expression: "45 7 * * *",
+      timezone: "Asia/Shanghai",
+      catchUp: false
+    }, "2026-07-29T23:45:00.000Z");
+    expect(updated).toEqual(expect.objectContaining({
+      expression: "45 7 * * *",
+      timezone: "Asia/Shanghai",
+      catchUp: false,
+      nextRunAt: "2026-07-29T23:45:00.000Z"
+    }));
+  });
 });
 
 describe("MVP1 database migration", () => {

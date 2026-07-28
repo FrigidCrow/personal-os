@@ -63,6 +63,7 @@ export const approvalActionTypeSchema = z.enum([
 ]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "rejected", "expired"]);
 export const generatedBySchema = z.enum(["demo", "codex", "manual"]);
+export const radarScheduleStatusSchema = z.enum(["idle", "running", "succeeded", "failed", "skipped"]);
 
 const optionalText = z.string().trim().max(2000).nullable().optional();
 const optionalDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional();
@@ -192,6 +193,13 @@ export const dailyReportInputSchema = z.object({
   isDemo: z.boolean().default(false)
 });
 
+export const radarScheduleInputSchema = z.object({
+  enabled: z.boolean().default(true),
+  expression: z.string().trim().min(1).max(120).default("0 8 * * *"),
+  timezone: z.string().trim().min(1).max(100).default("Asia/Tokyo"),
+  catchUp: z.boolean().default(true)
+});
+
 export type ProjectLane = z.infer<typeof projectLaneSchema>;
 export type ProjectStatus = z.infer<typeof projectStatusSchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
@@ -218,6 +226,8 @@ export type OpportunityInput = z.infer<typeof opportunityInputSchema>;
 export type ExperimentInput = z.infer<typeof experimentInputSchema>;
 export type IncomeAssetInput = z.infer<typeof incomeAssetInputSchema>;
 export type DailyReportInput = z.infer<typeof dailyReportInputSchema>;
+export type RadarScheduleInput = z.infer<typeof radarScheduleInputSchema>;
+export type RadarScheduleStatus = z.infer<typeof radarScheduleStatusSchema>;
 
 export interface Project extends ProjectInput {
   id: string;
@@ -260,6 +270,16 @@ export interface DailyReport extends DailyReportInput {
   id: string;
   opportunities: Opportunity[];
   createdAt: string;
+}
+
+export interface RadarSchedule extends RadarScheduleInput {
+  nextRunAt: string | null;
+  lastStartedAt: string | null;
+  lastCompletedAt: string | null;
+  lastStatus: RadarScheduleStatus;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CodexRun {

@@ -159,20 +159,11 @@ CODEX_MODE=live
 
 ## 每日机会报告
 
-Web 的“机会雷达”页可以手动生成报告。默认是演示模式，报告和机会均有显式演示标记。
-
-开启每日定时任务：
-
-```dotenv
-DAILY_RADAR_ENABLED=true
-DAILY_RADAR_CRON=0 8 * * *
-PERSONAL_OS_TIMEZONE=Asia/Tokyo
-CODEX_MODE=live
-```
+Web 的“机会雷达”页可以手动生成报告，也提供可持久化的每日定时设置。新数据库默认开启每天 `08:00`、`Asia/Tokyo`，并允许在页面中修改时间、时区、暂停状态和错过后补跑策略。设置保存在 SQLite，修改后不需要重启服务。
 
 `CODEX_MODE=live` 时，雷达会用 Codex SDK 和实时 Web 搜索生成最多五个机会，并要求每条事实包含直接来源。它只保存研究结果，不会自动做外联、购买或发布。
 
-定时器运行在本地 Server 进程内，因此每日自动报告要求开发 Server 或生产 LaunchAgent 持续运行。机会雷达不补跑电脑休眠期间错过的周期；任务型 Cron 可单独启用一次性 catch-up。
+定时器运行在本地 Server 进程内，因此每日自动报告要求开发 Server 或生产 LaunchAgent 持续运行。默认启用一次性 catch-up，电脑或服务恢复后只补最近一次，不连续补跑多天。
 
 ## 数据与备份
 

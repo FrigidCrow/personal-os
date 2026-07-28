@@ -51,9 +51,7 @@ const services = [
       PORT: "8787",
       DATABASE_PATH: join(projectRoot, "data", "personal-os.db"),
       CODEX_MODE: process.env.CODEX_MODE === "live" ? "live" : "demo",
-      PERSONAL_OS_TIMEZONE: process.env.PERSONAL_OS_TIMEZONE ?? "Asia/Tokyo",
-      DAILY_RADAR_ENABLED: process.env.DAILY_RADAR_ENABLED === "true" ? "true" : "false",
-      DAILY_RADAR_CRON: process.env.DAILY_RADAR_CRON ?? "0 8 * * *"
+      PERSONAL_OS_TIMEZONE: process.env.PERSONAL_OS_TIMEZONE ?? "Asia/Tokyo"
     }
   },
   {

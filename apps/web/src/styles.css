@@ -432,10 +432,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .radar-schedule-panel { display: grid; grid-template-columns: minmax(280px, 1.15fr) minmax(420px, 1fr); gap: 26px; align-items: stretch; padding: 24px; border: 1px solid var(--line); border-left: 3px solid var(--ink-faint); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-soft); }
 .radar-schedule-panel[data-enabled="true"] { border-left-color: var(--success); }
 .radar-schedule-lead { display: flex; flex-direction: column; justify-content: center; padding: 4px 8px; }
-.radar-schedule-lead > span { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 9px; letter-spacing: 0.04em; }
-.radar-schedule-panel[data-enabled="true"] .radar-schedule-lead > span { color: var(--success); }
+.radar-schedule-statusline { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.radar-schedule-statusline > span { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 9px; letter-spacing: 0.04em; }
+.radar-schedule-panel[data-enabled="true"] .radar-schedule-statusline > span { color: var(--success); }
+.radar-settings-button { min-height: 34px; padding: 7px 10px; font-size: 9px; white-space: nowrap; }
 .radar-schedule-lead h2 { margin: 12px 0 0; font-size: clamp(19px, 2vw, 27px); font-weight: 590; letter-spacing: -0.035em; }
 .radar-schedule-lead p { max-width: 64ch; margin: 8px 0 0; color: var(--ink-soft); font-size: 10.5px; line-height: 1.6; }
+.radar-schedule-lead .radar-schedule-error { padding: 9px 10px; border-left: 2px solid var(--danger); color: var(--danger); background: var(--danger-soft); }
 .radar-schedule-facts { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-strong); }
 .radar-schedule-facts > div { min-width: 0; padding: 15px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .radar-schedule-facts > div:nth-child(even) { border-right: 0; }
@@ -456,6 +459,19 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .report-history-list span { color: var(--ink-soft); font-size: 9.5px; }
 .report-history-list small { color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 8px; }
 .report-history-empty { margin: 0; padding: 21px 22px; color: var(--ink-faint); font-size: 10px; }
+
+.radar-settings-dialog { max-height: min(88vh, 760px); overflow-y: auto; }
+.radar-settings-kicker { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-bottom: 15px; color: var(--accent); }
+.radar-settings-kicker span { font-family: "Geist Mono Variable", monospace; font-size: 8.5px; letter-spacing: 0.05em; }
+.radar-settings-kicker small { color: var(--ink-faint); font-size: 8.5px; }
+.radar-setting-toggle { display: grid !important; grid-template-columns: auto minmax(0, 1fr); gap: 11px !important; align-items: start; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-strong); cursor: pointer; }
+.radar-setting-toggle > span { display: flex; flex-direction: column; gap: 4px; }
+.radar-setting-toggle strong { color: var(--ink); font-size: 10.5px; }
+.radar-setting-toggle small { color: var(--ink-faint); font-size: 9px; line-height: 1.45; }
+.radar-setting-preview { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; padding: 14px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 13px; color: var(--accent); background: var(--accent-faint); }
+.radar-setting-preview div { display: flex; flex-direction: column; gap: 4px; }
+.radar-setting-preview span { color: var(--ink-faint); font-size: 8.5px; }
+.radar-setting-preview strong { color: var(--ink); font-family: "Geist Mono Variable", monospace; font-size: 10px; }
 
 .opportunity-list { display: flex; flex-direction: column; gap: 18px; }
 .opportunity-panel { padding: 26px; }
@@ -850,6 +866,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
   .radar-actions { width: 100%; flex-wrap: wrap; }
   .radar-schedule-panel { padding: 18px; }
   .radar-schedule-lead { padding: 0; }
+  .radar-schedule-statusline { align-items: flex-start; flex-direction: column; }
   .radar-schedule-facts { grid-template-columns: 1fr; }
   .radar-schedule-facts > div, .radar-schedule-facts > div:nth-child(even), .radar-schedule-facts > div:nth-last-child(-n+2) { border-right: 0; border-bottom: 1px solid var(--line); }
   .radar-schedule-facts > div:last-child { border-bottom: 0; }

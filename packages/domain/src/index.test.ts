@@ -7,6 +7,7 @@ import {
   canTransitionTask,
   dailyReportInputSchema,
   opportunityInputSchema,
+  radarScheduleInputSchema,
   taskInputSchema
 } from "./index.js";
 
@@ -56,6 +57,17 @@ describe("task automation defaults", () => {
       nextRunAt: null,
       lastScheduledAt: null,
       automationPaused: false
+    });
+  });
+});
+
+describe("radar schedule defaults", () => {
+  it("starts enabled every day at 08:00 in Tokyo", () => {
+    expect(radarScheduleInputSchema.parse({})).toEqual({
+      enabled: true,
+      expression: "0 8 * * *",
+      timezone: "Asia/Tokyo",
+      catchUp: true
     });
   });
 });

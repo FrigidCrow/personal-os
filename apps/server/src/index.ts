@@ -16,7 +16,7 @@ const database = createDatabase(process.env.DATABASE_PATH ?? defaultDatabasePath
 const radar = new RadarService(database);
 const codex = new CodexOrchestrator(database);
 const dispatcher = new AgentDispatcher(database, codex);
-const stopScheduler = startDailyRadarScheduler(radar);
+const stopScheduler = startDailyRadarScheduler(radar, database);
 const stopDispatcher = startAgentDispatcher(dispatcher);
 const app = createApp({ database, radar, codex, dispatcher });
 
@@ -25,7 +25,7 @@ const server = serve({ fetch: app.fetch, port, hostname }, (info) => {
 });
 
 function shutdown(): void {
-  stopScheduler?.();
+  stopScheduler();
   stopDispatcher();
   server.close(() => {
     database.close();

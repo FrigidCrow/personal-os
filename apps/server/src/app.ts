@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { CronExpressionParser } from "cron-parser";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
@@ -13,6 +12,7 @@ import {
   opportunityInputSchema,
   projectInputSchema,
   projectPatchSchema,
+  radarScheduleInputSchema,
   taskInputSchema,
   taskPatchSchema,
   taskStatusSchema,
@@ -24,6 +24,7 @@ import type { PersonalOsDatabase } from "@personal-os/database";
 import { CodexOrchestrator } from "./codex.js";
 import { AgentDispatcher } from "./dispatcher.js";
 import { RadarService } from "./radar.js";
+import { nextRadarOccurrence, validateRadarSchedule } from "./scheduler.js";
 import { validateTaskAutomation } from "./task-automation.js";
 
 export interface AppDependencies {
@@ -106,6 +107,7 @@ export function createApp(dependencies: AppDependencies): Hono {
     if (
       error.message.includes("trigger requires") ||
       error.message.startsWith("Invalid cron trigger") ||
+      error.message.startsWith("Invalid radar schedule") ||
       error.message.startsWith("Dependency task")
     ) {
       return context.json({ error: "VALIDATION_ERROR", message: error.message }, 400);
@@ -299,25 +301,25 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json({ items: database.listDailyReports(limit) });
   });
   app.get("/api/reports/schedule", (context) => {
-    const enabled = process.env.DAILY_RADAR_ENABLED === "true";
-    const expression = process.env.DAILY_RADAR_CRON ?? "0 8 * * *";
-    const timezone = process.env.PERSONAL_OS_TIMEZONE ?? "Asia/Tokyo";
+    const schedule = database.getRadarSchedule();
     const latestReport = database.getLatestDailyReport();
-    let nextRunAt: string | null = null;
-    if (enabled) {
-      try {
-        nextRunAt = CronExpressionParser.parse(expression, { currentDate: new Date(), tz: timezone }).next().toDate().toISOString();
-      } catch {
-        nextRunAt = null;
-      }
-    }
     return context.json({
-      enabled,
-      expression,
-      timezone,
+      ...schedule,
       mode: process.env.CODEX_MODE === "live" ? "live" : "demo",
-      nextRunAt,
-      lastRunAt: latestReport?.createdAt ?? null,
+      lastRunAt: schedule.lastCompletedAt ?? latestReport?.createdAt ?? null,
+      lastReportDate: latestReport?.reportDate ?? null
+    });
+  });
+  app.patch("/api/reports/schedule", async (context) => {
+    const input = radarScheduleInputSchema.parse(await context.req.json());
+    validateRadarSchedule(input);
+    const nextRunAt = input.enabled ? nextRadarOccurrence(input).toISOString() : null;
+    const schedule = database.configureRadarSchedule(input, nextRunAt);
+    const latestReport = database.getLatestDailyReport();
+    return context.json({
+      ...schedule,
+      mode: process.env.CODEX_MODE === "live" ? "live" : "demo",
+      lastRunAt: schedule.lastCompletedAt ?? latestReport?.createdAt ?? null,
       lastReportDate: latestReport?.reportDate ?? null
     });
   });
