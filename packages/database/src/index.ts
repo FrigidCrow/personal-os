@@ -1272,6 +1272,85 @@ export class PersonalOsDatabase {
     return row ? mapApprovalRequest(row) : null;
   }
 
+  resolveApprovalRequest(id: string, decision: "approved" | "rejected"): ApprovalRequest {
+    const approval = this.requireApprovalRequest(id);
+    if (approval.status !== "pending") throw new Error(`Approval is already resolved: ${approval.status}`);
+    const run = this.requireAgentRun(approval.runId);
+    if (run.status !== "awaiting_approval") throw new Error(`Run is not awaiting approval: ${run.status}`);
+    const timestamp = this.timestamp();
+    const leaseExpiresAt = new Date(this.clock().getTime() + 120_000).toISOString();
+    const resolve = this.connection.transaction(() => {
+      this.connection.prepare("UPDATE approval_requests SET status = ?, resolved_at = ? WHERE id = ?")
+        .run(decision, timestamp, id);
+      this.connection.prepare(`
+        UPDATE agent_runs SET status = 'running', heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(timestamp, leaseExpiresAt, timestamp, run.id);
+      this.insertAgentRunEvent(run.id, "approval_resolved", `Human reviewer ${decision} ${approval.actionType} for ${approval.destination}.`, timestamp);
+    });
+    resolve.immediate();
+    return this.requireApprovalRequest(id);
+  }
+
+  expireApprovalRequests(asOf = this.timestamp()): ApprovalRequest[] {
+    const pending = (this.connection.prepare(`
+      SELECT * FROM approval_requests
+      WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?
+      ORDER BY expires_at
+    `).all(asOf) as Row[]).map(mapApprovalRequest);
+    return pending.map((approval) => {
+      const run = this.requireAgentRun(approval.runId);
+      const leaseExpiresAt = new Date(new Date(asOf).getTime() + 120_000).toISOString();
+      const expire = this.connection.transaction(() => {
+        this.connection.prepare("UPDATE approval_requests SET status = 'expired', resolved_at = ? WHERE id = ?")
+          .run(asOf, approval.id);
+        if (run.status === "awaiting_approval") {
+          this.connection.prepare(`
+            UPDATE agent_runs SET status = 'running', heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+            WHERE id = ?
+          `).run(asOf, leaseExpiresAt, asOf, run.id);
+        }
+        this.insertAgentRunEvent(run.id, "approval_resolved", `Approval expired and defaulted to rejection for ${approval.actionType}.`, asOf);
+      });
+      expire.immediate();
+      return this.requireApprovalRequest(approval.id);
+    });
+  }
+
+  acceptAgentRun(runId: string): AgentRun {
+    const run = this.requireAgentRun(runId);
+    if (run.status !== "needs_review") throw new Error(`Run is not ready for review: ${run.status}`);
+    const task = this.requireTask(run.taskId);
+    if (task.status !== "needs_review") throw new Error(`Task is not ready for approval: ${task.status}`);
+    const timestamp = this.timestamp();
+    const accept = this.connection.transaction(() => {
+      this.connection.prepare("UPDATE tasks SET status = 'done', updated_at = ? WHERE id = ?").run(timestamp, task.id);
+      this.connection.prepare(`
+        UPDATE agent_runs SET status = 'done', requires_human_review = 0,
+          completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE id = ?
+      `).run(timestamp, timestamp, run.id);
+      this.insertAgentRunEvent(run.id, "approval_resolved", "Human reviewer accepted the final result.", timestamp);
+    });
+    accept.immediate();
+    return this.requireAgentRun(runId);
+  }
+
+  rejectAgentRun(runId: string, reason: string): AgentRun {
+    const run = this.requireAgentRun(runId);
+    if (run.status !== "needs_review") throw new Error(`Run is not ready for review: ${run.status}`);
+    const task = this.requireTask(run.taskId);
+    if (task.status !== "needs_review") throw new Error(`Task is not ready for rejection: ${task.status}`);
+    const timestamp = this.timestamp();
+    const reject = this.connection.transaction(() => {
+      this.connection.prepare("UPDATE tasks SET status = 'blocked', updated_at = ? WHERE id = ?").run(timestamp, task.id);
+      this.connection.prepare("UPDATE agent_runs SET status = 'blocked', error_message = ?, updated_at = ? WHERE id = ?")
+        .run(reason, timestamp, run.id);
+      this.insertAgentRunEvent(run.id, "failed", `Human reviewer rejected the result: ${reason}`, timestamp);
+    });
+    reject.immediate();
+    return this.requireAgentRun(runId);
+  }
+
   createCodexRun(input: {
     taskId: string;
     projectId?: string | null;

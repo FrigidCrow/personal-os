@@ -37,7 +37,7 @@ const navItems: NavItem[] = [
   { to: "/radar", label: "机会雷达", description: "证据与最小测试", icon: Crosshair },
   { to: "/experiments", label: "实验室", description: "验证成功或及时停止", icon: Flask },
   { to: "/assets", label: "收入资产", description: "低维护收入漏斗", icon: Cube },
-  { to: "/review", label: "Codex 审查", description: "运行结果与人工验收", icon: Robot }
+  { to: "/review", label: "Agent 控制", description: "运行、审批与人工验收", icon: Robot }
 ];
 
 const titles: Record<string, { title: string; subtitle: string }> = {
@@ -47,7 +47,7 @@ const titles: Record<string, { title: string; subtitle: string }> = {
   "/radar": { title: "机会雷达", subtitle: "只保留有证据、可低成本验证的赚钱假设。" },
   "/experiments": { title: "微型实验室", subtitle: "限制投入，尽快获得真实市场反馈。" },
   "/assets": { title: "收入资产", subtitle: "同时衡量收入、复用程度和每月维护时间。" },
-  "/review": { title: "Codex 审查队列", subtitle: "机器负责执行，人负责批准结果。" }
+  "/review": { title: "Agent 控制面", subtitle: "查看自动执行，批准高风险动作，验收最终结果。" }
 };
 
 function resolveSystemTheme(): "light" | "dark" {

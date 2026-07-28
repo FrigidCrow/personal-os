@@ -62,6 +62,23 @@ Phase C verification so far:
 - Full gates passed with 6 test files / 43 tests, TypeScript, ESLint, production builds, and patch hygiene.
 - The required real OpenWorker model run remains Pending until a model is configured in OpenWorker Settings; the paused automation can then be enabled and run without code changes.
 
+### Work - Phase D: Web control and human approval
+
+- Added human-only HTTP operations to list, inspect, approve, reject, and expire consequential action requests. Approval resolution returns the worker to Running with a renewed lease; expiry defaults to rejection.
+- Added generic Agent Run SSE, final acceptance, final rejection with a persisted reason, and compatibility delegation from the legacy Codex acceptance route.
+- Added database transactions that keep Task and AgentRun final states synchronized. Agents still have no MCP method that can approve an action or mark a result Done.
+- Added task automation controls to the create and edit surfaces: task type, explicit or automatic executor, manual or automatic execution, trigger, cron/timezone, risk, maximum attempts, and next-run time.
+- Extended the task board with route, automation, risk, and latest-run context plus dispatch, pause, resume, cancel, retry, and review controls.
+- Replaced the Codex-only review surface with a unified Agent control plane for Codex and OpenWorker. It includes filters, live events, session and attempt metadata, artifacts, failures, final accept/reject, and an Approval Inbox with destination, action, preview, and explicit decisions.
+- Preserved the graphite and signal-orange visual system, Radix Themes, Phosphor icons, responsive behavior, reduced-motion behavior, and the existing `/review` route while changing its information architecture from a Codex list to a human decision surface.
+
+Phase D verification so far:
+
+- Database tests cover approval resolution, duplicate-resolution rejection, expiration-as-rejection, lease renewal, final acceptance, and final rejection.
+- API tests cover approval list/resolve, duplicate resolution, generic Agent Run SSE, final acceptance, final rejection, and SQLite state assertions.
+- Full automated gates passed with 6 test files / 48 tests, TypeScript, ESLint, production builds, and patch hygiene.
+- Rendered desktop, mobile, keyboard, and complete request/response/SQLite E2E evidence remains scheduled for the dedicated Review stage.
+
 ## 2026-07-28 - Plan
 
 - Cloned the empty remote repository into `/Users/frigidcrow/Documents/Codex/dev/personal-os`.

@@ -90,6 +90,56 @@ describe("PersonalOsDatabase", () => {
     expect(database.listAgentRunEvents(run.id).at(-1)?.eventType).toBe("approval_requested");
   });
 
+  it("resolves consequential approvals before accepting or rejecting final results", () => {
+    const approvedTask = database.createTask({
+      title: "Approval lifecycle",
+      status: "ready",
+      executor: "openworker",
+      riskLevel: "low",
+      acceptanceCriteria: ["Human approval is recorded"]
+    });
+    const approvedRun = database.createAgentRun({
+      taskId: approvedTask.id,
+      executor: "openworker",
+      promptSnapshot: "Prepare a draft, then request approval.",
+      idempotencyKey: "approval:lifecycle:1"
+    });
+    database.claimAgentRun(approvedRun.id);
+    database.updateAgentRun(approvedRun.id, { status: "running" });
+    const approval = database.createApprovalRequest({
+      runId: approvedRun.id,
+      actionType: "external_write",
+      destination: "local-test-target",
+      summary: "Write the approved test result"
+    });
+
+    expect(database.resolveApprovalRequest(approval.id, "approved").status).toBe("approved");
+    expect(database.getAgentRun(approvedRun.id)).toEqual(expect.objectContaining({ status: "running" }));
+    expect(() => database.resolveApprovalRequest(approval.id, "approved")).toThrow("already resolved");
+
+    database.submitAgentRunResult(approvedRun.id, {
+      finalResponse: "The approved result is ready.",
+      verificationSummary: "Approval and local result persistence verified."
+    });
+    expect(database.acceptAgentRun(approvedRun.id).status).toBe("done");
+    expect(database.getTask(approvedTask.id)?.status).toBe("done");
+
+    const rejectedTask = database.createTask({ title: "Reject result", status: "ready", executor: "openworker" });
+    const rejectedRun = database.createAgentRun({
+      taskId: rejectedTask.id,
+      executor: "openworker",
+      promptSnapshot: "Produce an unacceptable result.",
+      idempotencyKey: "approval:lifecycle:2"
+    });
+    database.claimAgentRun(rejectedRun.id);
+    database.submitAgentRunResult(rejectedRun.id, {
+      finalResponse: "Incomplete result.",
+      verificationSummary: "Acceptance criteria were not met."
+    });
+    expect(database.rejectAgentRun(rejectedRun.id, "Missing required evidence.").status).toBe("blocked");
+    expect(database.getTask(rejectedTask.id)?.status).toBe("blocked");
+  });
+
   it("updates and deletes projects without deleting their tasks", () => {
     const project = database.listProjects()[0]!;
     const task = database.listTasks({ projectId: project.id })[0]!;
@@ -254,6 +304,38 @@ describe("agent run leases and retry limits", () => {
       const failed = database.recordAgentRunFailure(run.id, "Worker stopped.");
       expect(failed.nextRetryAt).toBeNull();
       expect(database.getTask(task.id)?.status).toBe("blocked");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("expires a pending approval as a rejection and renews the worker lease", () => {
+    let currentTime = new Date("2026-07-28T00:00:00.000Z");
+    const database = new PersonalOsDatabase({ filePath: ":memory:", seed: false, clock: () => currentTime });
+    try {
+      const task = database.createTask({ title: "Expire approval", status: "ready", executor: "openworker" });
+      const run = database.createAgentRun({
+        taskId: task.id,
+        executor: "openworker",
+        promptSnapshot: "Request a time-limited approval.",
+        idempotencyKey: "approval:expiry:1"
+      });
+      database.claimAgentRun(run.id);
+      database.updateAgentRun(run.id, { status: "running" });
+      const approval = database.createApprovalRequest({
+        runId: run.id,
+        actionType: "send_message",
+        destination: "test-recipient",
+        summary: "Send a local test message",
+        expiresAt: "2026-07-28T00:01:00.000Z"
+      });
+
+      currentTime = new Date("2026-07-28T00:01:00.000Z");
+      expect(database.expireApprovalRequests()).toEqual([expect.objectContaining({ id: approval.id, status: "expired" })]);
+      expect(database.getAgentRun(run.id)).toEqual(expect.objectContaining({
+        status: "running",
+        leaseExpiresAt: "2026-07-28T00:03:00.000Z"
+      }));
     } finally {
       database.close();
     }

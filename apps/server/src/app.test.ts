@@ -305,4 +305,90 @@ describe("Personal OS API", () => {
     expect(second.id).not.toBe(first.id);
     expect(database.listAgentRuns().filter((run) => run.taskId === task.id)).toHaveLength(2);
   });
+
+  it("lists and resolves approval requests through the human-only API", async () => {
+    const task = database.createTask({ title: "Approve a write", status: "ready", executor: "openworker" });
+    const run = database.createAgentRun({
+      taskId: task.id,
+      executor: "openworker",
+      promptSnapshot: "Request approval before writing.",
+      idempotencyKey: "api:approval:1"
+    });
+    database.claimAgentRun(run.id);
+    database.updateAgentRun(run.id, { status: "running" });
+    const approval = database.createApprovalRequest({
+      runId: run.id,
+      actionType: "external_write",
+      destination: "test-destination",
+      summary: "Persist an approved local write"
+    });
+
+    const list = await app.request("/api/approvals?status=pending");
+    expect(list.status).toBe(200);
+    expect((await list.json()).items).toEqual([expect.objectContaining({ id: approval.id, status: "pending" })]);
+
+    const resolve = await app.request(`/api/approvals/${approval.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "rejected" })
+    });
+    expect(resolve.status).toBe(200);
+    expect(await resolve.json()).toEqual(expect.objectContaining({ status: "rejected", resolvedAt: expect.any(String) }));
+    expect(database.getAgentRun(run.id)?.status).toBe("running");
+
+    const duplicate = await app.request(`/api/approvals/${approval.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "approved" })
+    });
+    expect(duplicate.status).toBe(409);
+  });
+
+  it("streams and reviews a generic OpenWorker result", async () => {
+    const task = database.createTask({ title: "Review worker result", status: "ready", executor: "openworker" });
+    const run = database.createAgentRun({
+      taskId: task.id,
+      executor: "openworker",
+      promptSnapshot: "Return a reviewable result.",
+      idempotencyKey: "api:generic-review:1"
+    });
+    database.claimAgentRun(run.id);
+    database.submitAgentRunResult(run.id, {
+      finalResponse: "Reviewable output.",
+      verificationSummary: "The worker stored a complete result."
+    });
+
+    const stream = await app.request(`/api/agent-runs/${run.id}/stream`);
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    expect(await stream.text()).toContain("needs_review");
+
+    const accept = await app.request(`/api/agent-runs/${run.id}/accept`, { method: "POST" });
+    expect(accept.status).toBe(200);
+    expect(await accept.json()).toEqual(expect.objectContaining({ status: "done" }));
+    expect(database.getTask(task.id)?.status).toBe("done");
+  });
+
+  it("rejects a generic result with a persisted reason", async () => {
+    const task = database.createTask({ title: "Reject worker result", status: "ready", executor: "openworker" });
+    const run = database.createAgentRun({
+      taskId: task.id,
+      executor: "openworker",
+      promptSnapshot: "Return an incomplete result.",
+      idempotencyKey: "api:generic-review:2"
+    });
+    database.claimAgentRun(run.id);
+    database.submitAgentRunResult(run.id, {
+      finalResponse: "Incomplete output.",
+      verificationSummary: "A required artifact is missing."
+    });
+
+    const reject = await app.request(`/api/agent-runs/${run.id}/reject`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "Required artifact was not attached." })
+    });
+    expect(reject.status).toBe(200);
+    expect(await reject.json()).toEqual(expect.objectContaining({ status: "blocked", errorMessage: "Required artifact was not attached." }));
+    expect(database.getTask(task.id)?.status).toBe("blocked");
+  });
 });

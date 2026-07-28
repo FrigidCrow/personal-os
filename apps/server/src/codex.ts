@@ -88,17 +88,8 @@ export class CodexOrchestrator {
   accept(runId: string): CodexRun {
     const run = this.database.getCodexRun(runId);
     if (!run) throw new Error(`Codex run not found: ${runId}`);
-    if (run.status !== "needs_review") throw new Error(`Run is not ready for review: ${run.status}`);
-    const task = this.database.getTask(run.taskId);
-    if (!task) throw new Error(`Task not found: ${run.taskId}`);
-    if (task.status !== "needs_review") throw new Error(`Task is not ready for approval: ${task.status}`);
-    this.database.transitionTask(task.id, "done");
-    this.database.appendCodexRunEvent(run.id, "accepted", "Human reviewer approved the result.");
-    return this.database.updateCodexRun(run.id, {
-      status: "done",
-      requiresHumanReview: false,
-      completedAt: run.completedAt ?? new Date().toISOString()
-    });
+    this.database.acceptAgentRun(runId);
+    return this.database.getCodexRun(runId)!;
   }
 
   private async executeDemo(runId: string, task: Task, prompt: string): Promise<void> {

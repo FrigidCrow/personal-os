@@ -119,6 +119,8 @@ export function createApp(dependencies: AppDependencies): Hono {
       error.message.includes("automation is paused") ||
       error.message.includes("Maximum attempts") ||
       error.message.includes("not retryable") ||
+      error.message.includes("already resolved") ||
+      error.message.includes("not awaiting approval") ||
       error.message.includes("cannot be cancelled") ||
       error.message.includes("Active run already exists") ||
       error.message.includes("Duplicate idempotency")
@@ -189,7 +191,7 @@ export function createApp(dependencies: AppDependencies): Hono {
     const taskId = context.req.param("id");
     if (body.status === "done") {
       const pendingRun = database.listAgentRuns().find((run) => run.taskId === taskId && run.status === "needs_review");
-      if (pendingRun) throw new Error("Codex run must be accepted from the review screen.");
+      if (pendingRun) throw new Error("Agent run must be accepted from the review screen.");
     }
     return context.json(database.transitionTask(taskId, body.status));
   });
@@ -292,9 +294,47 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json(run);
   });
   app.get("/api/agent-runs/:id/events", (context) => context.json({ items: database.listAgentRunEvents(context.req.param("id")) }));
+  app.get("/api/agent-runs/:id/stream", (context) => {
+    const runId = context.req.param("id");
+    if (!database.getAgentRun(runId)) return context.json({ error: "NOT_FOUND", message: "Agent run not found." }, 404);
+    return streamSSE(context, async (stream) => {
+      let eventIndex = 0;
+      while (!stream.aborted) {
+        const run = database.getAgentRun(runId);
+        if (!run) break;
+        const events = database.listAgentRunEvents(runId);
+        await stream.writeSSE({
+          id: String(eventIndex++),
+          event: "run",
+          data: JSON.stringify({ run, events })
+        });
+        if (["needs_review", "done", "blocked", "failed", "cancelled"].includes(run.status)) break;
+        await stream.sleep(750);
+      }
+    });
+  });
   app.post("/api/agent-runs/:id/cancel", (context) => context.json(dispatcher.cancel(context.req.param("id"))));
   app.post("/api/agent-runs/:id/retry", (context) => context.json(dispatcher.retry(context.req.param("id")), 202));
+  app.post("/api/agent-runs/:id/accept", (context) => context.json(database.acceptAgentRun(context.req.param("id"))));
+  app.post("/api/agent-runs/:id/reject", async (context) => {
+    const body = z.object({ reason: z.string().trim().min(1).max(1000) }).parse(await context.req.json());
+    return context.json(database.rejectAgentRun(context.req.param("id"), body.reason));
+  });
   app.post("/api/dispatcher/tick", (context) => context.json(dispatcher.tick()));
+
+  app.get("/api/approvals", (context) => {
+    const status = z.enum(["pending", "approved", "rejected", "expired"]).safeParse(context.req.query("status"));
+    return context.json({ items: database.listApprovalRequests(status.success ? status.data : undefined) });
+  });
+  app.get("/api/approvals/:id", (context) => {
+    const approval = database.getApprovalRequest(context.req.param("id"));
+    if (!approval) return context.json({ error: "NOT_FOUND", message: "Approval request not found." }, 404);
+    return context.json(approval);
+  });
+  app.post("/api/approvals/:id/resolve", async (context) => {
+    const body = z.object({ decision: z.enum(["approved", "rejected"]) }).parse(await context.req.json());
+    return context.json(database.resolveApprovalRequest(context.req.param("id"), body.decision));
+  });
 
   app.get("/api/codex/runs", (context) => context.json({ items: database.listCodexRuns() }));
   app.get("/api/codex/runs/:id", (context) => {

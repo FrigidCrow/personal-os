@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertDialog, Button, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
-import { ArrowRight, PencilSimple, Plus, Robot, Trash, User } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowRight, Lightning, Pause, PencilSimple, Play, Plus, Robot, Trash, User } from "@phosphor-icons/react";
 import { Link } from "wouter";
 import { canTransitionTask, type DelegationMode, type Priority, type Task, type TaskInput, type TaskStatus } from "@personal-os/domain";
 import { api } from "../api";
@@ -27,6 +27,12 @@ const nextAction: Partial<Record<TaskStatus, { status: TaskStatus; label: string
 
 const priorityLabels: Record<Priority, string> = { low: "低", medium: "中", high: "高", critical: "关键" };
 const delegationLabels: Record<DelegationMode, string> = { human_only: "本人处理", codex_ready: "Codex 可执行", mixed: "人机协作" };
+const executorLabels: Record<Task["executor"], string> = { auto: "自动路由", human: "本人", codex: "Codex", openworker: "OpenWorker" };
+const taskTypeLabels: Record<Task["taskType"], string> = {
+  coding: "编码", testing: "测试", code_review: "代码审查", technical_docs: "技术文档",
+  email: "邮件", calendar: "日历", slack: "Slack", notion: "Notion",
+  business_report: "业务报告", general_writing: "通用写作", other: "其他"
+};
 const interactiveSelector = "button, a, input, textarea, select, [role='button']";
 
 function formatTimestamp(value: string): string {
@@ -78,6 +84,37 @@ const initialTask: TaskInput = {
   lastScheduledAt: null,
   automationPaused: false
 };
+
+function toLocalDateTime(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function AutomationFields({ value, onChange }: { value: TaskInput; onChange: (next: TaskInput) => void }) {
+  const cronExpression = typeof value.triggerConfig?.expression === "string" ? value.triggerConfig.expression : "";
+  return (
+    <section className="automation-fields">
+      <header><div><Lightning size={17} weight="duotone" /><strong>Agent 自动化</strong></div><span>先路由，再执行</span></header>
+      <div className="form-grid">
+        <div className="form-field"><span>任务类型</span><Select.Root value={value.taskType} onValueChange={(next) => onChange({ ...value, taskType: next as TaskInput["taskType"] })}><Select.Trigger aria-label="任务类型" /><Select.Content>{Object.entries(taskTypeLabels).map(([key, label]) => <Select.Item key={key} value={key}>{label}</Select.Item>)}</Select.Content></Select.Root></div>
+        <div className="form-field"><span>执行器</span><Select.Root value={value.executor} onValueChange={(next) => onChange({ ...value, executor: next as TaskInput["executor"] })}><Select.Trigger aria-label="执行器" /><Select.Content><Select.Item value="human">本人</Select.Item><Select.Item value="auto">自动路由</Select.Item><Select.Item value="codex">Codex</Select.Item><Select.Item value="openworker">OpenWorker</Select.Item></Select.Content></Select.Root></div>
+      </div>
+      <div className="form-grid">
+        <div className="form-field"><span>执行模式</span><Select.Root value={value.executionMode} onValueChange={(next) => onChange({ ...value, executionMode: next as TaskInput["executionMode"] })}><Select.Trigger aria-label="执行模式" /><Select.Content><Select.Item value="manual">手动触发</Select.Item><Select.Item value="automatic">自动执行</Select.Item></Select.Content></Select.Root></div>
+        <div className="form-field"><span>风险等级</span><Select.Root value={value.riskLevel} onValueChange={(next) => onChange({ ...value, riskLevel: next as TaskInput["riskLevel"] })}><Select.Trigger aria-label="风险等级" /><Select.Content><Select.Item value="low">低风险</Select.Item><Select.Item value="medium">中风险</Select.Item><Select.Item value="high">高风险</Select.Item></Select.Content></Select.Root></div>
+      </div>
+      <div className="form-grid">
+        <div className="form-field"><span>触发方式</span><Select.Root value={value.triggerType} onValueChange={(next) => onChange({ ...value, triggerType: next as TaskInput["triggerType"], triggerConfig: next === "cron" ? { expression: cronExpression } : null })}><Select.Trigger aria-label="触发方式" /><Select.Content><Select.Item value="manual">手动</Select.Item><Select.Item value="cron">定时</Select.Item><Select.Item value="event">事件</Select.Item><Select.Item value="dependency">依赖完成</Select.Item></Select.Content></Select.Root></div>
+        <label><span>最大尝试次数</span><TextField.Root type="number" min="1" max="10" value={String(value.maxAttempts)} onChange={(event) => onChange({ ...value, maxAttempts: Number(event.target.value) || 1 })} /></label>
+      </div>
+      {value.triggerType === "cron" ? <div className="form-grid"><label><span>Cron 表达式</span><TextField.Root placeholder="0 8 * * *" value={cronExpression} onChange={(event) => onChange({ ...value, triggerConfig: { expression: event.target.value } })} /></label><label><span>时区</span><TextField.Root value={value.triggerTimezone} onChange={(event) => onChange({ ...value, triggerTimezone: event.target.value })} /></label></div> : null}
+      {value.executionMode === "automatic" ? <label><span>下次执行时间</span><TextField.Root type="datetime-local" value={toLocalDateTime(value.nextRunAt)} onChange={(event) => onChange({ ...value, nextRunAt: event.target.value ? new Date(event.target.value).toISOString() : null })} /></label> : null}
+      <p>只有低风险任务允许自动派发。中高风险任务会停在人工控制面。</p>
+    </section>
+  );
+}
 
 interface PointerDrag {
   task: Task;
@@ -149,12 +186,31 @@ export function TasksPage() {
     }
   });
   const assign = useMutation({
-    mutationFn: ({ id, mode }: { id: string; mode: "demo" | "live" }) => api.assignTask(id, mode),
+    mutationFn: ({ id, mode }: { id: string; mode: "demo" | "live" }) => api.dispatchTask(id, { mode, forceExecutor: "codex" }),
     onSuccess: async () => {
       setAssignmentTask(null);
       showSuccess("任务已交给 Codex，运行状态会持续更新");
       await refresh();
     }
+  });
+  const dispatch = useMutation({
+    mutationFn: ({ id, forceExecutor }: { id: string; forceExecutor?: "codex" | "openworker" }) => api.dispatchTask(id, { mode: "demo", forceExecutor }),
+    onSuccess: async (run) => {
+      showSuccess(run.executor === "openworker" ? "任务已进入 OpenWorker 拉取队列" : "任务已进入 Agent 执行队列");
+      await refresh();
+    }
+  });
+  const pauseAutomation = useMutation({
+    mutationFn: ({ id, paused }: { id: string; paused: boolean }) => api.pauseTaskAutomation(id, paused),
+    onSuccess: async (task) => { showSuccess(task.automationPaused ? "自动执行已暂停" : "自动执行已恢复"); await refresh(); }
+  });
+  const cancelRun = useMutation({
+    mutationFn: api.cancelRun,
+    onSuccess: async () => { showSuccess("未开始的运行已取消"); await refresh(); }
+  });
+  const retryRun = useMutation({
+    mutationFn: api.retryRun,
+    onSuccess: async () => { showSuccess("已创建新的重试运行"); await refresh(); }
   });
 
   if (tasks.isLoading) return <LoadingState label="正在读取任务队列" />;
@@ -282,9 +338,9 @@ export function TasksPage() {
         action={
           <Dialog.Root open={open} onOpenChange={setOpen}>
             <Dialog.Trigger><button className="primary-button"><Plus size={17} weight="bold" />新增任务</button></Dialog.Trigger>
-            <Dialog.Content className="form-dialog">
+            <Dialog.Content className="form-dialog automation-task-dialog">
               <Dialog.Title>新增任务</Dialog.Title>
-              <Dialog.Description>任务越具体，Codex 的执行和验收越可靠。</Dialog.Description>
+              <Dialog.Description>定义任务、执行器、风险与触发方式，系统才能安全地自动派发。</Dialog.Description>
               <form className="form-stack" onSubmit={(event) => { event.preventDefault(); createTask.mutate(form); }}>
                 <label><span>任务名称</span><TextField.Root value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} required /></label>
                 <label><span>任务说明</span><TextArea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
@@ -293,6 +349,7 @@ export function TasksPage() {
                   <div className="form-field"><span>委派方式</span><Select.Root value={form.delegationMode} onValueChange={(value) => setForm({ ...form, delegationMode: value as DelegationMode })}><Select.Trigger aria-label="委派方式" /><Select.Content><Select.Item value="human_only">本人处理</Select.Item><Select.Item value="codex_ready">Codex 可执行</Select.Item><Select.Item value="mixed">协作执行</Select.Item></Select.Content></Select.Root></div>
                   <div className="form-field"><span>优先级</span><Select.Root value={form.priority} onValueChange={(value) => setForm({ ...form, priority: value as Priority })}><Select.Trigger aria-label="优先级" /><Select.Content><Select.Item value="low">低</Select.Item><Select.Item value="medium">中</Select.Item><Select.Item value="high">高</Select.Item><Select.Item value="critical">关键</Select.Item></Select.Content></Select.Root></div>
                 </div>
+                <AutomationFields value={form} onChange={setForm} />
                 <label><span>验收条件，每行一条</span><TextArea value={form.acceptanceCriteria.join("\n")} onChange={(event) => setForm({ ...form, acceptanceCriteria: event.target.value.split("\n").map((value) => value.trim()).filter(Boolean) })} /></label>
                 {createTask.error ? <p className="inline-error">{createTask.error.message}</p> : null}
                 <div className="dialog-actions"><Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close><Button type="submit" loading={createTask.isPending}>创建任务</Button></div>
@@ -342,6 +399,7 @@ export function TasksPage() {
                     <div className="form-field"><span>执行方式</span><Select.Root value={detailForm.delegationMode} onValueChange={(value) => setDetailForm((current) => ({ ...current, delegationMode: value as DelegationMode }))}><Select.Trigger aria-label="编辑执行方式" /><Select.Content><Select.Item value="human_only">本人处理</Select.Item><Select.Item value="codex_ready">Codex 可执行</Select.Item><Select.Item value="mixed">人机协作</Select.Item></Select.Content></Select.Root></div>
                     <div className="form-field"><span>优先级</span><Select.Root value={detailForm.priority} onValueChange={(value) => setDetailForm((current) => ({ ...current, priority: value as Priority }))}><Select.Trigger aria-label="编辑优先级" /><Select.Content><Select.Item value="low">低</Select.Item><Select.Item value="medium">中</Select.Item><Select.Item value="high">高</Select.Item><Select.Item value="critical">关键</Select.Item></Select.Content></Select.Root></div>
                   </div>
+                  <AutomationFields value={detailForm} onChange={setDetailForm} />
                   <label><span>验收条件，每行一条</span><TextArea value={detailForm.acceptanceCriteria.join("\n")} onChange={(event) => { const value = event.target.value; setDetailForm((current) => ({ ...current, acceptanceCriteria: value.split("\n").map((item) => item.trim()).filter(Boolean) })); }} /></label>
                   {updateTask.error ? <p className="inline-error">{updateTask.error.message}</p> : null}
                   <footer className="task-detail-footer task-detail-edit-footer">
@@ -355,6 +413,9 @@ export function TasksPage() {
                     <div><dt>所属项目</dt><dd>{detailTask.projectId ? projects.data?.items.find((project) => project.id === detailTask.projectId)?.name ?? "项目已移除" : "未归属项目"}</dd></div>
                     <div><dt>执行方式</dt><dd>{delegationLabels[detailTask.delegationMode]}</dd></div>
                     <div><dt>截止日期</dt><dd>{formatDate(detailTask.dueDate)}</dd></div>
+                    <div><dt>Agent</dt><dd>{executorLabels[detailTask.executor]}</dd></div>
+                    <div><dt>自动化</dt><dd>{detailTask.executionMode === "automatic" ? detailTask.automationPaused ? "已暂停" : "运行中" : "手动触发"}</dd></div>
+                    <div><dt>风险 / 重试</dt><dd>{detailTask.riskLevel} / {detailTask.maxAttempts} 次</dd></div>
                   </dl>
 
                   <section className="task-detail-acceptance">
@@ -400,8 +461,12 @@ export function TasksPage() {
               >
                 <header><h2>{column.label}</h2><span>{columnTasks.length}</span></header>
                 <div className="task-column-body">
-                  {columnTasks.length === 0 ? <span className="column-empty">没有任务</span> : columnTasks.map((task) => (
-                    <article
+                  {columnTasks.length === 0 ? <span className="column-empty">没有任务</span> : columnTasks.map((task) => {
+                    const latestRun = runs.data?.items.find((run) => run.taskId === task.id);
+                    const canLaunchAgent = task.status === "ready" && (task.executor !== "human" || task.delegationMode === "codex_ready");
+                    const pendingRun = latestRun?.status === "queued" || latestRun?.status === "claimed";
+                    const retryableRun = latestRun && ["failed", "blocked", "cancelled"].includes(latestRun.status) && latestRun.attempt < task.maxAttempts;
+                    return <article
                       aria-label={`查看 ${task.title} 详情；拖动可更改状态`}
                       className={`task-ticket${draggedTaskId === task.id ? " is-dragging" : ""}`}
                       data-draggable={!transition.isPending && columns.some((target) => canTransitionTask(task.status, target.status))}
@@ -416,21 +481,27 @@ export function TasksPage() {
                       <div className="task-ticket-top"><span className="priority-text" data-priority={task.priority}>{task.priority}</span><StatusBadge status={task.status} /></div>
                       <h3>{task.title}</h3>
                       <p>{task.description || "尚未补充说明。"}</p>
-                      <div className="task-meta"><span>{task.delegationMode === "human_only" ? <User size={15} /> : <Robot size={15} />}{task.delegationMode === "human_only" ? "本人" : task.delegationMode === "codex_ready" ? "Codex" : "协作"}</span><span>{formatDate(task.dueDate)}</span></div>
+                      <div className="task-meta"><span>{task.executor === "human" ? <User size={15} /> : <Robot size={15} />}{executorLabels[task.executor]}</span><span>{formatDate(task.dueDate)}</span></div>
+                      <div className="agent-meta-row"><span>{task.executionMode === "automatic" ? task.automationPaused ? "自动化暂停" : "自动执行" : "手动触发"}</span><span>{task.riskLevel} risk</span>{latestRun ? <span>{latestRun.executor} · {latestRun.status}</span> : null}</div>
                       {task.acceptanceCriteria.length > 0 ? <div className="acceptance-preview"><span>验收</span><p>{task.acceptanceCriteria[0]}</p></div> : null}
                       <div className="task-actions">
-                        {task.status === "ready" && task.delegationMode !== "human_only" ? <button className="compact-button" disabled={assign.isPending} onClick={() => { setAssignmentMode("demo"); setAssignmentTask(task); }}><Robot size={16} />Demo / Live</button> : null}
-                        {task.status === "needs_review" && runs.data?.items.some((run) => run.taskId === task.id && run.status === "needs_review") ? <Link className="text-button" href="/review">前往审查<ArrowRight size={15} /></Link> : nextAction[task.status] ? <button className="text-button" disabled={transition.isPending} onClick={() => transition.mutate({ id: task.id, status: nextAction[task.status]!.status })}>{nextAction[task.status]!.label}<ArrowRight size={15} /></button> : null}
+                        {canLaunchAgent && (task.executor === "codex" || task.delegationMode === "codex_ready") ? <button className="compact-button" disabled={assign.isPending} onClick={() => { setAssignmentMode("demo"); setAssignmentTask(task); }}><Robot size={16} />启动 Codex</button> : null}
+                        {canLaunchAgent && task.executor === "openworker" ? <button className="compact-button" disabled={dispatch.isPending} onClick={() => dispatch.mutate({ id: task.id, forceExecutor: "openworker" })}><Play size={16} />交给 Worker</button> : null}
+                        {canLaunchAgent && task.executor === "auto" && task.delegationMode !== "codex_ready" ? <button className="compact-button" disabled={dispatch.isPending} onClick={() => dispatch.mutate({ id: task.id })}><Lightning size={16} />自动路由</button> : null}
+                        {task.executionMode === "automatic" ? <button className="text-button" disabled={pauseAutomation.isPending} onClick={() => pauseAutomation.mutate({ id: task.id, paused: !task.automationPaused })}>{task.automationPaused ? <Play size={15} /> : <Pause size={15} />}{task.automationPaused ? "恢复" : "暂停"}</button> : null}
+                        {pendingRun ? <button className="text-button" disabled={cancelRun.isPending} onClick={() => cancelRun.mutate(latestRun.id)}>取消运行</button> : null}
+                        {retryableRun ? <button className="text-button" disabled={retryRun.isPending} onClick={() => retryRun.mutate(latestRun.id)}><ArrowClockwise size={15} />重试</button> : null}
+                        {task.status === "needs_review" && latestRun?.status === "needs_review" ? <Link className="text-button" href="/review">前往审查<ArrowRight size={15} /></Link> : !canLaunchAgent && !pendingRun && !retryableRun && nextAction[task.status] ? <button className="text-button" disabled={transition.isPending} onClick={() => transition.mutate({ id: task.id, status: nextAction[task.status]!.status })}>{nextAction[task.status]!.label}<ArrowRight size={15} /></button> : null}
                       </div>
                     </article>
-                  ))}
+                  })}
                 </div>
               </section>
             );
           })}
         </div>
       )}
-      {transition.error ? <p className="inline-error">{transition.error.message}</p> : null}
+      {transition.error || dispatch.error || pauseAutomation.error || cancelRun.error || retryRun.error ? <p className="inline-error">{(transition.error ?? dispatch.error ?? pauseAutomation.error ?? cancelRun.error ?? retryRun.error)?.message}</p> : null}
     </div>
   );
 }

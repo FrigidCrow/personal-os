@@ -124,6 +124,7 @@ export class AgentDispatcher {
     const skipped: Array<{ taskId: string; reason: string }> = [];
     const currentTime = this.clock();
 
+    this.database.expireApprovalRequests(currentTime.toISOString());
     this.database.recoverExpiredAgentRuns(currentTime.toISOString());
 
     for (const failed of this.database.listRetryableAgentRuns(currentTime.toISOString())) {

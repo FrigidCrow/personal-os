@@ -412,6 +412,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .task-ticket > p { min-height: 46px; margin: 7px 0 15px; color: var(--ink-soft); font-size: 10.5px; line-height: 1.5; }
 .task-meta { color: var(--ink-faint); font-size: 9.5px; }
 .task-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.agent-meta-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.agent-meta-row span { padding: 4px 6px; border: 1px solid var(--line-soft); border-radius: 6px; color: var(--ink-faint); background: var(--surface-strong); font-family: "Geist Mono Variable", monospace; font-size: 7.5px; letter-spacing: 0.025em; }
 .acceptance-preview { margin-top: 13px; padding: 11px; border-radius: 11px; background: var(--accent-faint); }
 .acceptance-preview span { color: var(--accent); font-family: "Geist Mono Variable", monospace; font-size: 8px; }
 .acceptance-preview p { margin: 5px 0 0; font-size: 9.5px; line-height: 1.45; }
@@ -514,6 +516,29 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .review-run footer { display: flex; align-items: center; justify-content: space-between; margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--line); }
 .review-run footer > span { color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 9px; }
 .review-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.agent-control-strip { display: grid; grid-template-columns: repeat(4, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-soft); }
+.agent-control-strip button { min-height: 82px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 17px 18px; border: 0; border-right: 1px solid var(--line); color: var(--ink-soft); background: transparent; cursor: pointer; text-align: left; transition: color 180ms ease, background 180ms ease, transform 220ms cubic-bezier(.16,1,.3,1); }
+.agent-control-strip button:last-child { border-right: 0; }
+.agent-control-strip button:hover { color: var(--ink); background: var(--surface-strong); }
+.agent-control-strip button.selected { color: var(--accent); background: var(--accent-faint); }
+.agent-control-strip button svg { transition: transform 260ms cubic-bezier(.16,1,.3,1); }
+.agent-control-strip button:hover svg { transform: rotate(-8deg) scale(1.08); }
+.agent-control-strip span { font-size: 10.5px; font-weight: 620; }
+.agent-control-strip strong { font-family: "Geist Mono Variable", monospace; font-size: 19px; font-weight: 560; }
+.approval-empty { display: flex; min-height: 76px; align-items: center; gap: 10px; padding: 18px 20px; border: 1px dashed var(--line-strong); border-radius: 15px; color: var(--success); background: var(--success-soft); font-size: 10.5px; }
+.approval-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.approval-card { position: relative; overflow: hidden; padding: 20px; border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--line)); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-soft); }
+.approval-card::before { content: ""; position: absolute; width: 120px; height: 2px; top: 0; left: 20px; background: var(--warning); box-shadow: 0 0 18px var(--warning); }
+.approval-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.approval-card > header span { color: var(--warning); font-family: "Geist Mono Variable", monospace; font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+.approval-card > header strong { color: var(--ink-faint); font-size: 9px; }
+.approval-card h2 { margin: 17px 0 0; font-size: 16px; letter-spacing: -0.025em; }
+.approval-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0 0; }
+.approval-card dl > div { min-width: 0; padding: 11px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface-strong); }
+.approval-card dt { color: var(--ink-faint); font-size: 8px; }
+.approval-card dd { margin: 5px 0 0; overflow-wrap: anywhere; font-family: "Geist Mono Variable", monospace; font-size: 9px; }
+.approval-card pre { max-height: 130px; margin: 11px 0 0; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink-soft); background: var(--surface-strong); font-family: "Geist Mono Variable", monospace; font-size: 8.5px; line-height: 1.55; white-space: pre-wrap; }
+.approval-card footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 
 .form-dialog, .mobile-nav-dialog {
   --page-soft: var(--color-panel-solid);
@@ -540,6 +565,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .form-stack label, .form-field { display: flex; flex-direction: column; gap: 8px; }
 .form-stack label > span, .form-field > span { color: var(--ink-soft); font-size: 11px; font-weight: 650; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.automation-task-dialog { max-height: min(90vh, 880px); overflow-y: auto; }
+.automation-fields { display: flex; flex-direction: column; gap: 13px; padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line)); border-radius: 15px; background: var(--accent-faint); }
+.automation-fields > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 11px; border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line)); }
+.automation-fields > header div { display: flex; align-items: center; gap: 8px; color: var(--accent); }
+.automation-fields > header strong { font-size: 11px; }
+.automation-fields > header span { color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 8px; }
+.automation-fields > p { margin: -1px 0 0; color: var(--ink-soft); font-size: 9px; line-height: 1.5; }
 .assignment-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .assignment-mode button { display: flex; min-height: 66px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: var(--surface-raised); cursor: pointer; text-align: left; transition: border-color 180ms ease, transform 180ms ease, background 180ms ease; }
 .assignment-mode button:hover { transform: translateY(-2px); }
@@ -559,6 +591,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .task-detail-facts > div { min-width: 0; padding: 17px 16px; border-right: 1px solid var(--line); }
 .task-detail-facts > div:first-child { padding-left: 0; }
 .task-detail-facts > div:last-child { padding-right: 0; border-right: 0; }
+.task-detail-facts > div:nth-child(3n) { border-right: 0; }
 .task-detail-facts dt, .task-detail-acceptance > span { color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; }
 .task-detail-facts dd { margin: 7px 0 0; overflow: hidden; font-size: 11.5px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
 .task-detail-acceptance { position: relative; margin: 20px 28px 0; padding: 17px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-strong); }
@@ -714,6 +747,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
   .asset-summary > div:last-child { border-bottom: 0; }
   .asset-stage-rail { overflow-x: auto; justify-content: flex-start; gap: 24px; }
   .asset-stage-rail div { flex: 0 0 auto; }
+  .agent-control-strip { grid-template-columns: repeat(2, 1fr); }
+  .agent-control-strip button:nth-child(2) { border-right: 0; }
+  .agent-control-strip button:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
 }
 
 @media (max-width: 680px) {
@@ -774,6 +810,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
   .review-run header .status-badge { grid-column: 2; }
   .review-run footer { align-items: flex-start; flex-direction: column; gap: 12px; }
   .review-actions { width: 100%; justify-content: flex-start; }
+  .approval-grid { grid-template-columns: 1fr; }
+  .approval-card dl { grid-template-columns: 1fr; }
+  .agent-control-strip { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }
+  .agent-control-strip button { min-width: 190px; flex: 0 0 190px; border-right: 1px solid var(--line); border-bottom: 0 !important; scroll-snap-align: start; }
   .project-detail-heading { grid-template-columns: 44px minmax(0, 1fr); }
   .project-detail-heading .status-badge { grid-column: 2; }
   .project-task-section { padding: 18px; }

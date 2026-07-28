@@ -1,6 +1,8 @@
 import type {
+  AgentRun,
+  AgentRunEvent,
+  ApprovalRequest,
   CodexRun,
-  CodexRunEvent,
   DailyReport,
   Experiment,
   ExperimentInput,
@@ -76,6 +78,8 @@ export const api = {
   deleteTask: (id: string) => request<Task>(`/api/tasks/${id}`, { method: "DELETE" }),
   transitionTask: (id: string, status: TaskStatus) => request<Task>(`/api/tasks/${id}/transition`, { method: "POST", body: JSON.stringify({ status }) }),
   assignTask: (id: string, mode: "demo" | "live" = "demo") => request<CodexRun>(`/api/tasks/${id}/assign`, { method: "POST", body: JSON.stringify({ mode, newThread: false }) }),
+  dispatchTask: (id: string, input: { mode?: "demo" | "live"; forceExecutor?: "codex" | "openworker" } = {}) => request<AgentRun>(`/api/tasks/${id}/dispatch`, { method: "POST", body: JSON.stringify(input) }),
+  pauseTaskAutomation: (id: string, paused: boolean) => request<Task>(`/api/tasks/${id}/automation/pause`, { method: "POST", body: JSON.stringify({ paused }) }),
   opportunities: () => request<ItemList<Opportunity>>("/api/opportunities"),
   createExperiment: (opportunityId: string) => request<Experiment>(`/api/opportunities/${opportunityId}/experiment`, { method: "POST", body: JSON.stringify({}) }),
   experiments: () => request<ItemList<Experiment>>("/api/experiments"),
@@ -85,9 +89,14 @@ export const api = {
   assets: () => request<ItemList<IncomeAsset>>("/api/assets"),
   latestReport: () => request<DailyReport>("/api/reports/latest"),
   generateReport: (mode: "demo" | "live") => request<DailyReport>("/api/reports/generate", { method: "POST", body: JSON.stringify({ mode }) }),
-  runs: () => request<ItemList<CodexRun>>("/api/codex/runs"),
-  run: (id: string) => request<CodexRun>(`/api/codex/runs/${id}`),
-  runEvents: (id: string) => request<ItemList<CodexRunEvent>>(`/api/codex/runs/${id}/events`),
-  runStreamUrl: (id: string) => `/api/codex/runs/${id}/stream`,
-  acceptRun: (id: string) => request<CodexRun>(`/api/codex/runs/${id}/accept`, { method: "POST" })
+  runs: () => request<ItemList<AgentRun>>("/api/agent-runs"),
+  run: (id: string) => request<AgentRun>(`/api/agent-runs/${id}`),
+  runEvents: (id: string) => request<ItemList<AgentRunEvent>>(`/api/agent-runs/${id}/events`),
+  runStreamUrl: (id: string) => `/api/agent-runs/${id}/stream`,
+  acceptRun: (id: string) => request<AgentRun>(`/api/agent-runs/${id}/accept`, { method: "POST" }),
+  rejectRun: (id: string, reason: string) => request<AgentRun>(`/api/agent-runs/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
+  cancelRun: (id: string) => request<AgentRun>(`/api/agent-runs/${id}/cancel`, { method: "POST" }),
+  retryRun: (id: string) => request<AgentRun>(`/api/agent-runs/${id}/retry`, { method: "POST" }),
+  approvals: (status?: ApprovalRequest["status"]) => request<ItemList<ApprovalRequest>>(`/api/approvals${status ? `?status=${status}` : ""}`),
+  resolveApproval: (id: string, decision: "approved" | "rejected") => request<ApprovalRequest>(`/api/approvals/${id}/resolve`, { method: "POST", body: JSON.stringify({ decision }) })
 };
