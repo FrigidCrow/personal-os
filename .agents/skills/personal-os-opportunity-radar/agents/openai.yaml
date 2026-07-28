@@ -1,0 +1,11 @@
+interface:
+  display_name: "Personal OS Opportunity Radar"
+  short_description: "Find and rank low-cost income experiments"
+  default_prompt: "Use $personal-os-opportunity-radar to find testable income opportunities for today."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "personal_os"
+      description: "Local Personal OS data and workflow tools"
+policy:
+  allow_implicit_invocation: true

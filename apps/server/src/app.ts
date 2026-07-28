@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { streamSSE } from "hono/streaming";
 import { ZodError, z } from "zod";
 import {
   experimentInputSchema,
@@ -15,9 +16,13 @@ import {
   type TaskInput
 } from "@personal-os/domain";
 import type { PersonalOsDatabase } from "@personal-os/database";
+import { CodexOrchestrator } from "./codex.js";
+import { RadarService } from "./radar.js";
 
 export interface AppDependencies {
   database: PersonalOsDatabase;
+  codex?: CodexOrchestrator;
+  radar?: RadarService;
 }
 
 function projectToInput(project: ReturnType<PersonalOsDatabase["getProject"]>): ProjectInput {
@@ -50,16 +55,7 @@ function taskToInput(task: ReturnType<PersonalOsDatabase["getTask"]>): TaskInput
   };
 }
 
-function todayInTimezone(timeZone = process.env.PERSONAL_OS_TIMEZONE ?? "Asia/Tokyo"): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(new Date());
-}
-
-export function createApp({ database }: AppDependencies): Hono {
+export function createApp({ database, codex = new CodexOrchestrator(database), radar = new RadarService(database) }: AppDependencies): Hono {
   const app = new Hono();
 
   app.use("*", logger());
@@ -74,6 +70,9 @@ export function createApp({ database }: AppDependencies): Hono {
     }
     if (error.message.startsWith("Invalid task transition")) {
       return context.json({ error: "INVALID_TRANSITION", message: error.message }, 409);
+    }
+    if (error.message.includes("must be ready") || error.message.includes("must be accepted") || error.message.includes("Live Codex requires") || error.message.includes("Human-only") || error.message.includes("not ready for")) {
+      return context.json({ error: "INVALID_STATE", message: error.message }, 409);
     }
     console.error(error);
     return context.json({ error: "INTERNAL_ERROR", message: "The request could not be completed." }, 500);
@@ -99,6 +98,9 @@ export function createApp({ database }: AppDependencies): Hono {
     const patch = projectPatchSchema.parse(await context.req.json());
     const input = projectInputSchema.parse({ ...projectToInput(current), ...patch });
     return context.json(database.updateProject(id, input));
+  });
+  app.delete("/api/projects/:id", (context) => {
+    return context.json(database.deleteProject(context.req.param("id")));
   });
 
   app.get("/api/tasks", (context) => {
@@ -128,9 +130,25 @@ export function createApp({ database }: AppDependencies): Hono {
     const input = taskInputSchema.parse({ ...taskToInput(current), ...patch });
     return context.json(database.updateTask(id, input));
   });
+  app.delete("/api/tasks/:id", (context) => {
+    return context.json(database.deleteTask(context.req.param("id")));
+  });
   app.post("/api/tasks/:id/transition", async (context) => {
     const body = z.object({ status: taskStatusSchema }).parse(await context.req.json());
-    return context.json(database.transitionTask(context.req.param("id"), body.status));
+    const taskId = context.req.param("id");
+    if (body.status === "done") {
+      const pendingRun = database.listCodexRuns().find((run) => run.taskId === taskId && run.status === "needs_review");
+      if (pendingRun) throw new Error("Codex run must be accepted from the review screen.");
+    }
+    return context.json(database.transitionTask(taskId, body.status));
+  });
+  app.post("/api/tasks/:id/assign", async (context) => {
+    const body = z.object({
+      mode: z.enum(["demo", "live"]).default("demo"),
+      newThread: z.boolean().default(false),
+      additionalInstructions: z.string().trim().max(2000).optional()
+    }).parse(await context.req.json());
+    return context.json(codex.assign(context.req.param("id"), body), 202);
   });
 
   app.get("/api/opportunities", (context) => context.json({ items: database.listOpportunities() }));
@@ -171,18 +189,11 @@ export function createApp({ database }: AppDependencies): Hono {
     return context.json(report);
   });
   app.post("/api/reports/generate-demo", (context) => {
-    const opportunities = database.listOpportunities().sort((a, b) => b.score - a.score).slice(0, 5);
-    const reportDate = todayInTimezone();
-    const report = database.createDailyReport({
-      reportDate,
-      title: "Opportunity radar",
-      summary: opportunities.length > 0
-        ? `${opportunities.length} demonstration opportunities are ready for review. Verify every source before acting.`
-        : "No demonstration opportunities are available. Add evidence-backed candidates before generating a report.",
-      generatedBy: "demo",
-      opportunityIds: opportunities.map((opportunity) => opportunity.id),
-      isDemo: true
-    });
+    return context.json(radar.generateDemo(), 201);
+  });
+  app.post("/api/reports/generate", async (context) => {
+    const body = z.object({ mode: z.enum(["demo", "live"]).default("demo") }).parse(await context.req.json());
+    const report = body.mode === "live" ? await radar.generateLive() : radar.generateDemo();
     return context.json(report, 201);
   });
 
@@ -192,6 +203,27 @@ export function createApp({ database }: AppDependencies): Hono {
     if (!run) return context.json({ error: "NOT_FOUND", message: "Codex run not found." }, 404);
     return context.json(run);
   });
+  app.get("/api/codex/runs/:id/events", (context) => context.json({ items: database.listCodexRunEvents(context.req.param("id")) }));
+  app.get("/api/codex/runs/:id/stream", (context) => {
+    const runId = context.req.param("id");
+    if (!database.getCodexRun(runId)) return context.json({ error: "NOT_FOUND", message: "Codex run not found." }, 404);
+    return streamSSE(context, async (stream) => {
+      let eventIndex = 0;
+      while (!stream.aborted) {
+        const run = database.getCodexRun(runId);
+        if (!run) break;
+        const events = database.listCodexRunEvents(runId);
+        await stream.writeSSE({
+          id: String(eventIndex++),
+          event: "run",
+          data: JSON.stringify({ run, events })
+        });
+        if (["needs_review", "done", "blocked", "failed", "cancelled"].includes(run.status)) break;
+        await stream.sleep(750);
+      }
+    });
+  });
+  app.post("/api/codex/runs/:id/accept", (context) => context.json(codex.accept(context.req.param("id"))));
 
   return app;
 }

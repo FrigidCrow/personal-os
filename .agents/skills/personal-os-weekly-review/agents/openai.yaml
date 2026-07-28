@@ -1,0 +1,11 @@
+interface:
+  display_name: "Personal OS Weekly Review"
+  short_description: "Review progress and choose next-week bets"
+  default_prompt: "Use $personal-os-weekly-review to review this week and choose next steps."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "personal_os"
+      description: "Local Personal OS data and workflow tools"
+policy:
+  allow_implicit_invocation: true

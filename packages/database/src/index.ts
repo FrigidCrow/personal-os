@@ -313,11 +313,20 @@ export class PersonalOsDatabase {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS codex_run_events (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES codex_runs(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
       CREATE INDEX IF NOT EXISTS idx_opportunities_status ON opportunities(status);
       CREATE INDEX IF NOT EXISTS idx_runs_task ON codex_runs(task_id);
       CREATE INDEX IF NOT EXISTS idx_runs_status ON codex_runs(status);
+      CREATE INDEX IF NOT EXISTS idx_run_events_run ON codex_run_events(run_id);
     `);
   }
 
@@ -381,6 +390,12 @@ export class PersonalOsDatabase {
       id
     );
     return this.requireProject(id);
+  }
+
+  deleteProject(id: string): Project {
+    const project = this.requireProject(id);
+    this.connection.prepare("DELETE FROM projects WHERE id = ?").run(id);
+    return project;
   }
 
   listTasks(filters: { status?: TaskStatus; projectId?: string } = {}): Task[] {
@@ -459,6 +474,12 @@ export class PersonalOsDatabase {
     return this.requireTask(id);
   }
 
+  deleteTask(id: string): Task {
+    const task = this.requireTask(id);
+    this.connection.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+    return task;
+  }
+
   transitionTask(id: string, nextStatus: TaskStatus): Task {
     const task = this.requireTask(id);
     assertTaskTransition(task.status, nextStatus);
@@ -509,6 +530,11 @@ export class PersonalOsDatabase {
     return (this.connection.prepare("SELECT * FROM experiments ORDER BY updated_at DESC").all() as Row[]).map(mapExperiment);
   }
 
+  getExperiment(id: string): Experiment | null {
+    const row = this.connection.prepare("SELECT * FROM experiments WHERE id = ?").get(id) as Row | undefined;
+    return row ? mapExperiment(row) : null;
+  }
+
   createExperiment(raw: ExperimentInput, id = randomUUID()): Experiment {
     const input = experimentInputSchema.parse(raw);
     if (input.opportunityId) this.requireOpportunity(input.opportunityId);
@@ -554,6 +580,17 @@ export class PersonalOsDatabase {
       resultSummary: null,
       ...overrides
     });
+  }
+
+  recordExperimentResult(id: string, input: { status: "measuring" | "won" | "lost" | "pivoted"; resultSummary: string }): Experiment {
+    this.requireExperiment(id);
+    this.connection.prepare("UPDATE experiments SET status = ?, result_summary = ?, updated_at = ? WHERE id = ?").run(
+      input.status,
+      input.resultSummary,
+      now(),
+      id
+    );
+    return this.requireExperiment(id);
   }
 
   listAssets(): IncomeAsset[] {
@@ -678,6 +715,40 @@ export class PersonalOsDatabase {
     return (this.connection.prepare("SELECT * FROM codex_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(mapRun);
   }
 
+  findLatestThreadForProject(projectId: string): string | null {
+    const row = this.connection.prepare(`
+      SELECT thread_id FROM codex_runs
+      WHERE project_id = ? AND thread_id IS NOT NULL
+      ORDER BY updated_at DESC LIMIT 1
+    `).get(projectId) as { thread_id: string } | undefined;
+    return row?.thread_id ?? null;
+  }
+
+  appendCodexRunEvent(runId: string, eventType: string, message: string): { id: string; runId: string; eventType: string; message: string; createdAt: string } {
+    this.requireRun(runId);
+    const event = { id: randomUUID(), runId, eventType, message, createdAt: now() };
+    this.connection.prepare("INSERT INTO codex_run_events (id, run_id, event_type, message, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      event.id,
+      event.runId,
+      event.eventType,
+      event.message,
+      event.createdAt
+    );
+    return event;
+  }
+
+  listCodexRunEvents(runId: string): Array<{ id: string; runId: string; eventType: string; message: string; createdAt: string }> {
+    this.requireRun(runId);
+    const rows = this.connection.prepare("SELECT * FROM codex_run_events WHERE run_id = ? ORDER BY created_at").all(runId) as Row[];
+    return rows.map((row) => ({
+      id: String(row.id),
+      runId: String(row.run_id),
+      eventType: String(row.event_type),
+      message: String(row.message),
+      createdAt: String(row.created_at)
+    }));
+  }
+
   getCodexRun(id: string): CodexRun | null {
     const row = this.connection.prepare("SELECT * FROM codex_runs WHERE id = ?").get(id) as Row | undefined;
     return row ? mapRun(row) : null;
@@ -732,11 +803,11 @@ export class PersonalOsDatabase {
     const opportunityTwoId = "44444444-4444-4444-8444-444444444444";
 
     this.createProject({
-      name: "Client delivery automation",
+      name: "客户交付自动化",
       lane: "cash_now",
       status: "active",
-      outcome: "Deliver the current client portal with a repeatable release checklist.",
-      nextAction: "Review the API integration acceptance criteria.",
+      outcome: "交付当前客户门户，并沉淀一份可复用的发布检查清单。",
+      nextAction: "核对 API 集成的验收条件。",
       deadline: "2026-08-01",
       expectedRevenue: 180000,
       actualRevenue: 90000,
@@ -745,11 +816,11 @@ export class PersonalOsDatabase {
     }, projectId);
 
     this.createProject({
-      name: "Reusable reporting kit",
+      name: "可复用客户周报工具包",
       lane: "assets",
       status: "active",
-      outcome: "Validate a repeatable reporting product with one paying user.",
-      nextAction: "Publish a private demo for three existing contacts.",
+      outcome: "通过一个真实付费用户验证可复用的周报产品。",
+      nextAction: "向三个现有联系人展示私有 Demo。",
       deadline: "2026-08-12",
       expectedRevenue: 30000,
       actualRevenue: 0,
@@ -759,30 +830,30 @@ export class PersonalOsDatabase {
 
     this.createTask({
       projectId,
-      title: "Verify the client export flow",
-      description: "Run the integration suite and document any mismatch in the CSV export.",
+      title: "验证客户数据导出流程",
+      description: "运行集成测试，并记录 CSV 导出与规格不一致的地方。",
       status: "ready",
       delegationMode: "codex_ready",
       priority: "critical",
       dueDate: "2026-07-29",
-      acceptanceCriteria: ["Integration tests pass", "Export columns match the client specification"]
+      acceptanceCriteria: ["集成测试通过", "导出字段与客户规格一致"]
     }, "55555555-5555-4555-8555-555555555555");
 
     this.createTask({
       projectId: assetProjectId,
-      title: "Prepare the reporting kit validation page",
-      description: "Create a concise validation page using only confirmed capabilities.",
+      title: "准备周报工具包验证页面",
+      description: "只使用已经确认的能力，制作一页简洁的验证页面。",
       status: "in_progress",
       delegationMode: "mixed",
       priority: "high",
       dueDate: "2026-07-31",
-      acceptanceCriteria: ["Value proposition is concrete", "Interest form works"]
+      acceptanceCriteria: ["价值主张具体", "意向表单可用"]
     }, "66666666-6666-4666-8666-666666666666");
 
     this.createTask({
       projectId: null,
-      title: "Classify three loose notes from Inbox",
-      description: "Move each note into a project, an asset candidate, or archive it.",
+      title: "整理 Inbox 中的三条零散记录",
+      description: "把每条记录归入项目、收入资产候选，或者归档。",
       status: "inbox",
       delegationMode: "human_only",
       priority: "medium",
@@ -791,71 +862,71 @@ export class PersonalOsDatabase {
     }, "77777777-7777-4777-8777-777777777777");
 
     this.createOpportunity({
-      title: "Automated client status reporting",
-      payer: "Small software agencies with recurring client work",
-      pain: "Weekly status reports require manual collection from issues, commits, and deployment notes.",
-      summary: "Validate a fixed-scope reporting setup plus a low-maintenance monthly service.",
-      businessModel: "Setup fee plus monthly subscription",
+      title: "客户项目状态自动周报",
+      payer: "持续承接客户项目的小型软件工作室",
+      pain: "每周都要手工从任务、提交和部署记录中整理客户报告。",
+      summary: "验证一次性配置费加低维护月度服务的标准化方案。",
+      businessModel: "一次性配置费加月度订阅",
       confidence: 68,
       personalFit: 91,
       validationEffortHours: 2,
       validationBudget: 0,
-      timeToRevenue: "Potentially within 7-14 days",
+      timeToRevenue: "可能在 7-14 天内",
       recurringPotential: 82,
       maintenanceHoursMonthly: 2,
-      hypothesis: "Two of ten relevant agencies will request a working sample.",
-      minimalExperiment: "Generate one real sample report, show it to ten relevant agency operators, and ask for a paid pilot before building a product.",
-      successCondition: "Two qualified calls or one paid pilot within seven days.",
-      stopCondition: "No qualified response after ten relevant conversations.",
+      hypothesis: "十家目标工作室中至少两家会要求查看可用样例。",
+      minimalExperiment: "生成一份真实样例，展示给十位目标工作室经营者，在开发产品前询问是否愿意参加付费试点。",
+      successCondition: "七天内获得两次有效沟通，或一个付费试点。",
+      stopCondition: "与十位相关对象沟通后仍无有效反馈。",
       status: "shortlisted",
       isDemo: true,
       evidence: [
         {
-          label: "Demonstration buyer signal",
+          label: "演示用买家信号",
           sourceUrl: "https://example.com/demo-agency-reporting-signal",
           type: "fact",
-          summary: "Sample evidence for interface acceptance. Replace with a verified source before acting."
+          summary: "这是一条用于界面验收的样例证据，采取行动前必须替换为真实来源。"
         },
         {
-          label: "Recurring service inference",
+          label: "持续服务模式推断",
           sourceUrl: "https://example.com/demo-recurring-model",
           type: "inference",
-          summary: "The subscription path is a hypothesis and still requires customer validation."
+          summary: "订阅收费只是待验证假设，仍然需要真实客户反馈。"
         }
       ]
     }, opportunityId);
 
     this.createOpportunity({
-      title: "Repository onboarding audit",
-      payer: "Small teams adopting AI coding agents",
-      pain: "Repositories lack concise agent instructions, test commands, and safe execution boundaries.",
-      summary: "Test a productized audit that produces AGENTS.md, workflow skills, and an implementation backlog.",
-      businessModel: "Fixed-scope audit with an optional maintenance retainer",
+      title: "AI 编码仓库接入审计",
+      payer: "正在采用 AI 编码代理的小型团队",
+      pain: "代码仓库缺少简洁的代理指令、测试命令和安全执行边界。",
+      summary: "验证一项标准化审计服务，交付 AGENTS.md、工作流 Skill 和实施清单。",
+      businessModel: "固定范围审计加可选维护服务",
       confidence: 62,
       personalFit: 87,
       validationEffortHours: 3,
       validationBudget: 0,
-      timeToRevenue: "Potentially within 14 days",
+      timeToRevenue: "可能在 14 天内",
       recurringPotential: 58,
       maintenanceHoursMonthly: 1,
-      hypothesis: "One of five warm contacts will pay for a repository audit.",
-      minimalExperiment: "Create one anonymized before-and-after sample and offer five paid audit slots to warm contacts.",
-      successCondition: "One paid audit or two explicit buying conversations.",
-      stopCondition: "No buying conversation after five relevant offers.",
+      hypothesis: "五位已有联系的人中至少一位愿意购买仓库审计。",
+      minimalExperiment: "制作一个匿名的改造前后样例，向五位已有联系人提供付费审计名额。",
+      successCondition: "一个付费审计，或两次明确的购买沟通。",
+      stopCondition: "五次相关报价后仍没有购买沟通。",
       status: "candidate",
       isDemo: true,
       evidence: [
         {
-          label: "Demonstration workflow gap",
+          label: "演示用工作流缺口",
           sourceUrl: "https://example.com/demo-agent-guidance-gap",
           type: "fact",
-          summary: "Sample evidence for interface acceptance. Verify a real source before testing."
+          summary: "这是一条用于界面验收的样例证据，开始测试前必须核对真实来源。"
         }
       ]
     }, opportunityTwoId);
 
     const experiment = this.createExperimentFromOpportunity(opportunityId, {
-      title: "Reporting pilot outreach",
+      title: "周报试点验证",
       status: "preparing",
       deadline: "2026-08-04"
     });
@@ -863,18 +934,18 @@ export class PersonalOsDatabase {
     this.createAsset({
       projectId: assetProjectId,
       experimentId: experiment.id,
-      name: "Reporting kit",
+      name: "客户周报工具包",
       stage: "experiment",
-      revenueModel: "Setup fee plus monthly subscription",
+      revenueModel: "一次性配置费加月度订阅",
       monthlyRevenue: 12000,
       maintenanceHoursMonthly: 2,
-      nextAction: "Complete three validation conversations."
+      nextAction: "完成三次真实需求验证沟通。"
     });
 
     this.createDailyReport({
       reportDate: "2026-07-28",
-      title: "Opportunity radar",
-      summary: "Two demonstration opportunities match the current technical profile. Validate buyer interest before development.",
+      title: "机会雷达日报",
+      summary: "两个演示机会与当前技术画像匹配。完整开发前先验证真实付费意愿。",
       generatedBy: "demo",
       opportunityIds: [opportunityId, opportunityTwoId],
       isDemo: true
@@ -954,9 +1025,9 @@ export class PersonalOsDatabase {
   }
 
   private requireExperiment(id: string): Experiment {
-    const row = this.connection.prepare("SELECT * FROM experiments WHERE id = ?").get(id) as Row | undefined;
-    if (!row) throw new Error(`Experiment not found: ${id}`);
-    return mapExperiment(row);
+    const experiment = this.getExperiment(id);
+    if (!experiment) throw new Error(`Experiment not found: ${id}`);
+    return experiment;
   }
 
   private requireAsset(id: string): IncomeAsset {
@@ -975,4 +1046,3 @@ export class PersonalOsDatabase {
 export function createDatabase(filePath = process.env.DATABASE_PATH ?? "./data/personal-os.db", seed = true): PersonalOsDatabase {
   return new PersonalOsDatabase({ filePath, seed });
 }
-

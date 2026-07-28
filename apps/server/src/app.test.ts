@@ -43,6 +43,18 @@ describe("Personal OS API", () => {
     expect(response.status).toBe(201);
     const project = await response.json();
     expect(database.getProject(project.id)?.name).toBe("API project");
+
+    const update = await app.request(`/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nextAction: "Verify API update persistence." })
+    });
+    expect(update.status).toBe(200);
+    expect((await update.json()).nextAction).toBe("Verify API update persistence.");
+
+    const deletion = await app.request(`/api/projects/${project.id}`, { method: "DELETE" });
+    expect(deletion.status).toBe(200);
+    expect(database.getProject(project.id)).toBeNull();
   });
 
   it("rejects invalid task transitions", async () => {
@@ -54,6 +66,37 @@ describe("Personal OS API", () => {
     });
     expect(response.status).toBe(409);
     expect((await response.json()).error).toBe("INVALID_TRANSITION");
+  });
+
+  it("creates, updates, and deletes a task", async () => {
+    const created = await app.request("/api/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId: null,
+        title: "API task",
+        description: "Initial description",
+        status: "inbox",
+        delegationMode: "mixed",
+        priority: "medium",
+        dueDate: null,
+        acceptanceCriteria: ["Persist the task"]
+      })
+    });
+    expect(created.status).toBe(201);
+    const task = await created.json();
+
+    const updated = await app.request(`/api/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Updated description", priority: "high" })
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).priority).toBe("high");
+
+    const deleted = await app.request(`/api/tasks/${task.id}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(database.getTask(task.id)).toBeNull();
   });
 
   it("converts an opportunity into an experiment", async () => {
@@ -74,5 +117,54 @@ describe("Personal OS API", () => {
     const report = await response.json();
     expect(report.isDemo).toBe(true);
     expect(report.opportunities.length).toBeLessThanOrEqual(5);
+  });
+
+  it("rejects live Codex assignment when the project repository path is invalid", async () => {
+    const task = database.listTasks().find((item) => item.status === "ready")!;
+    const response = await app.request(`/api/tasks/${task.id}/assign`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "live", newThread: false })
+    });
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toBe("INVALID_STATE");
+    expect(database.getTask(task.id)?.status).toBe("ready");
+    expect(database.listCodexRuns()).toHaveLength(0);
+  });
+
+  it("runs the demo Codex loop through human approval", async () => {
+    const task = database.listTasks().find((item) => item.status === "ready")!;
+    const assignment = await app.request(`/api/tasks/${task.id}/assign`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "demo", newThread: false })
+    });
+    expect(assignment.status).toBe(202);
+    const queuedRun = await assignment.json();
+    expect(queuedRun.mode).toBe("demo");
+
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const reviewRun = database.getCodexRun(queuedRun.id)!;
+    expect(reviewRun.status).toBe("needs_review");
+    expect(database.getTask(task.id)?.status).toBe("needs_review");
+
+    const stream = await app.request(`/api/codex/runs/${reviewRun.id}/stream`);
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    const streamBody = await stream.text();
+    expect(streamBody).toContain("event: run");
+    expect(streamBody).toContain("needs_review");
+
+    const bypass = await app.request(`/api/tasks/${task.id}/transition`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "done" })
+    });
+    expect(bypass.status).toBe(409);
+    expect(database.getTask(task.id)?.status).toBe("needs_review");
+
+    const approval = await app.request(`/api/codex/runs/${reviewRun.id}/accept`, { method: "POST" });
+    expect(approval.status).toBe(200);
+    expect((await approval.json()).status).toBe("done");
+    expect(database.getTask(task.id)?.status).toBe("done");
   });
 });

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsup src/index.ts --format esm --clean --sourcemap",
+    "build": "node ../../scripts/build-node.mjs apps/mcp/src/index.ts apps/mcp/dist/index.js",
     "start": "node dist/index.js"
   },
   "dependencies": {
@@ -13,8 +13,5 @@
     "@personal-os/database": "*",
     "@personal-os/domain": "*",
     "zod": "^4.4.3"
-  },
-  "devDependencies": {
-    "tsup": "^8.5.1"
   }
 }

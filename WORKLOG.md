@@ -19,6 +19,36 @@
 - Added domain, database, and API integration tests.
 - Verified 14 tests pass and TypeScript typecheck passes.
 
+### Web control plane
+
+- Applied the `design-taste-frontend` design read with `DESIGN_VARIANCE=5`, `MOTION_INTENSITY=3`, and `VISUAL_DENSITY=7`.
+- Built a responsive React control plane with Radix Themes, custom semantic tokens, and Phosphor Icons.
+- Implemented dashboard, project management, task board, opportunity radar, experiments, income assets, and Codex review pages.
+- Added accessible light, dark, and system themes, mobile navigation, loading, empty, error, and demo states.
+- Added project create/update/delete and real repository/Obsidian path editing.
+- Added explicit Demo versus Live Codex assignment controls and preserved a human approval gate.
+- Replaced React Router with the smaller SPA-only Wouter router after a new React Router RSC advisory appeared; `npm audit` now reports zero vulnerabilities.
+
+### Codex, MCP, and opportunity radar
+
+- Implemented a deterministic Demo adapter and a live `@openai/codex-sdk` adapter with thread resume, workspace binding, artifact capture, and verification summaries.
+- Added server-side validation that Live tasks point to an existing local Git repository.
+- Added persisted run events, polling reads, and a terminal Server-Sent Events stream.
+- Implemented the local STDIO MCP server with 12 tools. MCP can read context and submit work for review but cannot approve work or perform payments, purchases, outreach, publishing, or production deployment.
+- Added protocol-level MCP tests using an in-memory client/server transport.
+- Implemented Demo and Live opportunity reports, evidence requirements, a five-item maximum, manual generation, and a configurable local cron schedule.
+- Created and validated three repository Skills: daily focus, opportunity radar, and weekly review.
+- Added project-scoped Codex MCP configuration and copy-pasteable global setup guidance.
+
+### Integration evidence collected during Work
+
+- Codex SDK read-only smoke returned `PERSONAL_OS_CODEX_SDK_OK` with a persisted thread id.
+- A live Codex thread called `personal_os.get_today_context` through MCP and returned `PERSONAL_OS_MCP_LIVE_OK 2`.
+- The rendered Web flow created a real project and task, started Live Codex run `efa93fba`, received `PERSONAL_OS_LIVE_WEB_OK`, reported two successful checks and zero changed paths, then required explicit human approval.
+- The rendered Web flow also completed and approved a clearly labeled Demo run and converted an evidence-backed opportunity into a capped experiment.
+- Desktop dark, desktop light, mobile navigation, and mobile single-column layouts were inspected in the in-app browser.
+- The previous generated development database was moved to `work/old-db/personal-os.db-before-chinese-seed`; it remains recoverable and is ignored by Git.
+
 ## Review
 
-Not started. Review evidence will be recorded after implementation.
+In progress. Final gate output and requirement evidence are recorded in `REVIEW.md` and `docs/MVP1-ACCEPTANCE.md`.

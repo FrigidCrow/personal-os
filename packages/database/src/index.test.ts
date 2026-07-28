@@ -38,6 +38,20 @@ describe("PersonalOsDatabase", () => {
     expect(database.getTask(task.id)?.projectId).toBe(project.id);
   });
 
+  it("updates and deletes projects without deleting their tasks", () => {
+    const project = database.listProjects()[0]!;
+    const task = database.listTasks({ projectId: project.id })[0]!;
+    const updated = database.updateProject(project.id, {
+      ...project,
+      nextAction: "Verify the edited next action."
+    });
+    expect(updated.nextAction).toBe("Verify the edited next action.");
+
+    database.deleteProject(project.id);
+    expect(database.getProject(project.id)).toBeNull();
+    expect(database.getTask(task.id)?.projectId).toBeNull();
+  });
+
   it("enforces task review transitions", () => {
     const task = database.listTasks().find((item) => item.status === "ready");
     expect(task).toBeDefined();
