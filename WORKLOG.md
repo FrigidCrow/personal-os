@@ -1,5 +1,15 @@
 # Work Log
 
+## 2026-07-28 - MVP2 automated agent dispatch
+
+### Plan
+
+- Re-read the current repository, `AGENTS.md`, MVP1/MVP1.1 acceptance matrices, and the approved automated-agent architecture before implementation.
+- Confirmed the fixed implementation order: common AgentRun -> Dispatcher and Codex -> OpenWorker MCP Pull -> Approval Inbox -> reliable local operation.
+- Recorded 30 direct-evidence acceptance requirements in `docs/MVP2-ACCEPTANCE.md`, including the requested full MVP1+MVP2 feature inventory and UI-to-SQLite E2E traces.
+- Preserved the independent OpenWorker installation and loopback-only port baseline in `docs/AUTOMATION-PLAN.md`; installation alone is not treated as integration evidence.
+- Kept every MVP2 acceptance row Pending until Work and Review produce direct evidence.
+
 ## 2026-07-28 - Plan
 
 - Cloned the empty remote repository into `/Users/frigidcrow/Documents/Codex/dev/personal-os`.

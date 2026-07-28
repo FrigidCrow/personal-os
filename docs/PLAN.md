@@ -301,3 +301,23 @@ MVP1 is done only when:
 ## 11. Next phase
 
 MVP1 已完成并保留为历史执行基线。下一阶段的自动多执行器方案见 [`AUTOMATION-PLAN.md`](./AUTOMATION-PLAN.md)，覆盖 Personal OS 自动调度 Codex 与 OpenWorker、通用 Agent Run、任务租约、审批 Inbox 和可靠恢复。
+
+## 12. MVP2 execution control
+
+Status: In progress
+Date: 2026-07-28
+
+MVP2 的详细架构、实施顺序和安全边界以 [`AUTOMATION-PLAN.md`](./AUTOMATION-PLAN.md) 为准；逐项验收以 [`MVP2-ACCEPTANCE.md`](./MVP2-ACCEPTANCE.md) 为准。
+
+执行严格遵循：
+
+```text
+Plan
+  -> Work: Phase A -> B -> C -> D -> E
+  -> Review: requirement audit + automated gates
+  -> Full E2E inventory: MVP1 + MVP1.1 + MVP2
+  -> Feature-level UI -> HTTP -> backend -> SQLite traces
+  -> Complete business-journey E2E
+```
+
+在 `MVP2-ACCEPTANCE.md` 存在 Pending、Failed 或仅有间接证据的条目时，不得宣布 MVP2 完成。

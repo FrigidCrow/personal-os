@@ -5,6 +5,8 @@ Date: 2026-07-28
 Target: MVP2 — Automated Agent Dispatch  
 Method: Plan -> Implement -> Verify -> Human Review
 
+Environment baseline: OpenWorker 已完成本机源码安装并通过启动验证；Personal OS 与 OpenWorker 的自动领取、审批和结果回传尚未实现。
+
 ## 1. 目标
 
 让 Personal OS 成为个人工作的唯一控制中心，根据任务类型、风险和触发条件，自动把工作交给 Codex、OpenWorker 或本人，并把所有执行结果统一送回人工验收。
@@ -53,6 +55,77 @@ MVP2 的重点是“自动调度、受控执行、统一验收”，不是让 Ag
 - 缺少 OpenWorker 领取任务与回传结果的正式契约。
 - 缺少统一的审批 Inbox 和自动化运行页面。
 - 本地 Server 停止或电脑休眠时，定时任务不会运行，也不会自动补跑。
+
+### OpenWorker 本机安装基线
+
+OpenWorker 保持为独立执行器，不复制或合并进 Personal OS 仓库。当前机器已经完成源码安装，后续 Phase C 在此安装实例上配置 Personal OS MCP。
+
+#### 安装位置与运行方式
+
+| 项目 | 当前值 |
+|---|---|
+| OpenWorker 仓库 | `/Users/frigidcrow/Documents/Codex/dev/openworker` |
+| Python 环境 | OpenWorker 仓库内 `.venv`，Python 3.12 |
+| OpenWorker 工作目录 | `/Users/frigidcrow/Documents/Codex/dev/personal-os` |
+| OpenWorker 运行方式 | Python local agent server + React/Vite browser GUI |
+| 模型认证 | 由用户在 OpenWorker Settings 中配置，不写入 Personal OS、Git 或本文档 |
+
+当前采用源码开发运行方式，不是已打包的 macOS `.app`。开发进程关闭或电脑重启后需要重新启动；登录自动启动留到 Phase E 的 LaunchAgent 实现。
+
+#### 本机端口约定
+
+| 服务 | 地址 | 约束 |
+|---|---|---|
+| Personal OS Web | `http://127.0.0.1:5273` | 保留现有端口 |
+| Personal OS API | `http://127.0.0.1:8787` | 保留现有端口 |
+| OpenWorker Web | `http://127.0.0.1:5274` | 不使用已被其他项目占用的 5173 |
+| OpenWorker agent server | `http://127.0.0.1:8765` | 健康检查为 `/v1/health` |
+
+所有服务默认只监听 `127.0.0.1`。在身份认证、来源校验和远程访问策略完成前，不允许绑定 `0.0.0.0`、局域网地址或公网地址。
+
+#### 启动命令
+
+终端一启动 OpenWorker agent server：
+
+```bash
+cd /Users/frigidcrow/Documents/Codex/dev/openworker
+.venv/bin/openworker-server \
+  --cwd /Users/frigidcrow/Documents/Codex/dev/personal-os \
+  --host 127.0.0.1 \
+  --port 8765
+```
+
+终端二启动 OpenWorker Web：
+
+```bash
+cd /Users/frigidcrow/Documents/Codex/dev/openworker/surfaces/gui
+NODE_OPTIONS=--no-experimental-webstorage \
+  npm run dev -- --host 127.0.0.1 --port 5274
+```
+
+`NODE_OPTIONS=--no-experimental-webstorage` 用于规避当前 Node 25 实验性 Web Storage 与 OpenWorker/Vitest 的 `localStorage` 冲突；切换到项目兼容的 Node 22 后可以重新验证是否仍然需要。
+
+#### 当前安装验证
+
+- `GET http://127.0.0.1:8765/v1/health` 返回 `{"status":"ok"}`。
+- Python 后端测试：930 passed，1 skipped。
+- GUI 测试：74 passed。
+- GUI TypeScript 与 Vite 生产构建通过。
+- Python `pip check` 无缺失或冲突依赖。
+- OpenWorker Git 工作区保持干净，没有修改上游源码。
+
+GUI 当前依赖审计报告 7 项上游告警：3 moderate、3 high、1 critical，主要涉及 Vite/Vitest 开发工具及 `xlsx`。本机开发服务保持 loopback-only；在评估上游兼容性前不执行 `npm audit fix --force`。处理不可信电子表格文件前必须单独评估 `xlsx` 风险。
+
+#### 集成状态
+
+安装成功不代表 OpenWorker 自动化链路已经完成。当前只证明 OpenWorker 可以独立启动、构建和运行；以下能力仍属于 Phase A 至 Phase D：
+
+- Personal OS 通用 `AgentRun`、租约和幂等模型。
+- OpenWorker 的 `list_claimable_tasks`、`claim_task`、心跳和结果回传 MCP 契约。
+- Personal OS Approval Inbox。
+- OpenWorker 定时领取任务与真实端到端验收。
+
+不得因为 OpenWorker 已安装而跳过 Phase A 与 Phase B，直接把 Codex 专用数据结构复制成 OpenWorker 专用结构。
 
 ## 4. 目标架构
 
