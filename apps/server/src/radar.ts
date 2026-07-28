@@ -57,6 +57,28 @@ function today(timeZone = process.env.PERSONAL_OS_TIMEZONE ?? "Asia/Tokyo"): str
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
+function containsChinese(value: string): boolean {
+  return /\p{Script=Han}/u.test(value);
+}
+
+function assertChineseReport(parsed: { summary: string; opportunities: Array<Omit<OpportunityInput, "status" | "isDemo">> }): void {
+  if (!containsChinese(parsed.summary)) throw new Error("Live radar returned a non-Chinese report summary.");
+  const invalid = parsed.opportunities.find((opportunity) => [
+    opportunity.title,
+    opportunity.payer,
+    opportunity.pain,
+    opportunity.summary,
+    opportunity.businessModel,
+    opportunity.timeToRevenue,
+    opportunity.hypothesis,
+    opportunity.minimalExperiment,
+    opportunity.successCondition,
+    opportunity.stopCondition,
+    ...opportunity.evidence.flatMap((evidence) => [evidence.label, evidence.summary])
+  ].some((value) => !containsChinese(value)));
+  if (invalid) throw new Error(`Live radar returned non-Chinese content for opportunity: ${invalid.title}`);
+}
+
 export class RadarService {
   constructor(private readonly database: PersonalOsDatabase) {}
 
@@ -84,14 +106,15 @@ export class RadarService {
       webSearchMode: "live"
     });
     const prompt = [
-      "Research current, evidence-backed ways a solo technical operator could test a revenue opportunity with minimal investment.",
-      "The operator builds software, uses Codex, handles client projects, and wants low-maintenance recurring revenue.",
-      "Return at most five opportunities. Prefer explicit buyer pain, recent public demand, repeatability, and tests under four hours.",
-      "Every factual claim needs a direct source URL. Label unsupported commercial interpretation as inference.",
-      "Do not claim guaranteed income. Do not perform outreach, purchases, publishing, or account creation."
+      "请调研当前有证据支持、适合个人技术从业者以最低投入测试的赚钱机会。操作者会开发软件、使用 Codex、承接客户项目，并希望建立低维护的经常性收入。",
+      "最多返回五个机会。优先考虑明确的付费者痛点、近期公开需求、可重复交付能力，以及四小时以内可以完成的最小测试。",
+      "所有面向用户的字符串值必须使用简体中文，包括报告摘要、标题、付费者、痛点、商业模式、假设、最小实验、继续与停止条件、证据标签和证据摘要。专有名词可以保留英文，来源 URL 必须保持原样。不要输出英文段落。",
+      "每项事实都需要提供可直接访问的来源 URL。没有直接证据的商业判断必须标记为 inference，并在中文摘要中明确说明这是推断。",
+      "不得声称收入有保证。不得执行外联、购买、发布或创建账户等操作。只做只读调研并返回结构化结果。报告摘要只总结机会、优先级和下一步，不要描述数据是否已保存；应用会在返回后自动持久化报告。"
     ].join("\n\n");
     const result = await thread.run(prompt, { outputSchema: opportunityOutputSchema });
     const parsed = JSON.parse(result.finalResponse) as { summary: string; opportunities: Array<Omit<OpportunityInput, "status" | "isDemo">> };
+    assertChineseReport(parsed);
     const created = parsed.opportunities.slice(0, 5).map((opportunity) => this.database.createOpportunity({
       ...opportunity,
       status: "candidate",

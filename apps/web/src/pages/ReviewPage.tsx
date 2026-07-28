@@ -17,6 +17,7 @@ import {
 } from "@phosphor-icons/react";
 import type { AgentRun, AgentRunEvent, ApprovalRequest } from "@personal-os/domain";
 import { api } from "../api";
+import { MarkdownContent } from "../components/MarkdownContent";
 import { EmptyState, ErrorState, LoadingState, SectionHeader, StatusBadge } from "../components/UI";
 import { useSuccessToast } from "../components/SuccessToast";
 
@@ -114,8 +115,8 @@ function RunDetailDialog({
 
         <section className="run-prompt"><span>执行提示快照</span><pre>{current.promptSnapshot}</pre></section>
         <div className="run-detail-results">
-          <section><span>执行结果</span><p>{current.finalResponse ?? "任务仍在运行，完成后会显示摘要。"}</p></section>
-          <section><span>验证摘要</span><p>{current.verificationSummary ?? "尚未提交验证摘要。"}</p></section>
+          <section><span>执行结果</span>{current.finalResponse ? <MarkdownContent content={current.finalResponse} /> : <p className="markdown-empty">任务仍在运行，完成后会显示摘要。</p>}</section>
+          <section><span>验证摘要</span>{current.verificationSummary ? <MarkdownContent content={current.verificationSummary} /> : <p className="markdown-empty">尚未提交验证摘要。</p>}</section>
         </div>
         {current.errorMessage ? <section className="run-error-detail"><WarningCircle size={18} weight="fill" /><div><span>错误</span><p>{current.errorMessage}</p></div></section> : null}
         <section className="run-artifacts"><span>产物路径</span>{current.artifactPaths.length > 0 ? <div>{current.artifactPaths.map((path) => <code key={path}><FileCode size={14} />{path}</code>)}</div> : <p>没有登记文件产物。</p>}</section>
@@ -249,8 +250,8 @@ export function ReviewPage() {
               {run.mode === "demo" ? <div className="run-warning"><WarningCircle size={17} weight="fill" />该结果由确定性 Demo 适配器生成，只用于验证工作流。</div> : null}
               {run.status === "awaiting_approval" ? <div className="run-warning"><Pause size={17} weight="fill" />Worker 正在等待高风险动作审批。</div> : null}
               <div className="run-result">
-                <div><span>执行结果</span><p>{run.finalResponse ?? "任务仍在运行，完成后会在这里显示摘要。"}</p></div>
-                <div><span>验证摘要</span><p>{run.verificationSummary ?? "尚未提交验证摘要。"}</p></div>
+                <div><span>执行结果</span>{run.finalResponse ? <MarkdownContent content={run.finalResponse} compact /> : <p className="markdown-empty">任务仍在运行，完成后会在这里显示摘要。</p>}</div>
+                <div><span>验证摘要</span>{run.verificationSummary ? <MarkdownContent content={run.verificationSummary} compact /> : <p className="markdown-empty">尚未提交验证摘要。</p>}</div>
               </div>
               {run.artifactPaths.length > 0 ? <div className="artifact-list">{run.artifactPaths.map((path) => <span key={path}><FileCode size={15} />{path}</span>)}</div> : null}
               <footer>

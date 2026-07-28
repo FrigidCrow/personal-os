@@ -40,6 +40,11 @@ test("shell, dashboard, themes, mobile navigation and accessibility states", asy
   for (const [href, heading] of destinations) {
     await page.locator(`.desktop-sidebar a[href="${href}"]`).click();
     await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    if (href === "/radar") {
+      await expect(page.getByText("每日自动调研未开启", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "每日机会报告", exact: true })).toBeVisible();
+      await expect(page.getByText("0 份", { exact: true })).toBeVisible();
+    }
   }
 
   await page.getByRole("radio", { name: "浅色" }).click();
@@ -195,6 +200,16 @@ test("Codex demo reaches review, streams audit detail and only human acceptance 
   await expect.poll(() => databaseRow<Record<string, unknown>>("SELECT status FROM agent_runs WHERE id = ?", runId)?.status, { timeout: 20_000 }).toBe("needs_review");
   expect(databaseRow<Record<string, unknown>>("SELECT status FROM tasks WHERE id = ?", task.id)?.status).toBe("needs_review");
 
+  const markdownDatabase = createDatabase(e2eDatabasePath, false);
+  try {
+    markdownDatabase.updateAgentRun(runId, {
+      finalResponse: "# 执行结论\n\n- 已完成第一项\n- 已完成第二项\n\n[查看证据](https://example.com/evidence)",
+      verificationSummary: "## 验证摘要\n\n1. 页面可见\n2. 数据已持久化"
+    });
+  } finally {
+    markdownDatabase.close();
+  }
+
   await page.goto("/review");
   const card = page.getByTestId(`run-card-${runId}`);
   await expect(card).toContainText("待审查");
@@ -202,7 +217,9 @@ test("Codex demo reaches review, streams audit detail and only human acceptance 
   const runDialog = page.getByRole("dialog");
   await expect(runDialog.getByText("事件时间线", { exact: true })).toBeVisible();
   await expect(runDialog.getByText("运行已结束", { exact: true })).toBeVisible();
-  await expect(runDialog).toContainText("Demo 适配器验证了任务可以从 Ready 进入 In Progress，再进入 Needs Review");
+  await expect(runDialog.getByRole("heading", { name: "执行结论", exact: true })).toBeVisible();
+  await expect(runDialog.getByRole("link", { name: "查看证据", exact: true })).toHaveAttribute("target", "_blank");
+  await expect(runDialog.getByRole("heading", { name: "验证摘要", exact: true })).toBeVisible();
   await runDialog.getByRole("button", { name: "关闭", exact: true }).click();
   await tracedMutation(
     page,
@@ -364,15 +381,43 @@ test("review rejection and destructive CRUD require rendered human confirmation"
 });
 
 test("opportunity report converts to an experiment, edits it and records a result", async ({ page }, testInfo) => {
+  const radarDatabase = createDatabase(e2eDatabasePath, false);
+  try {
+    radarDatabase.createOpportunity({
+      title: "面向小团队的自动化维护包",
+      payer: "需要稳定自动化流程的小团队负责人",
+      pain: "流程上线后仍有监控、修复和小幅调整需求",
+      summary: "用固定范围的月度维护验证经常性收入需求。",
+      businessModel: "固定月费加超额需求单独报价",
+      confidence: 72,
+      personalFit: 86,
+      validationEffortHours: 2,
+      validationBudget: 0,
+      timeToRevenue: "预计两到四周",
+      recurringPotential: 84,
+      maintenanceHoursMonthly: 2,
+      hypothesis: "至少一位现有客户愿意讨论固定范围维护方案。",
+      minimalExperiment: "整理过去项目的重复维护事项并制作一页内部方案。",
+      successCondition: "找到两类以上重复需求并得到一次明确沟通意向。",
+      stopCondition: "需求主要是无法限定范围的紧急支持。",
+      status: "candidate",
+      isDemo: true,
+      evidence: [{ label: "测试证据", sourceUrl: "https://example.com/evidence", type: "fact", summary: "E2E 使用的本地确定性证据。" }]
+    });
+  } finally {
+    radarDatabase.close();
+  }
   await page.goto("/radar");
   await tracedMutation(
     page,
     testInfo,
     "radar-demo-generate",
     (response) => response.url().endsWith("/api/reports/generate") && response.request().method() === "POST",
-    () => page.getByRole("button", { name: "生成 Demo", exact: true }).click()
+    () => page.getByRole("button", { name: "生成演示", exact: true }).click()
   );
-  await expect(page.getByText("Demo 机会报告已生成", { exact: true })).toBeVisible();
+  await expect(page.getByText("演示机会报告已生成", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 份", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 个机会", { exact: true })).toBeVisible();
   expect(databaseRows("SELECT * FROM daily_report_opportunities").length).toBeLessThanOrEqual(5);
 
   const candidate = page.locator(".opportunity-panel").filter({ has: page.getByRole("button", { name: "启动最小实验" }) }).first();
@@ -415,6 +460,5 @@ test("opportunity report converts to an experiment, edits it and records a resul
   await page.goto("/assets");
   await expect(page.getByText("低维护月收入", { exact: true })).toBeVisible();
   await expect(page.getByText("每月维护时间", { exact: true })).toBeVisible();
-  await expect(page.getByText("月收入", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("月维护", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("还没有收入资产", { exact: true })).toBeVisible();
 });

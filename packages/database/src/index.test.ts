@@ -176,6 +176,21 @@ describe("PersonalOsDatabase", () => {
     expect(report).not.toBeNull();
     expect(report!.opportunities.length).toBeLessThanOrEqual(5);
   });
+
+  it("lists daily reports newest first for radar history", () => {
+    const opportunity = database.listOpportunities()[0]!;
+    const newer = database.createDailyReport({
+      reportDate: "2026-07-29",
+      title: "新的机会雷达日报",
+      summary: "用于验证日报历史排序。",
+      generatedBy: "codex",
+      opportunityIds: [opportunity.id],
+      isDemo: false
+    });
+
+    expect(database.listDailyReports().map((report) => report.id)).toEqual([newer.id, database.getReportByDate("2026-07-28")!.id]);
+    expect(database.listDailyReports(1)).toHaveLength(1);
+  });
 });
 
 describe("MVP1 database migration", () => {

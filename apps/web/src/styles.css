@@ -429,6 +429,34 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .radar-actions { position: relative; z-index: 2; display: flex; flex: 0 0 auto; gap: 9px; }
 @keyframes radar-breathe { 50% { transform: scale(1.08); opacity: 0.28; } }
 
+.radar-schedule-panel { display: grid; grid-template-columns: minmax(280px, 1.15fr) minmax(420px, 1fr); gap: 26px; align-items: stretch; padding: 24px; border: 1px solid var(--line); border-left: 3px solid var(--ink-faint); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-soft); }
+.radar-schedule-panel[data-enabled="true"] { border-left-color: var(--success); }
+.radar-schedule-lead { display: flex; flex-direction: column; justify-content: center; padding: 4px 8px; }
+.radar-schedule-lead > span { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 9px; letter-spacing: 0.04em; }
+.radar-schedule-panel[data-enabled="true"] .radar-schedule-lead > span { color: var(--success); }
+.radar-schedule-lead h2 { margin: 12px 0 0; font-size: clamp(19px, 2vw, 27px); font-weight: 590; letter-spacing: -0.035em; }
+.radar-schedule-lead p { max-width: 64ch; margin: 8px 0 0; color: var(--ink-soft); font-size: 10.5px; line-height: 1.6; }
+.radar-schedule-facts { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-strong); }
+.radar-schedule-facts > div { min-width: 0; padding: 15px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.radar-schedule-facts > div:nth-child(even) { border-right: 0; }
+.radar-schedule-facts > div:nth-last-child(-n+2) { border-bottom: 0; }
+.radar-schedule-facts dt { display: flex; align-items: center; gap: 6px; color: var(--ink-faint); font-size: 8.5px; }
+.radar-schedule-facts dd { margin: 7px 0 0; overflow-wrap: anywhere; font-family: "Geist Mono Variable", monospace; font-size: 10.5px; font-weight: 570; }
+.report-history-panel { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+.report-history-panel > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 20px 22px 16px; border-bottom: 1px solid var(--line); }
+.report-history-panel > header span { color: var(--accent); font-family: "Geist Mono Variable", monospace; font-size: 8.5px; letter-spacing: 0.06em; }
+.report-history-panel > header h2 { margin: 5px 0 0; font-size: 17px; letter-spacing: -0.025em; }
+.report-history-panel > header p { margin: 4px 0 0; color: var(--ink-soft); font-size: 9.5px; }
+.report-history-panel > header > strong { color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 10px; font-weight: 500; }
+.report-history-list { display: flex; gap: 0; overflow-x: auto; padding: 0; scroll-snap-type: x proximity; }
+.report-history-list button { min-width: 172px; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 16px 18px; border: 0; border-right: 1px solid var(--line); color: var(--ink); background: transparent; cursor: pointer; scroll-snap-align: start; text-align: left; transition: color 180ms ease, background 180ms ease; }
+.report-history-list button:hover { background: var(--surface-strong); }
+.report-history-list button.selected { color: var(--accent); background: var(--accent-faint); box-shadow: inset 0 -2px 0 var(--accent); }
+.report-history-list time { font-size: 11px; font-weight: 650; }
+.report-history-list span { color: var(--ink-soft); font-size: 9.5px; }
+.report-history-list small { color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 8px; }
+.report-history-empty { margin: 0; padding: 21px 22px; color: var(--ink-faint); font-size: 10px; }
+
 .opportunity-list { display: flex; flex-direction: column; gap: 18px; }
 .opportunity-panel { padding: 26px; }
 .opportunity-panel > header { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 22px; }
@@ -510,7 +538,33 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .run-warning { display: flex; align-items: center; gap: 8px; margin: 15px 0; padding: 10px 12px; border-radius: 10px; color: var(--warning); background: var(--warning-soft); font-size: 9.5px; }
 .run-result { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-top: 18px; }
 .run-result > div { min-height: 106px; padding: 15px; border: 1px solid var(--line-soft); border-radius: 13px; background: var(--surface-strong); }
-.run-result p { margin: 7px 0 0; color: var(--ink-soft); font-size: 10.5px; line-height: 1.55; white-space: pre-wrap; }
+.run-result > div > span { color: var(--ink-faint); font-family: "Geist Mono Variable", monospace; font-size: 8.5px; letter-spacing: 0.05em; }
+.markdown-empty { margin: 8px 0 0; color: var(--ink-faint); font-size: 10.5px; line-height: 1.55; }
+.markdown-content { margin-top: 9px; overflow-wrap: anywhere; color: var(--ink-soft); font-size: 11px; line-height: 1.65; }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4 { margin: 1.25em 0 0.55em; color: var(--ink); font-weight: 640; line-height: 1.3; letter-spacing: -0.02em; }
+.markdown-content h1 { font-size: 19px; }
+.markdown-content h2 { font-size: 16px; }
+.markdown-content h3 { font-size: 13px; }
+.markdown-content h4 { font-size: 11.5px; }
+.markdown-content p { margin: 0.7em 0; color: inherit; font-size: inherit; line-height: inherit; white-space: normal; }
+.markdown-content ul, .markdown-content ol { display: grid; gap: 5px; margin: 0.75em 0; padding-left: 22px; }
+.markdown-content li::marker { color: var(--accent); }
+.markdown-content a { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 44%, transparent); text-underline-offset: 3px; }
+.markdown-content a:hover { text-decoration-color: var(--accent); }
+.markdown-content blockquote { margin: 0.9em 0; padding: 8px 12px; border-left: 2px solid var(--accent); color: var(--ink-soft); background: var(--accent-faint); }
+.markdown-content pre { max-width: 100%; margin: 0.9em 0; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface-solid); font-family: "Geist Mono Variable", monospace; font-size: 9.5px; line-height: 1.6; }
+.markdown-content code { padding: 0.15em 0.35em; border-radius: 4px; color: var(--ink); background: var(--surface-raised); font-family: "Geist Mono Variable", monospace; font-size: 0.9em; }
+.markdown-content pre code { padding: 0; background: transparent; }
+.markdown-content table { width: 100%; margin: 0.9em 0; border-collapse: collapse; font-size: 9.5px; }
+.markdown-content th, .markdown-content td { padding: 7px 8px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.markdown-content th { color: var(--ink); background: var(--surface-strong); }
+.markdown-content hr { margin: 1.2em 0; border: 0; border-top: 1px solid var(--line); }
+.markdown-content-compact { max-height: 176px; overflow: hidden; }
+.markdown-content-compact h1 { font-size: 14px; }
+.markdown-content-compact h2 { font-size: 12.5px; }
+.markdown-content-compact h3, .markdown-content-compact h4 { font-size: 11px; }
 .artifact-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
 .artifact-list span { display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; border-radius: 8px; background: var(--surface-strong); font-family: "Geist Mono Variable", monospace; font-size: 8.5px; }
 .review-run footer { display: flex; align-items: center; justify-content: space-between; margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--line); }
@@ -649,9 +703,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .run-detail-facts dd { margin: 6px 0 0; overflow-wrap: anywhere; font-family: "Geist Mono Variable", monospace; font-size: 9.5px; line-height: 1.45; }
 .run-prompt { margin-top: 16px; padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-strong); }
 .run-prompt pre { max-height: 230px; margin: 10px 0 0; overflow: auto; color: var(--ink-soft); font-family: "Geist Mono Variable", monospace; font-size: 9px; line-height: 1.6; white-space: pre-wrap; }
-.run-detail-results { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-top: 12px; }
+.run-detail-results { display: grid; grid-template-columns: 1fr; gap: 11px; margin-top: 12px; }
 .run-detail-results section { min-height: 120px; padding: 15px; border: 1px solid var(--line); border-radius: 14px; }
-.run-detail-results p { margin: 7px 0 0; color: var(--ink-soft); font-size: 10.5px; line-height: 1.6; white-space: pre-wrap; }
 .run-error-detail { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; margin-top: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--line)); border-radius: 13px; color: var(--danger); background: var(--danger-soft); }
 .run-error-detail p { margin: 6px 0 0; font-size: 10px; line-height: 1.5; }
 .run-artifacts { margin-top: 12px; padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-strong); }
@@ -718,6 +771,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 }
 
 @media (max-width: 900px) {
+  .radar-schedule-panel { grid-template-columns: 1fr; }
   .app-shell { display: block; }
   .desktop-sidebar { display: none; }
   .app-header { min-height: 82px; padding-inline: 18px; }
@@ -794,6 +848,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
   .radar-intro { align-items: flex-start; flex-direction: column; padding: 26px 22px; }
   .radar-intro::after { right: -110px; }
   .radar-actions { width: 100%; flex-wrap: wrap; }
+  .radar-schedule-panel { padding: 18px; }
+  .radar-schedule-lead { padding: 0; }
+  .radar-schedule-facts { grid-template-columns: 1fr; }
+  .radar-schedule-facts > div, .radar-schedule-facts > div:nth-child(even), .radar-schedule-facts > div:nth-last-child(-n+2) { border-right: 0; border-bottom: 1px solid var(--line); }
+  .radar-schedule-facts > div:last-child { border-bottom: 0; }
+  .report-history-panel > header { align-items: flex-start; }
   .opportunity-panel { padding: 18px; }
   .opportunity-panel > header { grid-template-columns: minmax(0, 1fr) 64px; }
   .score-orbit { width: 62px; height: 62px; }

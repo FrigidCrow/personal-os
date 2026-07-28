@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
+import { CronExpressionParser } from "cron-parser";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
@@ -292,6 +293,34 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json(database.createAsset(input), 201);
   });
 
+  app.get("/api/reports", (context) => {
+    const requestedLimit = Number(context.req.query("limit") ?? 14);
+    const limit = Number.isFinite(requestedLimit) ? requestedLimit : 14;
+    return context.json({ items: database.listDailyReports(limit) });
+  });
+  app.get("/api/reports/schedule", (context) => {
+    const enabled = process.env.DAILY_RADAR_ENABLED === "true";
+    const expression = process.env.DAILY_RADAR_CRON ?? "0 8 * * *";
+    const timezone = process.env.PERSONAL_OS_TIMEZONE ?? "Asia/Tokyo";
+    const latestReport = database.getLatestDailyReport();
+    let nextRunAt: string | null = null;
+    if (enabled) {
+      try {
+        nextRunAt = CronExpressionParser.parse(expression, { currentDate: new Date(), tz: timezone }).next().toDate().toISOString();
+      } catch {
+        nextRunAt = null;
+      }
+    }
+    return context.json({
+      enabled,
+      expression,
+      timezone,
+      mode: process.env.CODEX_MODE === "live" ? "live" : "demo",
+      nextRunAt,
+      lastRunAt: latestReport?.createdAt ?? null,
+      lastReportDate: latestReport?.reportDate ?? null
+    });
+  });
   app.get("/api/reports/latest", (context) => {
     const report = database.getLatestDailyReport();
     if (!report) return context.json({ error: "NOT_FOUND", message: "No daily report has been generated." }, 404);

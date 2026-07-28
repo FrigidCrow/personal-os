@@ -53,6 +53,16 @@ interface ItemList<T> {
   items: T[];
 }
 
+export interface RadarScheduleData {
+  enabled: boolean;
+  expression: string;
+  timezone: string;
+  mode: "demo" | "live";
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastReportDate: string | null;
+}
+
 export type TaskPatch = Partial<Omit<TaskInput, "status">>;
 export type ExperimentPatch = Partial<ExperimentInput>;
 
@@ -104,6 +114,8 @@ export const api = {
   updateExperiment: (id: string, input: ExperimentPatch) => request<Experiment>(`/api/experiments/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   recordExperimentResult: (id: string, input: { status: "measuring" | "won" | "lost" | "pivoted"; resultSummary: string }) => request<Experiment>(`/api/experiments/${id}/result`, { method: "POST", body: JSON.stringify(input) }),
   assets: () => request<ItemList<IncomeAsset>>("/api/assets"),
+  reports: () => request<ItemList<DailyReport>>("/api/reports"),
+  reportSchedule: () => request<RadarScheduleData>("/api/reports/schedule"),
   latestReport: () => request<DailyReport>("/api/reports/latest"),
   generateReport: (mode: "demo" | "live") => request<DailyReport>("/api/reports/generate", { method: "POST", body: JSON.stringify({ mode }) }),
   runs: () => request<ItemList<AgentRun>>("/api/agent-runs"),

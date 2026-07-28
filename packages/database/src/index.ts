@@ -957,6 +957,12 @@ export class PersonalOsDatabase {
     return row ? this.hydrateDailyReport(row) : null;
   }
 
+  listDailyReports(limit = 14): DailyReport[] {
+    const safeLimit = Math.max(1, Math.min(Math.trunc(limit), 90));
+    const rows = this.connection.prepare("SELECT * FROM daily_reports ORDER BY report_date DESC, created_at DESC LIMIT ?").all(safeLimit) as Row[];
+    return rows.map((row) => this.hydrateDailyReport(row));
+  }
+
   getReportByDate(reportDate: string): DailyReport | null {
     const row = this.connection.prepare("SELECT * FROM daily_reports WHERE report_date = ?").get(reportDate) as Row | undefined;
     return row ? this.hydrateDailyReport(row) : null;
@@ -1486,7 +1492,8 @@ export class PersonalOsDatabase {
   } {
     const projects = this.listProjects();
     const tasks = this.listTasks();
-    const opportunities = this.listOpportunities().filter((item) => ["candidate", "shortlisted"].includes(item.status)).sort((a, b) => b.score - a.score).slice(0, 5);
+    const latestReport = this.getLatestDailyReport();
+    const opportunities = (latestReport?.opportunities ?? []).filter((item) => ["candidate", "shortlisted"].includes(item.status)).sort((a, b) => b.score - a.score).slice(0, 5);
     const experiments = this.listExperiments();
     const assets = this.listAssets();
     const taskCounts = Object.fromEntries(
@@ -1501,7 +1508,7 @@ export class PersonalOsDatabase {
       experiments,
       assets,
       runs: this.listCodexRuns(8),
-      latestReport: this.getLatestDailyReport(),
+      latestReport,
       metrics: {
         activeProjects: projects.filter((project) => project.status === "active").length,
         openLoops: tasks.filter((task) => task.status !== "done").length,

@@ -240,6 +240,41 @@ describe("Personal OS API", () => {
     expect(report.opportunities.length).toBeLessThanOrEqual(5);
   });
 
+  it("exposes radar history and the next automatic research run", async () => {
+    const previous = {
+      enabled: process.env.DAILY_RADAR_ENABLED,
+      expression: process.env.DAILY_RADAR_CRON,
+      timezone: process.env.PERSONAL_OS_TIMEZONE,
+      mode: process.env.CODEX_MODE
+    };
+    process.env.DAILY_RADAR_ENABLED = "true";
+    process.env.DAILY_RADAR_CRON = "0 8 * * *";
+    process.env.PERSONAL_OS_TIMEZONE = "Asia/Tokyo";
+    process.env.CODEX_MODE = "live";
+
+    try {
+      const history = await app.request("/api/reports");
+      expect(history.status).toBe(200);
+      expect((await history.json()).items).toHaveLength(1);
+
+      const response = await app.request("/api/reports/schedule");
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(expect.objectContaining({
+        enabled: true,
+        expression: "0 8 * * *",
+        timezone: "Asia/Tokyo",
+        mode: "live",
+        nextRunAt: expect.any(String),
+        lastReportDate: "2026-07-28"
+      }));
+    } finally {
+      if (previous.enabled === undefined) delete process.env.DAILY_RADAR_ENABLED; else process.env.DAILY_RADAR_ENABLED = previous.enabled;
+      if (previous.expression === undefined) delete process.env.DAILY_RADAR_CRON; else process.env.DAILY_RADAR_CRON = previous.expression;
+      if (previous.timezone === undefined) delete process.env.PERSONAL_OS_TIMEZONE; else process.env.PERSONAL_OS_TIMEZONE = previous.timezone;
+      if (previous.mode === undefined) delete process.env.CODEX_MODE; else process.env.CODEX_MODE = previous.mode;
+    }
+  });
+
   it("rejects live Codex assignment when the project repository path is invalid", async () => {
     const task = database.listTasks().find((item) => item.status === "ready")!;
     const response = await app.request(`/api/tasks/${task.id}/assign`, {
