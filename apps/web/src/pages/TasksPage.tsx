@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
 import { ArrowRight, Plus, Robot, User } from "@phosphor-icons/react";
 import { Link } from "wouter";
-import type { DelegationMode, Priority, Task, TaskInput, TaskStatus } from "@personal-os/domain";
+import { canTransitionTask, type DelegationMode, type Priority, type Task, type TaskInput, type TaskStatus } from "@personal-os/domain";
 import { api } from "../api";
 import { EmptyState, ErrorState, formatDate, LoadingState, SectionHeader, StatusBadge } from "../components/UI";
 
@@ -35,12 +35,25 @@ const initialTask: TaskInput = {
   acceptanceCriteria: []
 };
 
+interface PointerDrag {
+  task: Task;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  active: boolean;
+  cleanup?: () => void;
+}
+
 export function TasksPage() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<TaskInput>(initialTask);
   const [assignmentTask, setAssignmentTask] = useState<Task | null>(null);
   const [assignmentMode, setAssignmentMode] = useState<"demo" | "live">("demo");
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [dropStatus, setDropStatus] = useState<TaskStatus | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const pointerDrag = useRef<PointerDrag | null>(null);
   const tasks = useQuery({ queryKey: ["tasks"], queryFn: api.tasks });
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
@@ -50,7 +63,22 @@ export function TasksPage() {
     queryClient.invalidateQueries({ queryKey: ["runs"] })
   ]);
   const createTask = useMutation({ mutationFn: api.createTask, onSuccess: async () => { setOpen(false); setForm(initialTask); await refresh(); } });
-  const transition = useMutation({ mutationFn: ({ id, status }: { id: string; status: TaskStatus }) => api.transitionTask(id, status), onSuccess: refresh });
+  const transition = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: TaskStatus }) => api.transitionTask(id, status),
+    onMutate: async ({ id, status }) => {
+      await queryClient.cancelQueries({ queryKey: ["tasks"] });
+      const previous = queryClient.getQueryData<{ items: Task[] }>(["tasks"]);
+      queryClient.setQueryData<{ items: Task[] }>(["tasks"], (current) => current ? {
+        ...current,
+        items: current.items.map((task) => task.id === id ? { ...task, status } : task)
+      } : current);
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(["tasks"], context.previous);
+    },
+    onSettled: async () => { await refresh(); }
+  });
   const assign = useMutation({
     mutationFn: ({ id, mode }: { id: string; mode: "demo" | "live" }) => api.assignTask(id, mode),
     onSuccess: async () => {
@@ -64,6 +92,72 @@ export function TasksPage() {
   const items = tasks.data?.items ?? [];
   const assignmentProject = assignmentTask?.projectId ? projects.data?.items.find((project) => project.id === assignmentTask.projectId) : null;
   const liveReady = Boolean(assignmentProject?.repositoryPath);
+  const draggedTask = items.find((task) => task.id === draggedTaskId) ?? null;
+
+  const clearDragState = () => {
+    pointerDrag.current?.cleanup?.();
+    pointerDrag.current = null;
+    setDraggedTaskId(null);
+    setDropStatus(null);
+    setDragOffset({ x: 0, y: 0 });
+  };
+
+  const canDropTask = (status: TaskStatus) => Boolean(
+    draggedTask && draggedTask.status !== status && canTransitionTask(draggedTask.status, status)
+  );
+
+  const dropStatusAtPoint = (x: number, y: number, task: Task): TaskStatus | null => {
+    for (const element of document.elementsFromPoint(x, y)) {
+      const target = element.closest<HTMLElement>("[data-status]");
+      const status = target?.dataset.status as TaskStatus | undefined;
+      if (status && status !== task.status && canTransitionTask(task.status, status)) return status;
+    }
+    return null;
+  };
+
+  const beginPointerDrag = (event: ReactPointerEvent<HTMLElement>, task: Task) => {
+    const isInteractive = (event.target as HTMLElement).closest("button, a, input, textarea, select, [role='button']");
+    const hasDestination = columns.some((target) => canTransitionTask(task.status, target.status));
+    if (event.button !== 0 || isInteractive || transition.isPending || !hasDestination) return;
+    const drag: PointerDrag = {
+      task,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false
+    };
+    const onMove = (pointerEvent: globalThis.PointerEvent) => {
+      if (pointerEvent.pointerId !== drag.pointerId) return;
+      const x = pointerEvent.clientX - drag.startX;
+      const y = pointerEvent.clientY - drag.startY;
+      if (!drag.active && Math.hypot(x, y) < 6) return;
+      pointerEvent.preventDefault();
+      if (!drag.active) {
+        drag.active = true;
+        setDraggedTaskId(drag.task.id);
+      }
+      setDragOffset({ x, y });
+      setDropStatus(dropStatusAtPoint(pointerEvent.clientX, pointerEvent.clientY, drag.task));
+    };
+    const onEnd = (pointerEvent: globalThis.PointerEvent) => {
+      if (pointerEvent.pointerId !== drag.pointerId) return;
+      const status = drag.active ? dropStatusAtPoint(pointerEvent.clientX, pointerEvent.clientY, drag.task) : null;
+      clearDragState();
+      if (status) transition.mutate({ id: drag.task.id, status });
+    };
+    const onCancel = (pointerEvent: globalThis.PointerEvent) => {
+      if (pointerEvent.pointerId === drag.pointerId) clearDragState();
+    };
+    drag.cleanup = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onCancel);
+    };
+    pointerDrag.current = drag;
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onEnd);
+    window.addEventListener("pointercancel", onCancel);
+  };
 
   return (
     <div className="page-stack">
@@ -111,15 +205,28 @@ export function TasksPage() {
       </Dialog.Root>
 
       {items.length === 0 ? <EmptyState title="任务队列为空" body="先捕获一个事项，再决定由本人还是 Codex 处理。" /> : (
-        <div className="task-board">
+        <div className={`task-board${draggedTask ? " is-dragging" : ""}`}>
           {columns.map((column) => {
             const columnTasks = items.filter((task) => task.status === column.status);
+            const isValidTarget = canDropTask(column.status);
             return (
-              <section className="task-column" key={column.status}>
+              <section
+                className={`task-column${dropStatus === column.status ? " is-drop-target" : ""}${draggedTask && !isValidTarget ? " is-drop-disabled" : ""}`}
+                data-status={column.status}
+                key={column.status}
+              >
                 <header><h2>{column.label}</h2><span>{columnTasks.length}</span></header>
                 <div className="task-column-body">
                   {columnTasks.length === 0 ? <span className="column-empty">没有任务</span> : columnTasks.map((task) => (
-                    <article className="task-ticket" key={task.id}>
+                    <article
+                      aria-label={`${task.title}，拖动可更改状态`}
+                      className={`task-ticket${draggedTaskId === task.id ? " is-dragging" : ""}`}
+                      data-draggable={!transition.isPending && columns.some((target) => canTransitionTask(task.status, target.status))}
+                      data-task-id={task.id}
+                      key={task.id}
+                      onPointerDown={(event) => beginPointerDrag(event, task)}
+                      style={draggedTaskId === task.id ? { transform: `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0) scale(0.98) rotate(1deg)`, zIndex: 3 } : undefined}
+                    >
                       <div className="task-ticket-top"><span className="priority-text" data-priority={task.priority}>{task.priority}</span><StatusBadge status={task.status} /></div>
                       <h3>{task.title}</h3>
                       <p>{task.description || "尚未补充说明。"}</p>
