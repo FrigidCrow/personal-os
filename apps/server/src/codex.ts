@@ -8,9 +8,11 @@ export interface AssignmentOptions {
   mode: "demo" | "live";
   newThread: boolean;
   additionalInstructions?: string;
+  idempotencyKey?: string;
+  attempt?: number;
 }
 
-function buildTaskPrompt(task: Task, project: Project | null, additionalInstructions?: string): string {
+export function buildTaskPrompt(task: Task, project: Project | null, additionalInstructions?: string): string {
   return [
     `Personal OS task id: ${task.id}`,
     `Project: ${project?.name ?? "Unassigned"}`,
@@ -54,6 +56,9 @@ export class CodexOrchestrator {
     if (task.delegationMode === "human_only") throw new Error("Human-only tasks cannot be assigned to Codex.");
     const project = task.projectId ? this.database.getProject(task.projectId) : null;
     if (options.mode === "live") {
+      if (task.acceptanceCriteria.length === 0) {
+        throw new Error("Live Codex requires at least one acceptance criterion.");
+      }
       const repositoryPath = project?.repositoryPath;
       if (!repositoryPath || !existsSync(repositoryPath) || !statSync(repositoryPath).isDirectory() || !existsSync(join(repositoryPath, ".git"))) {
         throw new Error("Live Codex requires an existing local Git repository path on the assigned project.");
@@ -66,9 +71,10 @@ export class CodexOrchestrator {
       projectId: project?.id ?? null,
       mode: options.mode,
       workingDirectory,
-      promptSnapshot
+      promptSnapshot,
+      idempotencyKey: options.idempotencyKey,
+      attempt: options.attempt
     });
-    this.database.appendCodexRunEvent(run.id, "queued", "Task entered the Codex queue.");
     this.database.transitionTask(task.id, "in_progress");
 
     if (options.mode === "demo") {
@@ -155,13 +161,7 @@ export class CodexOrchestrator {
 
   private failRun(runId: string, taskId: string, error: unknown): void {
     const message = error instanceof Error ? error.message : "Unknown Codex execution error";
-    const task = this.database.getTask(taskId);
-    if (task?.status === "in_progress") this.database.transitionTask(taskId, "blocked");
-    this.database.updateCodexRun(runId, {
-      status: "failed",
-      errorMessage: message,
-      completedAt: new Date().toISOString()
-    });
-    this.database.appendCodexRunEvent(runId, "failed", message);
+    if (!this.database.getTask(taskId)) return;
+    this.database.recordAgentRunFailure(runId, message);
   }
 }

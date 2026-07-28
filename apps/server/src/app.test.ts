@@ -236,4 +236,73 @@ describe("Personal OS API", () => {
     expect((await approval.json()).status).toBe("done");
     expect(database.getTask(task.id)?.status).toBe("done");
   });
+
+  it("dispatches, lists, pauses, and cancels an OpenWorker pull run", async () => {
+    const task = database.createTask({
+      title: "Prepare local report",
+      description: "No external writes.",
+      status: "ready",
+      delegationMode: "mixed",
+      priority: "medium",
+      acceptanceCriteria: ["A local Markdown draft exists"],
+      taskType: "business_report",
+      executor: "openworker",
+      executionMode: "manual",
+      riskLevel: "low",
+      maxAttempts: 2
+    });
+    const dispatch = await app.request(`/api/tasks/${task.id}/dispatch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "demo" })
+    });
+    expect(dispatch.status).toBe(202);
+    const run = await dispatch.json();
+    expect(run).toEqual(expect.objectContaining({ taskId: task.id, executor: "openworker", status: "queued" }));
+
+    const list = await app.request("/api/agent-runs?executor=openworker");
+    expect(list.status).toBe(200);
+    expect((await list.json()).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: run.id })]));
+
+    const pause = await app.request(`/api/tasks/${task.id}/automation/pause`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ paused: true })
+    });
+    expect(pause.status).toBe(200);
+    expect((await pause.json()).automationPaused).toBe(true);
+
+    const cancel = await app.request(`/api/agent-runs/${run.id}/cancel`, { method: "POST" });
+    expect(cancel.status).toBe(200);
+    expect((await cancel.json()).status).toBe("cancelled");
+    expect(database.getTask(task.id)?.status).toBe("ready");
+  });
+
+  it("retries a failed run once without duplicating the previous attempt", async () => {
+    const task = database.createTask({
+      title: "Retry local worker",
+      status: "ready",
+      acceptanceCriteria: ["Second attempt is visible"],
+      taskType: "general_writing",
+      executor: "openworker",
+      executionMode: "manual",
+      riskLevel: "low",
+      maxAttempts: 2
+    });
+    const first = database.createAgentRun({
+      taskId: task.id,
+      executor: "openworker",
+      promptSnapshot: "First attempt",
+      idempotencyKey: "api:retry:1"
+    });
+    database.claimAgentRun(first.id);
+    database.recordAgentRunFailure(first.id, "Simulated failure", 0);
+
+    const retry = await app.request(`/api/agent-runs/${first.id}/retry`, { method: "POST" });
+    expect(retry.status).toBe(202);
+    const second = await retry.json();
+    expect(second).toEqual(expect.objectContaining({ taskId: task.id, attempt: 2, status: "queued" }));
+    expect(second.id).not.toBe(first.id);
+    expect(database.listAgentRuns().filter((run) => run.taskId === task.id)).toHaveLength(2);
+  });
 });

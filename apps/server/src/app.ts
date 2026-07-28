@@ -20,11 +20,13 @@ import {
 } from "@personal-os/domain";
 import type { PersonalOsDatabase } from "@personal-os/database";
 import { CodexOrchestrator } from "./codex.js";
+import { AgentDispatcher } from "./dispatcher.js";
 import { RadarService } from "./radar.js";
 
 export interface AppDependencies {
   database: PersonalOsDatabase;
   codex?: CodexOrchestrator;
+  dispatcher?: AgentDispatcher;
   radar?: RadarService;
 }
 
@@ -85,7 +87,10 @@ function experimentToInput(experiment: ReturnType<PersonalOsDatabase["getExperim
   };
 }
 
-export function createApp({ database, codex = new CodexOrchestrator(database), radar = new RadarService(database) }: AppDependencies): Hono {
+export function createApp(dependencies: AppDependencies): Hono {
+  const { database, radar = new RadarService(database) } = dependencies;
+  const codex = dependencies.codex ?? new CodexOrchestrator(database);
+  const dispatcher = dependencies.dispatcher ?? new AgentDispatcher(database, codex);
   const app = new Hono();
 
   app.use("*", logger());
@@ -98,17 +103,33 @@ export function createApp({ database, codex = new CodexOrchestrator(database), r
     if (error.message.includes("not found")) {
       return context.json({ error: "NOT_FOUND", message: error.message }, 404);
     }
-    if (error.message.startsWith("Invalid task transition")) {
+    if (error.message.startsWith("Invalid task transition") || error.message.startsWith("Invalid agent run transition")) {
       return context.json({ error: "INVALID_TRANSITION", message: error.message }, 409);
     }
-    if (error.message.includes("must be ready") || error.message.includes("must be accepted") || error.message.includes("Live Codex requires") || error.message.includes("Human-only") || error.message.includes("not ready for")) {
+    if (
+      error.message.includes("must be ready") ||
+      error.message.includes("must be accepted") ||
+      error.message.includes("Live Codex requires") ||
+      error.message.includes("Human-only") ||
+      error.message.includes("not ready for") ||
+      error.message.includes("cannot safely handle") ||
+      error.message.includes("routes to the human") ||
+      error.message.includes("Automatic dispatch") ||
+      error.message.includes("Automatic Codex") ||
+      error.message.includes("automation is paused") ||
+      error.message.includes("Maximum attempts") ||
+      error.message.includes("not retryable") ||
+      error.message.includes("cannot be cancelled") ||
+      error.message.includes("Active run already exists") ||
+      error.message.includes("Duplicate idempotency")
+    ) {
       return context.json({ error: "INVALID_STATE", message: error.message }, 409);
     }
     console.error(error);
     return context.json({ error: "INTERNAL_ERROR", message: "The request could not be completed." }, 500);
   });
 
-  app.get("/api/health", (context) => context.json({ ok: true, service: "personal-os", codexMode: process.env.CODEX_MODE ?? "demo" }));
+  app.get("/api/health", (context) => context.json({ ok: true, service: "personal-os", codexMode: process.env.CODEX_MODE ?? "demo", executors: dispatcher.health() }));
   app.get("/api/dashboard", (context) => context.json(database.getDashboard()));
 
   app.get("/api/projects", (context) => context.json({ items: database.listProjects() }));
@@ -167,7 +188,7 @@ export function createApp({ database, codex = new CodexOrchestrator(database), r
     const body = z.object({ status: taskStatusSchema }).parse(await context.req.json());
     const taskId = context.req.param("id");
     if (body.status === "done") {
-      const pendingRun = database.listCodexRuns().find((run) => run.taskId === taskId && run.status === "needs_review");
+      const pendingRun = database.listAgentRuns().find((run) => run.taskId === taskId && run.status === "needs_review");
       if (pendingRun) throw new Error("Codex run must be accepted from the review screen.");
     }
     return context.json(database.transitionTask(taskId, body.status));
@@ -179,6 +200,19 @@ export function createApp({ database, codex = new CodexOrchestrator(database), r
       additionalInstructions: z.string().trim().max(2000).optional()
     }).parse(await context.req.json());
     return context.json(codex.assign(context.req.param("id"), body), 202);
+  });
+  app.post("/api/tasks/:id/dispatch", async (context) => {
+    const body = z.object({
+      mode: z.enum(["demo", "live"]).default("demo"),
+      newThread: z.boolean().default(false),
+      additionalInstructions: z.string().trim().max(2000).optional(),
+      forceExecutor: z.enum(["codex", "openworker"]).optional()
+    }).parse(await context.req.json().catch(() => ({})));
+    return context.json(dispatcher.dispatch(context.req.param("id"), body), 202);
+  });
+  app.post("/api/tasks/:id/automation/pause", async (context) => {
+    const body = z.object({ paused: z.boolean() }).parse(await context.req.json());
+    return context.json(dispatcher.setPaused(context.req.param("id"), body.paused));
   });
 
   app.get("/api/opportunities", (context) => context.json({ items: database.listOpportunities() }));
@@ -243,6 +277,24 @@ export function createApp({ database, codex = new CodexOrchestrator(database), r
     const report = body.mode === "live" ? await radar.generateLive() : radar.generateDemo();
     return context.json(report, 201);
   });
+
+  app.get("/api/agent-runs", (context) => {
+    const executor = z.enum(["codex", "openworker"]).safeParse(context.req.query("executor"));
+    const status = z.enum(["queued", "claimed", "running", "awaiting_approval", "needs_review", "done", "blocked", "failed", "cancelled"]).safeParse(context.req.query("status"));
+    return context.json({ items: database.listAgentRuns({
+      ...(executor.success ? { executor: executor.data } : {}),
+      ...(status.success ? { status: status.data } : {})
+    }) });
+  });
+  app.get("/api/agent-runs/:id", (context) => {
+    const run = database.getAgentRun(context.req.param("id"));
+    if (!run) return context.json({ error: "NOT_FOUND", message: "Agent run not found." }, 404);
+    return context.json(run);
+  });
+  app.get("/api/agent-runs/:id/events", (context) => context.json({ items: database.listAgentRunEvents(context.req.param("id")) }));
+  app.post("/api/agent-runs/:id/cancel", (context) => context.json(dispatcher.cancel(context.req.param("id"))));
+  app.post("/api/agent-runs/:id/retry", (context) => context.json(dispatcher.retry(context.req.param("id")), 202));
+  app.post("/api/dispatcher/tick", (context) => context.json(dispatcher.tick()));
 
   app.get("/api/codex/runs", (context) => context.json({ items: database.listCodexRuns() }));
   app.get("/api/codex/runs/:id", (context) => {

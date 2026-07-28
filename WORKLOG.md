@@ -26,6 +26,25 @@ Phase A verification:
 - A SQLite backup of the current development database migrated with 4 tasks, 2 legacy Codex runs, and 2 matching generic runs; `PRAGMA integrity_check` returned `ok` and `foreign_key_check` returned no rows.
 - TypeScript, ESLint, all production builds, and `git diff --check` passed.
 
+### Work - Phase B: Dispatcher and Codex automation
+
+- Added deterministic routing that honors explicit executor choices, routes repository code work to Codex, routes approved business/document work to OpenWorker, and sends unknown or automatic high-risk work to the human queue.
+- Added a shared `ExecutorAdapter` contract with Codex and OpenWorker Pull implementations plus health reporting.
+- Added the local Agent Dispatcher with manual dispatch, due-task ticks, automatic Codex execution, retry dispatch, automation pause, queued-run cancellation, and executor health APIs.
+- Preserved the Codex demo/live adapter and compatibility API while requiring a real Git repository and non-empty acceptance criteria for live execution. Live continues to use workspace-write, approval `never`, and disabled network access.
+- Added transactional claim, heartbeat, lease expiry, cancellation, failure classification, retry scheduling, and maximum-attempt blocking behavior.
+- Added generic Agent Run HTTP list/detail/event/cancel/retry routes and a manual dispatcher tick route. Existing Codex routes remain available.
+- Started the Dispatcher on the local Server interval and stop it during graceful shutdown.
+
+Phase B verification:
+
+- Automatic Codex demo integration passed Ready -> Running -> Needs Review and retained the human acceptance gate.
+- Router tests covered explicit, Codex, OpenWorker, unknown, and automatic high-risk decisions.
+- Lease tests covered claim exclusivity, 30-second heartbeat timing, 2-minute expiry, retryable recovery, and final-attempt Blocked behavior.
+- A file-backed restart test proved that reopening the Server database with a valid claimed lease creates no duplicate run.
+- API tests covered OpenWorker queue dispatch/list/pause/cancel and a second unique retry attempt.
+- Full gates passed with 6 test files / 40 tests, TypeScript, ESLint, production builds, and patch hygiene.
+
 ## 2026-07-28 - Plan
 
 - Cloned the empty remote repository into `/Users/frigidcrow/Documents/Codex/dev/personal-os`.

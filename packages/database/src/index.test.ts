@@ -193,3 +193,69 @@ describe("MVP1 database migration", () => {
     }
   });
 });
+
+describe("agent run leases and retry limits", () => {
+  it("extends an active lease and safely recovers an expired worker", () => {
+    let currentTime = new Date("2026-07-28T00:00:00.000Z");
+    const database = new PersonalOsDatabase({ filePath: ":memory:", seed: false, clock: () => currentTime });
+    try {
+      const task = database.createTask({
+        title: "Lease test",
+        status: "ready",
+        description: "Verify lease recovery.",
+        delegationMode: "mixed",
+        priority: "medium",
+        acceptanceCriteria: ["Expired lease is retryable"],
+        executor: "openworker",
+        executionMode: "automatic",
+        riskLevel: "low",
+        maxAttempts: 2
+      });
+      const run = database.createAgentRun({
+        taskId: task.id,
+        executor: "openworker",
+        promptSnapshot: "Lease test",
+        idempotencyKey: "lease:test:1"
+      });
+      const claimed = database.claimAgentRun(run.id);
+      expect(claimed.status).toBe("claimed");
+      expect(claimed.leaseExpiresAt).toBe("2026-07-28T00:02:00.000Z");
+      expect(database.getTask(task.id)?.status).toBe("in_progress");
+      expect(() => database.claimAgentRun(run.id)).toThrow("cannot be claimed");
+
+      currentTime = new Date("2026-07-28T00:00:30.000Z");
+      expect(database.heartbeatAgentRun(run.id).leaseExpiresAt).toBe("2026-07-28T00:02:30.000Z");
+      currentTime = new Date("2026-07-28T00:02:30.000Z");
+      const recovered = database.recoverExpiredAgentRuns();
+      expect(recovered).toHaveLength(1);
+      expect(recovered[0]).toMatchObject({ status: "failed", nextRetryAt: "2026-07-28T00:02:30.000Z" });
+      expect(database.getTask(task.id)?.status).toBe("ready");
+      expect(database.listRetryableAgentRuns()).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("blocks the task when the final attempt fails", () => {
+    const database = new PersonalOsDatabase({ filePath: ":memory:", seed: false });
+    try {
+      const task = database.createTask({
+        title: "Final attempt",
+        status: "ready",
+        maxAttempts: 1
+      });
+      const run = database.createAgentRun({
+        taskId: task.id,
+        executor: "openworker",
+        promptSnapshot: "Final attempt",
+        idempotencyKey: "lease:final:1"
+      });
+      database.claimAgentRun(run.id);
+      const failed = database.recordAgentRunFailure(run.id, "Worker stopped.");
+      expect(failed.nextRetryAt).toBeNull();
+      expect(database.getTask(task.id)?.status).toBe("blocked");
+    } finally {
+      database.close();
+    }
+  });
+});

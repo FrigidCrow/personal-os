@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import type { RadarService } from "./radar.js";
+import type { AgentDispatcher } from "./dispatcher.js";
 
 export function startDailyRadarScheduler(radar: RadarService): (() => void) | null {
   if (process.env.DAILY_RADAR_ENABLED !== "true") return null;
@@ -11,4 +12,19 @@ export function startDailyRadarScheduler(radar: RadarService): (() => void) | nu
     void execution.catch((error) => console.error("Daily radar failed", error));
   }, { timezone });
   return () => task.stop();
+}
+
+export function startAgentDispatcher(dispatcher: AgentDispatcher, intervalMilliseconds = 15_000): () => void {
+  const run = () => {
+    try {
+      const result = dispatcher.tick();
+      if (result.skipped.length > 0) console.warn("Agent dispatcher skipped tasks", result.skipped);
+    } catch (error) {
+      console.error("Agent dispatcher tick failed", error);
+    }
+  };
+  const timer = setInterval(run, intervalMilliseconds);
+  timer.unref();
+  run();
+  return () => clearInterval(timer);
 }

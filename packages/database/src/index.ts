@@ -1023,6 +1023,129 @@ export class PersonalOsDatabase {
     return row ? mapAgentRun(row) : null;
   }
 
+  getActiveRunForTask(taskId: string): AgentRun | null {
+    const row = this.connection.prepare(`
+      SELECT * FROM agent_runs
+      WHERE task_id = ? AND status IN ('queued', 'claimed', 'running', 'awaiting_approval')
+      ORDER BY created_at DESC LIMIT 1
+    `).get(taskId) as Row | undefined;
+    return row ? mapAgentRun(row) : null;
+  }
+
+  claimAgentRun(runId: string, leaseMilliseconds = 120_000): AgentRun {
+    if (!Number.isFinite(leaseMilliseconds) || leaseMilliseconds <= 0) throw new Error("Lease duration must be positive");
+    const claimedAt = this.timestamp();
+    const leaseExpiresAt = new Date(this.clock().getTime() + leaseMilliseconds).toISOString();
+    const claim = this.connection.transaction(() => {
+      const result = this.connection.prepare(`
+        UPDATE agent_runs
+        SET status = 'claimed', claimed_at = ?, heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'queued'
+      `).run(claimedAt, claimedAt, leaseExpiresAt, claimedAt, runId);
+      if (result.changes !== 1) {
+        const current = this.getAgentRun(runId);
+        if (!current) throw new Error(`Agent run not found: ${runId}`);
+        throw new Error(`Run cannot be claimed from status: ${current.status}`);
+      }
+      const run = this.requireAgentRun(runId);
+      const task = this.requireTask(run.taskId);
+      if (task.status === "ready") {
+        this.connection.prepare("UPDATE tasks SET status = 'in_progress', updated_at = ? WHERE id = ?").run(claimedAt, task.id);
+      } else if (task.status !== "in_progress") {
+        throw new Error(`Task cannot be claimed from status: ${task.status}`);
+      }
+      this.insertAgentRunEvent(runId, "claimed", `Lease acquired until ${leaseExpiresAt}.`, claimedAt);
+    });
+    claim.immediate();
+    return this.requireAgentRun(runId);
+  }
+
+  heartbeatAgentRun(runId: string, leaseMilliseconds = 120_000): AgentRun {
+    if (!Number.isFinite(leaseMilliseconds) || leaseMilliseconds <= 0) throw new Error("Lease duration must be positive");
+    const heartbeatAt = this.timestamp();
+    const leaseExpiresAt = new Date(this.clock().getTime() + leaseMilliseconds).toISOString();
+    const result = this.connection.prepare(`
+      UPDATE agent_runs
+      SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+      WHERE id = ? AND status IN ('claimed', 'running', 'awaiting_approval')
+        AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
+    `).run(heartbeatAt, leaseExpiresAt, heartbeatAt, runId, heartbeatAt);
+    if (result.changes !== 1) {
+      const current = this.getAgentRun(runId);
+      if (!current) throw new Error(`Agent run not found: ${runId}`);
+      throw new Error(`Run lease is not active: ${current.status}`);
+    }
+    this.insertAgentRunEvent(runId, "heartbeat", `Lease extended until ${leaseExpiresAt}.`, heartbeatAt);
+    return this.requireAgentRun(runId);
+  }
+
+  cancelAgentRun(runId: string): AgentRun {
+    const run = this.requireAgentRun(runId);
+    if (!(["queued", "claimed"] as AgentRunStatus[]).includes(run.status)) {
+      throw new Error(`Only an unstarted run can be cancelled: ${run.status}`);
+    }
+    const timestamp = this.timestamp();
+    const cancel = this.connection.transaction(() => {
+      this.connection.prepare(`
+        UPDATE agent_runs
+        SET status = 'cancelled', completed_at = ?, lease_expires_at = NULL, updated_at = ?
+        WHERE id = ?
+      `).run(timestamp, timestamp, runId);
+      const task = this.requireTask(run.taskId);
+      if (task.status === "in_progress") {
+        this.connection.prepare("UPDATE tasks SET status = 'ready', updated_at = ? WHERE id = ?").run(timestamp, task.id);
+      }
+      this.insertAgentRunEvent(runId, "cancelled", "The queued run was cancelled by the user.", timestamp);
+    });
+    cancel.immediate();
+    return this.requireAgentRun(runId);
+  }
+
+  recordAgentRunFailure(runId: string, message: string, retryDelayMilliseconds = 30_000): AgentRun {
+    const run = this.requireAgentRun(runId);
+    if (!(["queued", "claimed", "running", "awaiting_approval"] as AgentRunStatus[]).includes(run.status)) {
+      throw new Error(`Run cannot fail from status: ${run.status}`);
+    }
+    const task = this.requireTask(run.taskId);
+    const timestamp = this.timestamp();
+    const retryable = run.attempt < task.maxAttempts;
+    const nextRetryAt = retryable ? new Date(this.clock().getTime() + retryDelayMilliseconds).toISOString() : null;
+    const fail = this.connection.transaction(() => {
+      this.connection.prepare(`
+        UPDATE agent_runs
+        SET status = 'failed', error_message = ?, completed_at = ?, next_retry_at = ?,
+            lease_expires_at = NULL, updated_at = ?
+        WHERE id = ?
+      `).run(message, timestamp, nextRetryAt, timestamp, runId);
+      if (retryable && task.status === "in_progress") {
+        this.connection.prepare("UPDATE tasks SET status = 'ready', updated_at = ? WHERE id = ?").run(timestamp, task.id);
+      } else if (!retryable && task.status !== "blocked") {
+        this.connection.prepare("UPDATE tasks SET status = 'blocked', updated_at = ? WHERE id = ?").run(timestamp, task.id);
+      }
+      this.insertAgentRunEvent(runId, "failed", retryable ? `${message} Retry scheduled for ${nextRetryAt}.` : `${message} Maximum attempts reached.`, timestamp);
+    });
+    fail.immediate();
+    return this.requireAgentRun(runId);
+  }
+
+  listRetryableAgentRuns(asOf = this.timestamp()): AgentRun[] {
+    return (this.connection.prepare(`
+      SELECT * FROM agent_runs
+      WHERE status = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= ?
+      ORDER BY next_retry_at
+    `).all(asOf) as Row[]).map(mapAgentRun);
+  }
+
+  recoverExpiredAgentRuns(asOf = this.timestamp()): AgentRun[] {
+    const expired = (this.connection.prepare(`
+      SELECT * FROM agent_runs
+      WHERE status IN ('claimed', 'running', 'awaiting_approval')
+        AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+      ORDER BY lease_expires_at
+    `).all(asOf) as Row[]).map(mapAgentRun);
+    return expired.map((run) => this.recordAgentRunFailure(run.id, "Worker lease expired.", 0));
+  }
+
   appendAgentRunEvent(runId: string, eventType: AgentRunEventType, message: string): AgentRunEvent {
     this.requireAgentRun(runId);
     const parsedType = agentRunEventTypeSchema.parse(eventType);
@@ -1088,11 +1211,14 @@ export class PersonalOsDatabase {
     mode: "demo" | "live";
     workingDirectory?: string | null;
     promptSnapshot: string;
+    idempotencyKey?: string;
+    attempt?: number;
   }, id = randomUUID()): CodexRun {
     const run = this.createAgentRun({
       ...input,
       executor: "codex",
-      idempotencyKey: `codex:${id}`
+      idempotencyKey: input.idempotencyKey ?? `codex:${id}`,
+      attempt: input.attempt
     }, id);
     return toCodexRun(run);
   }
