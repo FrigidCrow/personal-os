@@ -1032,6 +1032,16 @@ export class PersonalOsDatabase {
     return row ? mapAgentRun(row) : null;
   }
 
+  listClaimableRuns(executor: AgentExecutor): AgentRun[] {
+    return (this.connection.prepare(`
+      SELECT agent_runs.* FROM agent_runs
+      JOIN tasks ON tasks.id = agent_runs.task_id
+      WHERE agent_runs.executor = ? AND agent_runs.status = 'queued'
+        AND tasks.status = 'ready' AND tasks.automation_paused = 0
+      ORDER BY agent_runs.created_at
+    `).all(executor) as Row[]).map(mapAgentRun);
+  }
+
   claimAgentRun(runId: string, leaseMilliseconds = 120_000): AgentRun {
     if (!Number.isFinite(leaseMilliseconds) || leaseMilliseconds <= 0) throw new Error("Lease duration must be positive");
     const claimedAt = this.timestamp();
@@ -1150,6 +1160,63 @@ export class PersonalOsDatabase {
     this.requireAgentRun(runId);
     const parsedType = agentRunEventTypeSchema.parse(eventType);
     return this.insertAgentRunEvent(runId, parsedType, message, this.timestamp());
+  }
+
+  saveAgentRunArtifact(runId: string, path: string): AgentRun {
+    const run = this.requireAgentRun(runId);
+    const artifactPaths = Array.from(new Set([...run.artifactPaths, path]));
+    const timestamp = this.timestamp();
+    const save = this.connection.transaction(() => {
+      this.connection.prepare("UPDATE agent_runs SET artifact_paths = ?, updated_at = ? WHERE id = ?")
+        .run(JSON.stringify(artifactPaths), timestamp, runId);
+      this.insertAgentRunEvent(runId, "artifact_saved", path, timestamp);
+    });
+    save.immediate();
+    return this.requireAgentRun(runId);
+  }
+
+  submitAgentRunResult(runId: string, input: {
+    finalResponse: string;
+    verificationSummary: string;
+    artifactPaths?: string[];
+    externalSessionId?: string | null;
+  }): AgentRun {
+    const run = this.requireAgentRun(runId);
+    if (!(["claimed", "running"] as AgentRunStatus[]).includes(run.status)) {
+      throw new Error(`Run cannot submit a result from status: ${run.status}`);
+    }
+    const task = this.requireTask(run.taskId);
+    if (task.status !== "in_progress") throw new Error(`Task must be in progress before result submission: ${task.status}`);
+    const timestamp = this.timestamp();
+    const artifactPaths = Array.from(new Set([...(run.artifactPaths ?? []), ...(input.artifactPaths ?? [])]));
+    const submit = this.connection.transaction(() => {
+      if (run.status === "claimed") {
+        this.connection.prepare("UPDATE agent_runs SET status = 'running', started_at = ?, updated_at = ? WHERE id = ?")
+          .run(timestamp, timestamp, runId);
+        this.insertAgentRunEvent(runId, "running", "Worker started execution.", timestamp);
+      }
+      this.connection.prepare(`
+        UPDATE agent_runs SET
+          status = 'needs_review', external_session_id = ?, final_response = ?,
+          artifact_paths = ?, verification_summary = ?, completed_at = ?,
+          lease_expires_at = NULL, requires_human_review = 1, updated_at = ?
+        WHERE id = ?
+      `).run(
+        input.externalSessionId ?? run.externalSessionId,
+        input.finalResponse,
+        JSON.stringify(artifactPaths),
+        input.verificationSummary,
+        timestamp,
+        timestamp,
+        runId
+      );
+      this.connection.prepare("UPDATE tasks SET status = 'needs_review', updated_at = ? WHERE id = ?")
+        .run(timestamp, task.id);
+      this.insertAgentRunEvent(runId, "verification", input.verificationSummary, timestamp);
+      this.insertAgentRunEvent(runId, "needs_review", "Worker submitted the result for human review.", timestamp);
+    });
+    submit.immediate();
+    return this.requireAgentRun(runId);
   }
 
   listAgentRunEvents(runId: string): AgentRunEvent[] {

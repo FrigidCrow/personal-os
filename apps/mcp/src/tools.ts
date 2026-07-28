@@ -1,5 +1,14 @@
 import type { PersonalOsDatabase } from "@personal-os/database";
-import type { DailyReportInput, ExperimentStatus, IncomeAssetInput, OpportunityInput, TaskStatus } from "@personal-os/domain";
+import type {
+  AgentExecutor,
+  AgentRunEventType,
+  ApprovalActionType,
+  DailyReportInput,
+  ExperimentStatus,
+  IncomeAssetInput,
+  OpportunityInput,
+  TaskStatus
+} from "@personal-os/domain";
 
 export function createPersonalOsTools(database: PersonalOsDatabase) {
   return {
@@ -14,6 +23,77 @@ export function createPersonalOsTools(database: PersonalOsDatabase) {
       if (!task) throw new Error(`Task not found: ${taskId}`);
       return { task, project: task.projectId ? database.getProject(task.projectId) : null };
     },
+    listClaimableTasks: (executor: AgentExecutor = "openworker") => database.listClaimableRuns(executor).map((run) => {
+      const task = database.getTask(run.taskId)!;
+      return {
+        runId: run.id,
+        executor: run.executor,
+        attempt: run.attempt,
+        task,
+        project: task.projectId ? database.getProject(task.projectId) : null
+      };
+    }),
+    claimTask: (taskId: string, executor: AgentExecutor = "openworker") => {
+      const run = database.getActiveRunForTask(taskId);
+      if (!run || run.status !== "queued") throw new Error(`No queued run exists for task: ${taskId}`);
+      if (run.executor !== executor) throw new Error(`Queued run belongs to ${run.executor}, not ${executor}`);
+      return database.claimAgentRun(run.id);
+    },
+    getExecutionContext: (runId: string) => {
+      const run = database.getAgentRun(runId);
+      if (!run) throw new Error(`Agent run not found: ${runId}`);
+      const task = database.getTask(run.taskId);
+      if (!task) throw new Error(`Task not found: ${run.taskId}`);
+      const project = task.projectId ? database.getProject(task.projectId) : null;
+      return {
+        run,
+        task,
+        project,
+        safety: {
+          allowed: ["read approved context", "write local task artifacts", "run proportionate local verification"],
+          requiresApproval: ["send_message", "calendar_write", "publish", "shell with external effect", "external_write"],
+          prohibited: ["payment", "purchase", "financial transfer", "credential or OTP handling", "production deployment"],
+          finalState: "needs_review"
+        }
+      };
+    },
+    heartbeatRun: (runId: string) => database.heartbeatAgentRun(runId),
+    appendAgentRunEvent: (runId: string, eventType: AgentRunEventType, message: string) => {
+      const run = database.getAgentRun(runId);
+      if (!run) throw new Error(`Agent run not found: ${runId}`);
+      if (eventType === "running" && run.status === "claimed") {
+        database.updateAgentRun(runId, { status: "running", startedAt: new Date().toISOString() });
+      }
+      return database.appendAgentRunEvent(runId, eventType, message);
+    },
+    requestApproval: (input: {
+      runId: string;
+      actionType: ApprovalActionType;
+      destination: string;
+      summary: string;
+      payloadPreview?: string | null;
+      expiresAt?: string | null;
+    }) => {
+      const run = database.getAgentRun(input.runId);
+      if (!run) throw new Error(`Agent run not found: ${input.runId}`);
+      if (run.status === "claimed") {
+        database.updateAgentRun(run.id, { status: "running", startedAt: new Date().toISOString() });
+      }
+      return database.createApprovalRequest(input);
+    },
+    getApprovalStatus: (approvalId: string) => {
+      const approval = database.getApprovalRequest(approvalId);
+      if (!approval) throw new Error(`Approval request not found: ${approvalId}`);
+      return approval;
+    },
+    submitRunResult: (input: {
+      runId: string;
+      finalResponse: string;
+      verificationSummary: string;
+      artifactPaths?: string[];
+      externalSessionId?: string | null;
+    }) => database.submitAgentRunResult(input.runId, input),
+    failRun: (runId: string, reason: string) => database.recordAgentRunFailure(runId, reason),
     updateTaskStatus: (taskId: string, status: Exclude<TaskStatus, "done">) => database.transitionTask(taskId, status),
     appendRunEvent: (runId: string, eventType: string, message: string) => database.appendCodexRunEvent(runId, eventType, message),
     markTaskBlocked: (taskId: string, reason: string, runId?: string) => {
@@ -50,9 +130,7 @@ export function createPersonalOsTools(database: PersonalOsDatabase) {
       return { task: transitioned, run };
     },
     saveArtifact: (runId: string, path: string) => {
-      const run = database.getCodexRun(runId);
-      if (!run) throw new Error(`Codex run not found: ${runId}`);
-      return database.updateCodexRun(runId, { artifactPaths: Array.from(new Set([...run.artifactPaths, path])) });
+      return database.saveAgentRunArtifact(runId, path);
     },
     createAssetCandidate: (input: IncomeAssetInput) => database.createAsset({ ...input, stage: input.stage ?? "idea" }),
     saveOpportunity: (input: OpportunityInput) => database.createOpportunity(input),

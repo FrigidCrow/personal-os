@@ -45,6 +45,23 @@ Phase B verification:
 - API tests covered OpenWorker queue dispatch/list/pause/cancel and a second unique retry attempt.
 - Full gates passed with 6 test files / 40 tests, TypeScript, ESLint, production builds, and patch hygiene.
 
+### Work - Phase C: OpenWorker MCP Pull contract
+
+- Added the planned MCP tools for claimable work, atomic claim, execution context, heartbeat, typed events, approval request/status, artifacts, result submission, and failure handling.
+- Kept the legacy Codex-oriented MCP tools for compatibility, but changed the shared event and artifact paths to the generic AgentRun model.
+- Added database operations that list only queued/unpaused work, atomically acquire a lease, persist artifacts with events, and transactionally submit a worker result to Needs Review.
+- Added fake-worker tool and in-memory MCP protocol tests covering one successful claimant, execution context safety policy, heartbeat, timeline events, artifact persistence, result submission, and pending approval blocking.
+- Built the MCP bundle and added it to the running OpenWorker instance as `personal_os`. The OpenWorker config is connected and limits actual session exposure to the ten Pull-workflow tools; these control-plane writes do not require OpenWorker's duplicate approval layer.
+- Created OpenWorker automation `task-c53f71a26e` (`Personal OS Pull Worker`, every five minutes, Asia/Tokyo) with strict one-task, local-artifact, approval, and Needs Review instructions.
+- Paused that automation because OpenWorker reports `model_ready: false` and `has_key: false`; no provider key exists in the process environment. No key was read, copied, logged, or stored in the repository.
+
+Phase C verification so far:
+
+- Fake OpenWorker contract passed through real MCP client/server protocol and SQLite persistence.
+- OpenWorker `/v1/mcp` reports `personal_os` connected with the intended include-tool whitelist and no last error.
+- Full gates passed with 6 test files / 43 tests, TypeScript, ESLint, production builds, and patch hygiene.
+- The required real OpenWorker model run remains Pending until a model is configured in OpenWorker Settings; the paused automation can then be enabled and run without code changes.
+
 ## 2026-07-28 - Plan
 
 - Cloned the empty remote repository into `/Users/frigidcrow/Documents/Codex/dev/personal-os`.

@@ -29,6 +29,16 @@ describe("Personal OS MCP protocol", () => {
     const names = listed.tools.map((tool) => tool.name);
     expect(names).toContain("get_today_context");
     expect(names).toContain("complete_task");
+    expect(names).toEqual(expect.arrayContaining([
+      "list_claimable_tasks",
+      "claim_task",
+      "get_execution_context",
+      "heartbeat_run",
+      "request_approval",
+      "get_approval_status",
+      "submit_run_result",
+      "fail_run"
+    ]));
     expect(names).not.toContain("accept_run");
     expect(names).not.toContain("publish");
     expect(names).not.toContain("purchase");
@@ -71,5 +81,46 @@ describe("Personal OS MCP protocol", () => {
     expect(database.getTask(task.id)?.status).toBe("needs_review");
     expect(database.getCodexRun(run.id)?.status).toBe("needs_review");
     expect(database.getCodexRun(run.id)?.requiresHumanReview).toBe(true);
+  });
+
+  it("runs a deterministic OpenWorker pull flow through the MCP protocol", async () => {
+    const task = database.createTask({
+      title: "MCP pull task",
+      status: "ready",
+      acceptanceCriteria: ["Result is submitted for review"],
+      taskType: "general_writing",
+      executor: "openworker",
+      executionMode: "automatic",
+      riskLevel: "low",
+      maxAttempts: 2
+    });
+    const run = database.createAgentRun({
+      taskId: task.id,
+      executor: "openworker",
+      promptSnapshot: "Write a local result.",
+      idempotencyKey: "protocol:pull:1"
+    });
+
+    const listed = await client.callTool({ name: "list_claimable_tasks", arguments: { executor: "openworker" } }, CallToolResultSchema);
+    const listedBlock = Array.isArray(listed.content) ? listed.content[0] : null;
+    if (listedBlock?.type !== "text") throw new Error("Expected text result");
+    expect(JSON.parse(listedBlock.text)).toEqual([
+      expect.objectContaining({ runId: run.id, task: expect.objectContaining({ id: task.id }) })
+    ]);
+
+    await client.callTool({ name: "claim_task", arguments: { taskId: task.id, executor: "openworker" } });
+    await client.callTool({ name: "append_run_event", arguments: { runId: run.id, eventType: "running", message: "Fake worker started." } });
+    await client.callTool({
+      name: "submit_run_result",
+      arguments: {
+        runId: run.id,
+        finalResponse: "Fake worker result.",
+        verificationSummary: "Protocol result persisted.",
+        artifactPaths: []
+      }
+    });
+
+    expect(database.getAgentRun(run.id)?.status).toBe("needs_review");
+    expect(database.getTask(task.id)?.status).toBe("needs_review");
   });
 });
