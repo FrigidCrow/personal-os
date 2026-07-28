@@ -10,7 +10,11 @@ import type {
   TaskStatus
 } from "@personal-os/domain";
 
-export function createPersonalOsTools(database: PersonalOsDatabase) {
+export function createPersonalOsTools(
+  database: PersonalOsDatabase,
+  options: { leaseMilliseconds?: number } = {}
+) {
+  const leaseMilliseconds = options.leaseMilliseconds ?? 120_000;
   return {
     getTodayContext: () => database.getDashboard(),
     getProject: (projectId: string) => {
@@ -27,8 +31,11 @@ export function createPersonalOsTools(database: PersonalOsDatabase) {
       const task = database.getTask(run.taskId)!;
       return {
         runId: run.id,
+        taskId: task.id,
         executor: run.executor,
         attempt: run.attempt,
+        claimArguments: { taskId: task.id, executor: run.executor },
+        contextArguments: { runId: run.id },
         task,
         project: task.projectId ? database.getProject(task.projectId) : null
       };
@@ -37,7 +44,7 @@ export function createPersonalOsTools(database: PersonalOsDatabase) {
       const run = database.getActiveRunForTask(taskId);
       if (!run || run.status !== "queued") throw new Error(`No queued run exists for task: ${taskId}`);
       if (run.executor !== executor) throw new Error(`Queued run belongs to ${run.executor}, not ${executor}`);
-      return database.claimAgentRun(run.id);
+      return database.claimAgentRun(run.id, leaseMilliseconds);
     },
     getExecutionContext: (runId: string) => {
       const run = database.getAgentRun(runId);
@@ -57,7 +64,7 @@ export function createPersonalOsTools(database: PersonalOsDatabase) {
         }
       };
     },
-    heartbeatRun: (runId: string) => database.heartbeatAgentRun(runId),
+    heartbeatRun: (runId: string) => database.heartbeatAgentRun(runId, leaseMilliseconds),
     appendAgentRunEvent: (runId: string, eventType: AgentRunEventType, message: string) => {
       const run = database.getAgentRun(runId);
       if (!run) throw new Error(`Agent run not found: ${runId}`);

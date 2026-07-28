@@ -516,6 +516,12 @@ export class PersonalOsDatabase {
         created_at
       FROM codex_run_events;
 
+      -- OpenWorker has never had a deterministic demo adapter: every queued
+      -- OpenWorker run is consumed by the external process over MCP. Repair
+      -- records created before the dispatcher enforced that invariant.
+      UPDATE agent_runs SET mode = 'live'
+      WHERE executor = 'openworker' AND mode = 'demo';
+
       CREATE INDEX IF NOT EXISTS idx_agent_runs_task ON agent_runs(task_id);
       CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
       CREATE INDEX IF NOT EXISTS idx_agent_runs_executor_status ON agent_runs(executor, status);

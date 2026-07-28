@@ -39,6 +39,24 @@ describe("AgentDispatcher", () => {
 
   afterEach(() => database.close());
 
+  it("labels OpenWorker pulls as live even when a caller supplies demo mode", () => {
+    const task = database.createTask({
+      title: "Real pull worker",
+      status: "ready",
+      taskType: "business_report",
+      executor: "openworker",
+      executionMode: "manual",
+      triggerType: "manual",
+      riskLevel: "low",
+      maxAttempts: 1
+    });
+    const dispatcher = new AgentDispatcher(database, undefined, undefined, () => currentTime);
+
+    const run = dispatcher.dispatch(task.id, { forceExecutor: "openworker", mode: "demo" });
+
+    expect(run).toMatchObject({ executor: "openworker", mode: "live", status: "queued" });
+  });
+
   it("automatically runs a due low-risk Codex demo through Needs Review", async () => {
     const project = database.createProject({
       name: "Dispatcher repository",

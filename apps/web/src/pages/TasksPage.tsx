@@ -199,7 +199,7 @@ export function TasksPage() {
     }
   });
   const dispatch = useMutation({
-    mutationFn: ({ id, forceExecutor }: { id: string; forceExecutor?: "codex" | "openworker" }) => api.dispatchTask(id, { mode: "demo", forceExecutor }),
+    mutationFn: ({ id, forceExecutor }: { id: string; forceExecutor?: "codex" | "openworker" }) => api.dispatchTask(id, { mode: forceExecutor === "openworker" ? "live" : "demo", forceExecutor }),
     onSuccess: async (run) => {
       showSuccess(run.executor === "openworker" ? "任务已进入 OpenWorker 拉取队列" : "任务已进入 Agent 执行队列");
       await refresh();
@@ -474,6 +474,7 @@ export function TasksPage() {
                     return <article
                       aria-label={`查看 ${task.title} 详情；拖动可更改状态`}
                       className={`task-ticket${draggedTaskId === task.id ? " is-dragging" : ""}`}
+                      data-testid={`task-card-${task.id}`}
                       data-draggable={!transition.isPending && columns.some((target) => canTransitionTask(task.status, target.status))}
                       data-task-id={task.id}
                       key={task.id}

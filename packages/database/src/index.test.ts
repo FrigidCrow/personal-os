@@ -242,6 +242,35 @@ describe("MVP1 database migration", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("repairs historical OpenWorker runs that were mislabeled as demo", () => {
+    const directory = mkdtempSync(join(tmpdir(), "personal-os-openworker-mode-"));
+    const filePath = join(directory, "mode.db");
+    try {
+      const initial = new PersonalOsDatabase({ filePath, seed: false });
+      const task = initial.createTask({
+        title: "Historical pull run",
+        status: "ready",
+        executor: "openworker",
+        executionMode: "manual",
+        riskLevel: "low"
+      });
+      const run = initial.createAgentRun({
+        taskId: task.id,
+        executor: "openworker",
+        mode: "demo",
+        promptSnapshot: "Historical mislabeled run",
+        idempotencyKey: "historical-openworker-demo"
+      });
+      initial.close();
+
+      const migrated = new PersonalOsDatabase({ filePath, seed: false });
+      expect(migrated.getAgentRun(run.id)?.mode).toBe("live");
+      migrated.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("agent run leases and retry limits", () => {

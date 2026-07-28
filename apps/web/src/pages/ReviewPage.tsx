@@ -224,7 +224,7 @@ export function ReviewPage() {
       <SectionHeader title="审批收件箱" description="发送消息、写日历、发布和外部写入等动作必须先得到你的明确决定。" />
       {approvals.error ? <ErrorState error={approvals.error} retry={() => approvals.refetch()} /> : pendingApprovals.length === 0 ? <div className="approval-empty"><ShieldCheck size={19} /><span>当前没有待处理的高风险动作</span></div> : (
         <div className="approval-grid">{pendingApprovals.map((approval) => (
-          <article className="approval-card" key={approval.id}>
+          <article className="approval-card" data-testid={`approval-card-${approval.id}`} key={approval.id}>
             <header><span>{allRuns.find((run) => run.id === approval.runId)?.executor ?? "agent"} · {approval.actionType}</span><strong>等待你的决定</strong></header>
             <h2>{approval.summary}</h2>
             <dl><div><dt>目标</dt><dd>{approval.destination}</dd></div><div><dt>过期</dt><dd>{formatTimestamp(approval.expiresAt)}</dd></div></dl>
@@ -240,7 +240,7 @@ export function ReviewPage() {
           {filteredRuns.map((run) => {
             const task = tasks.data?.items.find((item) => item.id === run.taskId);
             const canRetry = ["failed", "blocked", "cancelled"].includes(run.status) && run.attempt < (task?.maxAttempts ?? run.attempt);
-            return <article className="review-run" key={run.id}>
+            return <article className="review-run" data-testid={`run-card-${run.id}`} key={run.id}>
               <header>
                 <div className="run-avatar"><Robot size={22} weight="duotone" /></div>
                 <div><span>{run.executor} · {run.mode}</span><h2>{taskTitle(run)}</h2><small>{projectName(run)} · 第 {run.attempt} / {task?.maxAttempts ?? run.attempt} 次</small></div>

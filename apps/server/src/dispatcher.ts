@@ -81,7 +81,9 @@ export class AgentDispatcher {
     const context: TaskExecutionContext = {
       task,
       project,
-      mode: options.mode ?? "demo",
+      // OpenWorker is always an external pull worker. "demo" only describes
+      // the deterministic Codex/report adapters and must never label real work.
+      mode: executor === "openworker" ? "live" : options.mode ?? "demo",
       newThread: options.newThread ?? false,
       additionalInstructions: options.additionalInstructions,
       idempotencyKey: options.idempotencyKey ?? `dispatch:${task.id}:${randomUUID()}`,

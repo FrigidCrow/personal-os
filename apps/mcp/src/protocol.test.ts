@@ -105,7 +105,13 @@ describe("Personal OS MCP protocol", () => {
     const listedBlock = Array.isArray(listed.content) ? listed.content[0] : null;
     if (listedBlock?.type !== "text") throw new Error("Expected text result");
     expect(JSON.parse(listedBlock.text)).toEqual([
-      expect.objectContaining({ runId: run.id, task: expect.objectContaining({ id: task.id }) })
+      expect.objectContaining({
+        runId: run.id,
+        taskId: task.id,
+        claimArguments: { taskId: task.id, executor: "openworker" },
+        contextArguments: { runId: run.id },
+        task: expect.objectContaining({ id: task.id })
+      })
     ]);
 
     await client.callTool({ name: "claim_task", arguments: { taskId: task.id, executor: "openworker" } });

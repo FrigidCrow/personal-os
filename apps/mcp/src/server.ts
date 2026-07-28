@@ -19,8 +19,11 @@ function toolResult(value: unknown) {
   };
 }
 
-export function createPersonalOsMcpServer(database: PersonalOsDatabase): McpServer {
-  const tools = createPersonalOsTools(database);
+export function createPersonalOsMcpServer(
+  database: PersonalOsDatabase,
+  options: { leaseMilliseconds?: number } = {}
+): McpServer {
+  const tools = createPersonalOsTools(database, options);
   const server = new McpServer(
     { name: "personal-os", version: "0.1.0" },
     {
@@ -50,14 +53,14 @@ export function createPersonalOsMcpServer(database: PersonalOsDatabase): McpServ
 
   server.registerTool("list_claimable_tasks", {
     title: "List claimable tasks",
-    description: "List queued Personal OS tasks that the requested executor may atomically claim.",
+    description: "List queued Personal OS work. Copy claimArguments exactly into claim_task; taskId and runId are different IDs.",
     inputSchema: z.object({ executor: agentExecutorSchema.default("openworker") }),
     annotations: { readOnlyHint: true }
   }, async ({ executor }) => toolResult(tools.listClaimableTasks(executor)));
 
   server.registerTool("claim_task", {
     title: "Claim task",
-    description: "Atomically claim the queued run for a task and acquire a two-minute worker lease.",
+    description: "Atomically claim a queued run and acquire the configured worker lease. Copy taskId from list_claimable_tasks.claimArguments; never pass runId as taskId.",
     inputSchema: z.object({ taskId: z.string().uuid(), executor: agentExecutorSchema.default("openworker") })
   }, async ({ taskId, executor }) => toolResult(tools.claimTask(taskId, executor)));
 
@@ -70,7 +73,7 @@ export function createPersonalOsMcpServer(database: PersonalOsDatabase): McpServ
 
   server.registerTool("heartbeat_run", {
     title: "Heartbeat run",
-    description: "Extend an active worker lease by two minutes. Workers should call this every 30 seconds.",
+    description: "Extend an active worker lease by the configured duration. Workers should call this before work and periodically while running.",
     inputSchema: z.object({ runId: z.string().uuid() })
   }, async ({ runId }) => toolResult(tools.heartbeatRun(runId)));
 

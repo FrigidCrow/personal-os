@@ -13,6 +13,7 @@
     "dev:web": "npm run dev -w @personal-os/web",
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.0",
     "@types/node": "^24.10.1",
     "concurrently": "^10.0.4",
     "esbuild": "^0.28.1",

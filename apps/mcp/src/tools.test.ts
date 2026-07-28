@@ -65,7 +65,14 @@ describe("Personal OS MCP tool contract", () => {
     });
 
     expect(tools.listClaimableTasks()).toEqual([
-      expect.objectContaining({ runId: queued.id, executor: "openworker", task: expect.objectContaining({ id: task.id }) })
+      expect.objectContaining({
+        runId: queued.id,
+        taskId: task.id,
+        executor: "openworker",
+        claimArguments: { taskId: task.id, executor: "openworker" },
+        contextArguments: { runId: queued.id },
+        task: expect.objectContaining({ id: task.id })
+      })
     ]);
     const claimed = tools.claimTask(task.id);
     expect(claimed.status).toBe("claimed");
@@ -87,6 +94,30 @@ describe("Personal OS MCP tool contract", () => {
     expect(database.listAgentRunEvents(claimed.id).map((event) => event.eventType)).toEqual(
       expect.arrayContaining(["queued", "claimed", "heartbeat", "running", "artifact_saved", "verification", "needs_review"])
     );
+  });
+
+  it("supports a longer deployment lease for slower local models", () => {
+    const slowTools = createPersonalOsTools(database, { leaseMilliseconds: 600_000 });
+    const task = database.createTask({
+      title: "Slow local worker",
+      status: "ready",
+      executor: "openworker",
+      executionMode: "automatic",
+      triggerType: "manual",
+      riskLevel: "low",
+      maxAttempts: 1
+    });
+    database.createAgentRun({
+      taskId: task.id,
+      executor: "openworker",
+      promptSnapshot: "Use the longer lease.",
+      idempotencyKey: "mcp:slow-worker"
+    });
+
+    const claimed = slowTools.claimTask(task.id);
+    const leaseDuration = new Date(claimed.leaseExpiresAt!).getTime() - new Date(claimed.claimedAt!).getTime();
+
+    expect(leaseDuration).toBe(600_000);
   });
 
   it("creates an immutable approval request instead of performing an external write", () => {
