@@ -1,6 +1,12 @@
 import { Codex } from "@openai/codex-sdk";
 import type { PersonalOsDatabase } from "@personal-os/database";
-import type { DailyReport, OpportunityInput } from "@personal-os/domain";
+import {
+  evaluateOpportunityResearchGate,
+  OPPORTUNITY_RESEARCH_SCORE_THRESHOLD,
+  RADAR_QUALIFIED_TARGET,
+  type DailyReport,
+  type OpportunityInput
+} from "@personal-os/domain";
 
 const opportunityOutputSchema = {
   type: "object",
@@ -8,7 +14,7 @@ const opportunityOutputSchema = {
     summary: { type: "string" },
     opportunities: {
       type: "array",
-      maxItems: 5,
+      maxItems: RADAR_QUALIFIED_TARGET,
       items: {
         type: "object",
         properties: {
@@ -46,6 +52,50 @@ const opportunityOutputSchema = {
           minimalExperiment: { type: "string" },
           successCondition: { type: "string" },
           stopCondition: { type: "string" },
+          assessment: {
+            type: "object",
+            properties: {
+              currentAlternative: { type: "string" },
+              currentAlternativeCost: { type: "string" },
+              competitiveLandscape: { type: "string" },
+              automatedDeliveryFlow: { type: "string" },
+              acquisitionPlan: { type: "string" },
+              dependencies: {
+                type: "array",
+                maxItems: 12,
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    type: { type: "string", enum: ["account", "qualification", "api", "data", "compliance", "platform", "other"] },
+                    status: { type: "string", enum: ["verified", "unverified", "blocking"] },
+                    details: { type: "string" },
+                    sourceUrl: { type: ["string", "null"] }
+                  },
+                  required: ["name", "type", "status", "details", "sourceUrl"],
+                  additionalProperties: false
+                }
+              },
+              failureReasons: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } },
+              unknowns: { type: "array", maxItems: 8, items: { type: "string" } },
+              scores: {
+                type: "object",
+                properties: {
+                  demand: { type: "integer", minimum: 0, maximum: 20 },
+                  payment: { type: "integer", minimum: 0, maximum: 20 },
+                  acquisition: { type: "integer", minimum: 0, maximum: 15 },
+                  closure: { type: "integer", minimum: 0, maximum: 15 },
+                  differentiation: { type: "integer", minimum: 0, maximum: 10 },
+                  feasibility: { type: "integer", minimum: 0, maximum: 10 },
+                  recurringValue: { type: "integer", minimum: 0, maximum: 10 }
+                },
+                required: ["demand", "payment", "acquisition", "closure", "differentiation", "feasibility", "recurringValue"],
+                additionalProperties: false
+              }
+            },
+            required: ["currentAlternative", "currentAlternativeCost", "competitiveLandscape", "automatedDeliveryFlow", "acquisitionPlan", "dependencies", "failureReasons", "unknowns", "scores"],
+            additionalProperties: false
+          },
           evidence: {
             type: "array",
             minItems: 1,
@@ -55,14 +105,19 @@ const opportunityOutputSchema = {
                 label: { type: "string" },
                 sourceUrl: { type: "string" },
                 type: { type: "string", enum: ["fact", "inference"] },
-                summary: { type: "string" }
+                category: { type: "string", enum: ["demand", "payment", "channel", "feasibility", "counter"] },
+                strength: { type: "string", enum: ["weak", "medium", "strong"] },
+                sourceDate: { type: ["string", "null"] },
+                summary: { type: "string" },
+                proves: { type: "string" },
+                limitations: { type: "string" }
               },
-              required: ["label", "sourceUrl", "type", "summary"],
+              required: ["label", "sourceUrl", "type", "category", "strength", "sourceDate", "summary", "proves", "limitations"],
               additionalProperties: false
             }
           }
         },
-        required: ["title", "payer", "pain", "summary", "businessModel", "offer", "pricingModel", "salesChannels", "firstSalePlan", "confidence", "personalFit", "validationEffortHours", "validationBudget", "timeToRevenue", "recurringPotential", "maintenanceHoursMonthly", "hypothesis", "minimalExperiment", "successCondition", "stopCondition", "evidence"],
+        required: ["title", "payer", "pain", "summary", "businessModel", "offer", "pricingModel", "salesChannels", "firstSalePlan", "confidence", "personalFit", "validationEffortHours", "validationBudget", "timeToRevenue", "recurringPotential", "maintenanceHoursMonthly", "hypothesis", "minimalExperiment", "successCondition", "stopCondition", "assessment", "evidence"],
         additionalProperties: false
       }
     }
@@ -95,8 +150,18 @@ function assertChineseReport(parsed: { summary: string; opportunities: Array<Omi
     opportunity.minimalExperiment,
     opportunity.successCondition,
     opportunity.stopCondition,
+    ...(opportunity.assessment ? [
+      opportunity.assessment.currentAlternative,
+      opportunity.assessment.currentAlternativeCost,
+      opportunity.assessment.competitiveLandscape,
+      opportunity.assessment.automatedDeliveryFlow,
+      opportunity.assessment.acquisitionPlan,
+      ...opportunity.assessment.dependencies.flatMap((dependency) => [dependency.name, dependency.details]),
+      ...opportunity.assessment.failureReasons,
+      ...opportunity.assessment.unknowns
+    ] : []),
     ...opportunity.salesChannels.flatMap((channel) => [channel.name, channel.accessMethod]),
-    ...opportunity.evidence.flatMap((evidence) => [evidence.label, evidence.summary])
+    ...opportunity.evidence.flatMap((evidence) => [evidence.label, evidence.summary, evidence.proves, evidence.limitations])
   ].some((value) => !containsChinese(value)));
   if (invalid) throw new Error(`Live radar returned non-Chinese content for opportunity: ${invalid.title}`);
 }
@@ -105,7 +170,7 @@ export class RadarService {
   constructor(private readonly database: PersonalOsDatabase) {}
 
   generateDemo(): DailyReport {
-    const opportunities = this.database.listOpportunities().sort((a, b) => b.score - a.score).slice(0, 5);
+    const opportunities = this.database.listOpportunities().sort((a, b) => b.score - a.score).slice(0, RADAR_QUALIFIED_TARGET);
     return this.database.createDailyReport({
       reportDate: today(),
       title: "机会雷达日报",
@@ -129,11 +194,15 @@ export class RadarService {
       webSearchMode: "live"
     });
     const prompt = [
-      "请调研当前有证据支持、适合个人技术从业者以最低投入测试的赚钱机会。",
+      "你是保守的商业机会投资委员会，不是创业点子生成器。先跨多个垂直领域广泛扫描，再对最强候选做深度尽调。",
       `操作者画像：${schedule.searchProfile}`,
       schedule.customInstructions ? `用户自定义搜索规则：${schedule.customInstructions}` : "用户没有添加额外搜索规则。",
-      "最多返回五个机会。优先考虑明确的付费者痛点、近期公开需求、可重复交付能力，以及四小时以内可以完成的最小测试。",
-      "销售渠道是硬门槛。每个候选必须说明具体卖什么、卖给谁、如何定价、从哪个真实渠道接触买家，以及获得第一单的分步路径。salesChannels 至少包含一个可直接访问的公开 URL 和具体进入方式。无法验证销售渠道的候选必须省略，不能为了凑数返回。",
+      `最多返回 ${RADAR_QUALIFIED_TARGET} 个深挖候选。每个候选必须独立达到 ${OPPORTUNITY_RESEARCH_SCORE_THRESHOLD} 分并通过全部门禁；不足三个时如实少返回，禁止降低标准凑数。`,
+      "每个候选至少需要两条独立的真实需求事实，并且 demand、payment、channel、feasibility、counter 五类都必须有带日期的强事实证据，强证据至少来自五个不同 URL。竞品宣传页或价格页只能证明有人尝试销售，不能单独证明用户正在付费。",
+      "必须主动调查免费替代品、平台原生能力、隐私顾虑和最可能失败的原因。逐条写清来源证明了什么、没有证明什么，并列出未解决问题。",
+      "销售渠道是硬门槛。必须说明精确入口、准入资格、成本、限制以及前 100 个目标访问者从哪里来。泛泛写小红书、抖音、知乎或 SEO 不算渠道。",
+      "商业闭环必须覆盖发现、首次价值、合规微信或支付宝收款、付款回调、自动交付、复购和维护。人工咨询、代做、逐单分析或不可获得的商业账号不能作为核心环节。任何 blocking 依赖都会淘汰候选。",
+      "评分必须保守校准。没有直接用户证据时 demand 不得超过 10；只有价格页没有采用或购买证据时 payment 不得超过 10；只有泛渠道描述时 acquisition 不得超过 7；存在未验证的关键交付依赖时 closure 不得超过 7。",
       "所有面向用户的字符串值必须使用简体中文，包括报告摘要、标题、付费者、痛点、商业模式、假设、最小实验、继续与停止条件、证据标签和证据摘要。专有名词可以保留英文，来源 URL 必须保持原样。不要输出英文段落。",
       "每项事实都需要提供可直接访问的来源 URL。没有直接证据的商业判断必须标记为 inference，并在中文摘要中明确说明这是推断。",
       "不得声称收入有保证。不得执行外联、购买、发布或创建账户等操作。只做只读调研并返回结构化结果。报告摘要只总结机会、优先级和下一步，不要描述数据是否已保存；应用会在返回后自动持久化报告。"
@@ -141,15 +210,18 @@ export class RadarService {
     const result = await thread.run(prompt, { outputSchema: opportunityOutputSchema });
     const parsed = JSON.parse(result.finalResponse) as { summary: string; opportunities: Array<Omit<OpportunityInput, "status" | "isDemo">> };
     assertChineseReport(parsed);
-    const created = parsed.opportunities.slice(0, 5).map((opportunity) => this.database.createOpportunity({
-      ...opportunity,
-      status: "candidate",
-      isDemo: false
-    }));
+    const created = parsed.opportunities.slice(0, RADAR_QUALIFIED_TARGET).flatMap((opportunity) => {
+      const candidate = { ...opportunity, status: "candidate" as const, isDemo: false };
+      return evaluateOpportunityResearchGate(candidate).passed
+        ? [this.database.createQualifiedRadarOpportunity(candidate)]
+        : [];
+    });
     return this.database.createDailyReport({
       reportDate: today(),
       title: "机会雷达日报",
-      summary: parsed.summary,
+      summary: created.length === RADAR_QUALIFIED_TARGET
+        ? parsed.summary
+        : `${parsed.summary}\n\n程序门禁最终保留 ${created.length}/${RADAR_QUALIFIED_TARGET} 个达到 ${OPPORTUNITY_RESEARCH_SCORE_THRESHOLD} 分的候选，本次调研未达到完全成功标准。`,
       generatedBy: "codex",
       opportunityIds: created.map((opportunity) => opportunity.id),
       isDemo: false

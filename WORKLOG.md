@@ -267,3 +267,29 @@ Phase E verification so far:
 - The recovered 08:00 opportunity radar reached `succeeded` at 2026-07-29 13:50 JST and scheduled its next run for 2026-07-30 08:00 JST. The OpenWorker/DeepSeek run used 38 steps and saved a five-opportunity Chinese report.
 - Live API validation confirmed all five saved opportunities contain a concrete offer, payer, pricing model, first-sale plan, and one or more structured sales channels with a URL and access method. The desktop and 390px radar views render these fields as the `成交路径已验证` section.
 - The live verification also proved that an empty ordinary task queue is followed by `claim_due_radar`; it no longer causes the due radar job to be skipped. A true empty poll now returns the explicit Chinese Idle message.
+
+## 2026-07-29 - Opportunity radar deep-research gate
+
+### Plan
+
+- Replaced the permissive zero-opportunity success proposal with the user's explicit target: scan multiple verticals, persist at most three qualified candidates, and count the run as fully successful only at 3/3 with every score at least 85.
+- Added `docs/RADAR-DEEP-RESEARCH-ACCEPTANCE.md` before implementation and used the `product-trend-researcher` evidence doctrine plus the existing `design-taste-frontend` product-UI contract.
+- Preserved the editable user profile and custom rules, while treating the 85-point threshold, five evidence classes, three-candidate target, and experiment gate as non-editable system invariants.
+
+### Work
+
+- Added a seven-dimension 100-point assessment, critical score floors, two-source demand requirement, five strong dated evidence categories, five distinct strong-source URLs, blocking-dependency rejection, and an atomic maximum of three saved candidates per claim.
+- Added the `partial` scheduler state. Codex and OpenWorker now return `succeeded` only for exactly three qualified candidates; zero to two preserve the honest report as not fully qualified, while operational exceptions remain `failed`.
+- Added structured alternatives, current cost, competition, automated delivery, first-100 acquisition, dependencies, failure reasons, unknowns, evidence proof scope, and limitations across Domain, SQLite, Codex JSON schema, MCP tools, and the repository Radar Skill.
+- Prevented old shallow opportunities from starting new experiments. Existing data remains readable after additive SQLite migrations and now shows its missing-gate reasons.
+- Expanded the Radar UI with a compact audit panel, score breakdown, 3-candidate target, full/partial/failure status distinction, evidence classes and strengths, risks, closure path, and explicit legacy state. Kept the existing graphite/orange, Radix, Geist, and Phosphor system.
+- Updated the saved live custom prompt from the conflicting 75-point/one-plus-two rule to three formal candidates at 85 points. The next run remains 2026-07-30 08:00 Asia/Tokyo.
+- Created a pre-deployment SQLite backup at `backups/personal-os-2026-07-29T05-56-06-058Z.db`, rebuilt all services, restarted Personal OS and OpenWorker, and verified `personal_os` is connected in the refreshed OpenWorker registry.
+
+### Review
+
+- Final unit and integration result: 7 files / 80 tests passed, including 1/3 partial, 3/3 success, fourth-candidate rejection, weak critical evidence rejection, 84-point rejection, migration compatibility, and legacy experiment blocking.
+- Final browser result: 8/8 Playwright journeys passed. Desktop and 390px Radar audit screenshots are stored in the Playwright output; mobile document width equals viewport width.
+- TypeScript, ESLint, all production builds, dependency audit with zero vulnerabilities, and `git diff --check` passed.
+- Live health after deployment reports SQLite `ok`, zero active or stale runs, zero pending approvals, next Radar run at `2026-07-29T23:00:00.000Z`, and OpenWorker `personal_os` registered and connected.
+- The program can validate evidence structure and declared strength but cannot independently guarantee the semantic truth of every cited page. Real evidence should still be reviewed before authorizing spend or launching an experiment.

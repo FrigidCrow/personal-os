@@ -25,6 +25,10 @@ export const taskTypeSchema = z.enum([
 ]);
 export const opportunityStatusSchema = z.enum(["candidate", "shortlisted", "dismissed", "experiment", "validated", "rejected"]);
 export const evidenceTypeSchema = z.enum(["fact", "inference"]);
+export const evidenceCategorySchema = z.enum(["demand", "payment", "channel", "feasibility", "counter"]);
+export const evidenceStrengthSchema = z.enum(["weak", "medium", "strong"]);
+export const dependencyTypeSchema = z.enum(["account", "qualification", "api", "data", "compliance", "platform", "other"]);
+export const dependencyStatusSchema = z.enum(["verified", "unverified", "blocking"]);
 export const experimentStatusSchema = z.enum(["hypothesis", "preparing", "running", "measuring", "won", "lost", "pivoted"]);
 export const assetStageSchema = z.enum(["idea", "evidence", "experiment", "building", "launched", "revenue", "systemized"]);
 export const agentRunStatusSchema = z.enum([
@@ -63,7 +67,10 @@ export const approvalActionTypeSchema = z.enum([
 ]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "rejected", "expired"]);
 export const generatedBySchema = z.enum(["demo", "codex", "openworker", "manual"]);
-export const radarScheduleStatusSchema = z.enum(["idle", "running", "succeeded", "failed", "skipped"]);
+export const radarScheduleStatusSchema = z.enum(["idle", "running", "succeeded", "partial", "failed", "skipped"]);
+
+export const OPPORTUNITY_RESEARCH_SCORE_THRESHOLD = 85;
+export const RADAR_QUALIFIED_TARGET = 3;
 
 const optionalText = z.string().trim().max(2000).nullable().optional();
 const optionalDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional();
@@ -113,13 +120,48 @@ export const evidenceInputSchema = z.object({
   label: z.string().trim().min(1).max(180),
   sourceUrl: z.string().url(),
   type: evidenceTypeSchema,
-  summary: z.string().trim().min(1).max(1000)
+  category: evidenceCategorySchema.default("demand"),
+  strength: evidenceStrengthSchema.default("weak"),
+  sourceDate: optionalDate.default(null),
+  summary: z.string().trim().min(1).max(1000),
+  proves: z.string().trim().min(1).max(1000).default("历史证据未单独记录证明范围。"),
+  limitations: z.string().trim().min(1).max(1000).default("历史证据未单独记录局限。")
 });
 
 export const salesChannelInputSchema = z.object({
   name: z.string().trim().min(1).max(180),
   accessMethod: z.string().trim().min(1).max(1000),
   sourceUrl: z.string().url()
+});
+
+export const opportunityAssessmentScoresSchema = z.object({
+  demand: z.number().int().min(0).max(20),
+  payment: z.number().int().min(0).max(20),
+  acquisition: z.number().int().min(0).max(15),
+  closure: z.number().int().min(0).max(15),
+  differentiation: z.number().int().min(0).max(10),
+  feasibility: z.number().int().min(0).max(10),
+  recurringValue: z.number().int().min(0).max(10)
+});
+
+export const opportunityDependencySchema = z.object({
+  name: z.string().trim().min(1).max(180),
+  type: dependencyTypeSchema,
+  status: dependencyStatusSchema,
+  details: z.string().trim().min(1).max(1000),
+  sourceUrl: z.string().url().nullable().default(null)
+});
+
+export const opportunityAssessmentSchema = z.object({
+  currentAlternative: z.string().trim().min(1).max(1500),
+  currentAlternativeCost: z.string().trim().min(1).max(1000),
+  competitiveLandscape: z.string().trim().min(1).max(2000),
+  automatedDeliveryFlow: z.string().trim().min(1).max(2000),
+  acquisitionPlan: z.string().trim().min(1).max(2000),
+  dependencies: z.array(opportunityDependencySchema).max(12).default([]),
+  failureReasons: z.array(z.string().trim().min(1).max(800)).min(3).max(5),
+  unknowns: z.array(z.string().trim().min(1).max(800)).max(8).default([]),
+  scores: opportunityAssessmentScoresSchema
 });
 
 export const opportunityInputSchema = z.object({
@@ -143,6 +185,7 @@ export const opportunityInputSchema = z.object({
   minimalExperiment: z.string().trim().min(1).max(3000),
   successCondition: z.string().trim().min(1).max(1000),
   stopCondition: z.string().trim().min(1).max(1000),
+  assessment: opportunityAssessmentSchema.nullable().default(null),
   status: opportunityStatusSchema.default("candidate"),
   evidence: z.array(evidenceInputSchema).min(1).max(20),
   isDemo: z.boolean().default(false)
@@ -199,7 +242,7 @@ export const dailyReportInputSchema = z.object({
   title: z.string().trim().min(1).max(180),
   summary: z.string().trim().min(1).max(2000),
   generatedBy: generatedBySchema,
-  opportunityIds: z.array(z.string().uuid()).max(5),
+  opportunityIds: z.array(z.string().uuid()).max(RADAR_QUALIFIED_TARGET),
   isDemo: z.boolean().default(false)
 });
 
@@ -225,6 +268,8 @@ export type TriggerType = z.infer<typeof triggerTypeSchema>;
 export type RiskLevel = z.infer<typeof riskLevelSchema>;
 export type TaskType = z.infer<typeof taskTypeSchema>;
 export type OpportunityStatus = z.infer<typeof opportunityStatusSchema>;
+export type EvidenceCategory = z.infer<typeof evidenceCategorySchema>;
+export type EvidenceStrength = z.infer<typeof evidenceStrengthSchema>;
 export type ExperimentStatus = z.infer<typeof experimentStatusSchema>;
 export type AssetStage = z.infer<typeof assetStageSchema>;
 export type CodexRunStatus = z.infer<typeof codexRunStatusSchema>;
@@ -236,6 +281,7 @@ export type ProjectInput = z.infer<typeof projectInputSchema>;
 export type TaskCreateInput = z.input<typeof taskInputSchema>;
 export type TaskInput = z.output<typeof taskInputSchema>;
 export type OpportunityInput = z.infer<typeof opportunityInputSchema>;
+export type OpportunityAssessment = z.infer<typeof opportunityAssessmentSchema>;
 export type ExperimentInput = z.infer<typeof experimentInputSchema>;
 export type IncomeAssetInput = z.infer<typeof incomeAssetInputSchema>;
 export type DailyReportInput = z.infer<typeof dailyReportInputSchema>;
@@ -272,6 +318,8 @@ export interface Opportunity extends Omit<OpportunityInput, "evidence"> {
   id: string;
   evidence: Evidence[];
   score: number;
+  researchGatePassed: boolean;
+  researchGateReasons: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -421,7 +469,51 @@ export function assertAgentRunTransition(from: AgentRunStatus, to: AgentRunStatu
   }
 }
 
-export function calculateOpportunityScore(input: Pick<OpportunityInput, "confidence" | "personalFit" | "validationEffortHours" | "recurringPotential" | "maintenanceHoursMonthly">): number {
+const requiredEvidenceCategories: EvidenceCategory[] = ["demand", "payment", "channel", "feasibility", "counter"];
+
+export function calculateResearchScore(scores: z.infer<typeof opportunityAssessmentScoresSchema>): number {
+  return scores.demand + scores.payment + scores.acquisition + scores.closure + scores.differentiation + scores.feasibility + scores.recurringValue;
+}
+
+export function evaluateOpportunityResearchGate(input: Pick<OpportunityInput, "assessment" | "evidence" | "salesChannels">): { passed: boolean; score: number; reasons: string[] } {
+  const reasons: string[] = [];
+  if (!input.assessment) {
+    return { passed: false, score: 0, reasons: ["缺少结构化深度尽调。"] };
+  }
+
+  const score = calculateResearchScore(input.assessment.scores);
+  if (score < OPPORTUNITY_RESEARCH_SCORE_THRESHOLD) reasons.push(`综合评分 ${score}，低于 ${OPPORTUNITY_RESEARCH_SCORE_THRESHOLD} 分门槛。`);
+
+  const floors = {
+    demand: 12,
+    payment: 12,
+    acquisition: 9,
+    closure: 9,
+    feasibility: 6
+  } as const;
+  for (const [dimension, floor] of Object.entries(floors) as Array<[keyof typeof floors, number]>) {
+    if (input.assessment.scores[dimension] < floor) reasons.push(`${dimension} 分项低于最低门槛 ${floor} 分。`);
+  }
+
+  const factualEvidence = input.evidence.filter((item) => item.type === "fact");
+  const demandUrls = new Set(factualEvidence.filter((item) => item.category === "demand").map((item) => item.sourceUrl));
+  if (demandUrls.size < 2) reasons.push("需求证据不足两条独立事实来源。");
+
+  for (const category of requiredEvidenceCategories) {
+    const strong = factualEvidence.find((item) => item.category === category && item.strength === "strong" && item.sourceDate);
+    if (!strong) reasons.push(`${category} 类缺少带日期的强事实证据。`);
+  }
+
+  const strongSourceUrls = new Set(factualEvidence.filter((item) => item.strength === "strong" && item.sourceDate).map((item) => item.sourceUrl));
+  if (strongSourceUrls.size < requiredEvidenceCategories.length) reasons.push("强证据来源不够独立，至少需要五个不同 URL。");
+  if (input.salesChannels.length === 0) reasons.push("缺少可核验销售渠道。");
+  if (input.assessment.dependencies.some((item) => item.status === "blocking")) reasons.push("仍存在阻断自动成交或交付的外部依赖。");
+
+  return { passed: reasons.length === 0, score, reasons };
+}
+
+export function calculateOpportunityScore(input: Pick<OpportunityInput, "confidence" | "personalFit" | "validationEffortHours" | "recurringPotential" | "maintenanceHoursMonthly"> & Partial<Pick<OpportunityInput, "assessment">>): number {
+  if (input.assessment) return calculateResearchScore(input.assessment.scores);
   const effortScore = Math.max(0, 100 - input.validationEffortHours * 8);
   const maintenanceScore = Math.max(0, 100 - input.maintenanceHoursMonthly * 10);
   const weighted =

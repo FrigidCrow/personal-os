@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Checkbox, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
-import { ArrowSquareOut, CalendarBlank, CheckCircle, Clock, Crosshair, Flask, GearSix, Lightning, Sparkle } from "@phosphor-icons/react";
+import { ArrowSquareOut, CalendarBlank, CheckCircle, Clock, Crosshair, Flask, GearSix, Lightning, ShieldCheck, Sparkle, WarningCircle } from "@phosphor-icons/react";
 import { api, type RadarScheduleInput } from "../api";
 import { DemoBanner, EmptyState, ErrorState, LoadingState, SectionHeader } from "../components/UI";
 import { useSuccessToast } from "../components/SuccessToast";
@@ -44,9 +44,21 @@ function expressionFromTime(time: string): string {
   return `${Number(minute)} ${Number(hour)} * * *`;
 }
 
-function runStatusLabel(status: "idle" | "running" | "succeeded" | "failed" | "skipped" | undefined): string {
-  return { idle: "等待执行", running: "正在调研", succeeded: "最近一次成功", failed: "最近一次失败", skipped: "最近一次已跳过" }[status ?? "idle"];
+function runStatusLabel(status: "idle" | "running" | "succeeded" | "partial" | "failed" | "skipped" | undefined): string {
+  return { idle: "等待执行", running: "正在调研", succeeded: "最近一次完全成功", partial: "最近一次未达标", failed: "最近一次执行失败", skipped: "最近一次已跳过" }[status ?? "idle"];
 }
+
+const evidenceCategoryLabels = { demand: "需求", payment: "付费", channel: "渠道", feasibility: "可实现", counter: "反证" } as const;
+const evidenceStrengthLabels = { weak: "弱", medium: "中", strong: "强" } as const;
+const scoreLabels = [
+  ["demand", "需求", 20],
+  ["payment", "付费", 20],
+  ["acquisition", "获客", 15],
+  ["closure", "闭环", 15],
+  ["differentiation", "差异", 10],
+  ["feasibility", "实现", 10],
+  ["recurringValue", "复购", 10]
+] as const;
 
 export function RadarPage() {
   const queryClient = useQueryClient();
@@ -159,7 +171,7 @@ export function RadarPage() {
               <div><span>发现规则</span><h3 id="radar-rules-title">定义雷达要为谁寻找什么</h3><p>这里的内容会原样加入每次调研。你可以持续补充擅长领域、可投入时间、排除方向和偏好的销售方式。</p></div>
               <label><span>个人能力与目标画像</span><TextArea aria-label="个人能力与目标画像" value={settingsForm.searchProfile} onChange={(event) => setSettingsForm((current) => ({ ...current, searchProfile: event.target.value }))} rows={4} required /></label>
               <label><span>额外搜索规则和提示词</span><TextArea aria-label="额外搜索规则和提示词" value={settingsForm.customInstructions} onChange={(event) => setSettingsForm((current) => ({ ...current, customInstructions: event.target.value }))} rows={5} placeholder="例如：排除需要囤货的项目；优先日本和中文市场；单次验证不超过 300 元。" /></label>
-              <div className="radar-sales-gate"><CheckCircle size={18} weight="fill" /><div><strong>系统固定成交门槛</strong><p>必须找到可核验的买家渠道和直达链接，并写清产品、定价、进入渠道的方法与第一单步骤。找不到渠道的候选不会进入日报。</p></div></div>
+              <div className="radar-sales-gate"><ShieldCheck size={18} weight="fill" /><div><strong>系统固定深度门槛</strong><p>每天最多保存 3 个候选。每个候选必须达到 85 分，并具备需求、付费、渠道、可实现性和反证强证据。少于 3 个时，本次运行标记为未达标。</p></div></div>
             </section>
             <section className="radar-setting-preview"><Clock size={17} /><div><span>保存后的计划</span><strong>{settingsForm.enabled ? `每天 ${settingsForm.time}，${settingsForm.timezone}，${settingsForm.executor === "openworker" ? "OpenWorker" : "Codex"}` : "自动调研暂停"}</strong></div></section>
             {updateSchedule.error ? <p className="inline-error">{updateSchedule.error.message}</p> : null}
@@ -184,14 +196,14 @@ export function RadarPage() {
         <div className="radar-schedule-lead">
           <div className="radar-schedule-statusline"><span><CheckCircle size={17} weight="fill" />{schedule.data?.enabled ? "每日自动调研已开启" : "每日自动调研已暂停"}</span><button className="secondary-button radar-settings-button" type="button" onClick={openScheduleSettings} disabled={!schedule.data}><GearSix size={16} />定时设置</button></div>
           <h2>{schedule.data?.enabled ? `${scheduleLabel(schedule.data.expression)} 自动寻找低成本机会` : "自动调研当前已暂停"}</h2>
-          <p>{schedule.data?.executor === "openworker" ? "OpenWorker 会使用当前 DeepSeek 配置只读检索公开网络" : "Codex 会只读检索公开网络"}，只保留具有可核验销售渠道的中文机会报告。</p>
+          <p>{schedule.data?.executor === "openworker" ? "OpenWorker 会使用当前 DeepSeek 配置只读检索公开网络" : "Codex 会只读检索公开网络"}，跨垂直扫描后只保留达到 85 分并通过五类证据门禁的候选。</p>
           {schedule.data?.lastError ? <p className="radar-schedule-error">{runStatusLabel(schedule.data.lastStatus)}：{schedule.data.lastError}</p> : null}
         </div>
         <dl className="radar-schedule-facts">
           <div><dt><Clock size={15} />下次调研</dt><dd>{formatDateTime(schedule.data?.nextRunAt ?? null, timezone)}</dd></div>
           <div><dt><CalendarBlank size={15} />上次完成</dt><dd>{formatDateTime(schedule.data?.lastRunAt ?? null, timezone)}</dd></div>
-          <div><dt><Crosshair size={15} />运行方式</dt><dd>{schedule.data?.executor === "openworker" ? "OpenWorker / DeepSeek" : schedule.data?.mode === "live" ? "Live Codex" : "演示模式"}</dd></div>
-          <div><dt><Clock size={15} />时区</dt><dd>{timezone}</dd></div>
+          <div><dt><Crosshair size={15} />本期门槛</dt><dd>3 个候选，分别 ≥ 85 分</dd></div>
+          <div><dt><Clock size={15} />状态</dt><dd>{runStatusLabel(schedule.data?.lastStatus)}</dd></div>
         </dl>
       </section>
       {schedule.error ? <p className="inline-error">无法读取自动调研计划：{schedule.error.message}</p> : null}
@@ -212,7 +224,7 @@ export function RadarPage() {
                 aria-pressed={selectedReport?.id === report.id}
               >
                 <time dateTime={report.reportDate}>{formatReportDate(report.reportDate)}</time>
-                <span>{report.opportunities.length} 个机会</span>
+                <span>{report.opportunities.length}/3 个合格</span>
                 <small>{report.isDemo ? "演示" : report.generatedBy === "codex" ? "Codex 调研" : report.generatedBy === "openworker" ? "OpenWorker 调研" : report.generatedBy}</small>
               </button>
             ))}
@@ -222,15 +234,15 @@ export function RadarPage() {
 
       <SectionHeader
         title="本期调研结果"
-        description={selectedReport ? `${formatReportDate(selectedReport.reportDate)}，${selectedReport.isDemo ? "演示数据" : "中文实时调研"}。评分用于比较，每条证据仍需回到原始来源核验。` : "日报不会为了填满页面而编造机会。"}
+        description={selectedReport ? `${formatReportDate(selectedReport.reportDate)}，${selectedReport.isDemo ? "演示数据" : "中文实时调研"}。本期 ${items.length}/3 个候选达到门槛，评分和证据仍需回到原始来源核验。` : "日报不会为了填满页面而降低证据门槛。"}
       />
-      {items.length === 0 ? <EmptyState title="本期没有候选机会" body="可以等待下一次自动调研，或者现在手动发起一轮中文调研。" /> : (
+      {items.length === 0 ? <EmptyState title="本期 0/3，调研未达标" body="本次执行完成，但没有候选同时达到 85 分和五类强证据门槛。系统不会用浅薄机会凑数。" /> : (
         <div className="opportunity-list">
           {items.map((opportunity) => (
             <article className="opportunity-panel" key={opportunity.id}>
               <header>
-                <div><span className="evidence-count">{opportunity.evidence.length} 条证据</span><h2>{opportunity.title}</h2><p>{opportunity.summary}</p></div>
-                <div className="score-orbit" aria-label={`匹配分 ${opportunity.score}`}><strong>{opportunity.score}</strong><span>匹配分</span></div>
+                <div><span className="evidence-count">{opportunity.evidence.length} 条证据 · {opportunity.researchGatePassed ? "门禁通过" : "历史记录"}</span><h2>{opportunity.title}</h2><p>{opportunity.summary}</p></div>
+                <div className="score-orbit" aria-label={`尽调分 ${opportunity.score}`}><strong>{opportunity.score}</strong><span>尽调分</span></div>
               </header>
               <div className="opportunity-grid">
                 <div><span>谁会付钱</span><strong>{opportunity.payer}</strong></div>
@@ -238,6 +250,25 @@ export function RadarPage() {
                 <div><span>验证投入</span><strong>{opportunity.validationEffortHours} 小时 / ¥{opportunity.validationBudget}</strong></div>
                 <div><span>首次收入</span><strong>{opportunity.timeToRevenue}</strong></div>
               </div>
+              {opportunity.assessment ? (
+                <section className="research-audit-panel">
+                  <header><ShieldCheck size={18} weight="fill" /><div><strong>{opportunity.researchGatePassed ? "深度门禁通过" : "深度门禁未通过"}</strong><p>{opportunity.researchGatePassed ? "评分和五类强证据达到程序门槛。" : opportunity.researchGateReasons.join(" ")}</p></div></header>
+                  <div className="research-score-grid">
+                    {scoreLabels.map(([key, label, maximum]) => <div key={key}><span>{label}</span><strong>{opportunity.assessment!.scores[key]}<small>/{maximum}</small></strong></div>)}
+                  </div>
+                  <div className="research-context-grid">
+                    <div><span>当前替代方案</span><strong>{opportunity.assessment.currentAlternative}</strong><p>{opportunity.assessment.currentAlternativeCost}</p></div>
+                    <div><span>竞争与免费替代</span><strong>{opportunity.assessment.competitiveLandscape}</strong></div>
+                    <div><span>自动交付闭环</span><strong>{opportunity.assessment.automatedDeliveryFlow}</strong></div>
+                    <div><span>前 100 个目标访问者</span><strong>{opportunity.assessment.acquisitionPlan}</strong></div>
+                  </div>
+                  <div className="research-risk-grid">
+                    <div><span>外部依赖</span>{opportunity.assessment.dependencies.length === 0 ? <p>没有登记外部依赖。</p> : <ul>{opportunity.assessment.dependencies.map((dependency) => <li key={`${dependency.name}-${dependency.type}`}><strong>{dependency.name}</strong><small>{dependency.status === "verified" ? "已验证" : dependency.status === "blocking" ? "阻断" : "未验证"}</small><p>{dependency.details}</p></li>)}</ul>}</div>
+                    <div><span>最可能失败</span><ol>{opportunity.assessment.failureReasons.map((reason) => <li key={reason}>{reason}</li>)}</ol></div>
+                    <div><span>仍未查清</span>{opportunity.assessment.unknowns.length === 0 ? <p>没有登记未知项。</p> : <ul>{opportunity.assessment.unknowns.map((unknown) => <li key={unknown}>{unknown}</li>)}</ul>}</div>
+                  </div>
+                </section>
+              ) : <p className="sales-path-missing"><WarningCircle size={16} /> 这是一条旧结构记录，没有完成深度尽调，不能进入新实验。</p>}
               {opportunity.salesChannels.length > 0 ? (
                 <section className="sales-path-panel">
                   <div className="sales-path-heading"><span>成交路径已验证</span><h3>{opportunity.offer}</h3><p>{opportunity.firstSalePlan}</p></div>
@@ -261,13 +292,13 @@ export function RadarPage() {
               <div className="evidence-list">
                 {opportunity.evidence.map((evidence) => (
                   <a key={evidence.id} href={evidence.sourceUrl} target="_blank" rel="noreferrer">
-                    <span data-kind={evidence.type}>{evidence.type === "fact" ? "事实" : "推断"}</span>
-                    <div><strong>{evidence.label}</strong><p>{evidence.summary}</p></div>
+                    <span data-kind={evidence.type}>{evidenceCategoryLabels[evidence.category]} · {evidenceStrengthLabels[evidence.strength]}</span>
+                    <div><strong>{evidence.label}</strong><small>{evidence.sourceDate ?? "日期未记录"} · {evidence.type === "fact" ? "事实" : "推断"}</small><p>{evidence.summary}</p><p><b>证明：</b>{evidence.proves}</p><p><b>局限：</b>{evidence.limitations}</p></div>
                     <ArrowSquareOut size={16} />
                   </a>
                 ))}
               </div>
-              <footer><span>{opportunity.isDemo ? "演示候选，仅用于验证流程" : opportunity.salesChannels.length > 0 ? "渠道与来源已登记，行动前仍需人工核验" : "未通过销售渠道门槛"}</span><button className="secondary-button" onClick={() => convert.mutate(opportunity.id)} disabled={convert.isPending || opportunity.status === "experiment" || opportunity.salesChannels.length === 0}><Flask size={17} />{opportunity.status === "experiment" ? "已进入实验" : "启动最小实验"}</button></footer>
+              <footer><span>{opportunity.isDemo ? "演示候选，证据仅用于验证流程" : opportunity.researchGatePassed ? "结构门禁已通过，行动前仍需回看原始来源" : "未通过深度尽调门禁"}</span><button className="secondary-button" onClick={() => convert.mutate(opportunity.id)} disabled={convert.isPending || opportunity.status === "experiment" || !opportunity.researchGatePassed}><Flask size={17} />{opportunity.status === "experiment" ? "已进入实验" : "启动最小实验"}</button></footer>
             </article>
           ))}
         </div>

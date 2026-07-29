@@ -142,7 +142,7 @@ Every recommended opportunity requires:
 - minimal experiment
 - success and stop conditions
 
-Daily reports contain no more than five shortlisted opportunities.
+The current deep-research gate supersedes the original breadth limit: daily reports contain no more than three qualified opportunities.
 
 MVP1 supports a manual generate action and a configurable local daily schedule. The scheduled job may run in demo mode for deterministic acceptance and in live mode for real Codex research.
 
@@ -359,3 +359,23 @@ Acceptance criteria:
 - The existing AI news recurring task is routed to OpenWorker so the configured DeepSeek model can execute it while Codex usage is unavailable.
 - Permanent Codex quota errors remain visible with their original reason and are not misreported as an empty OpenWorker queue.
 - Domain, database, MCP, API, scheduler, browser, mobile, typecheck, lint, build, and live integration checks pass with evidence recorded in `WORKLOG.md` and `REVIEW.md`.
+
+## 15. Opportunity radar deep-research gate
+
+Status: Implemented and verified
+Date: 2026-07-29
+
+The radar must behave like a conservative investment committee, not an idea generator. A daily run scans broadly across multiple verticals, then deeply researches and persists at most three qualified candidates. A run is fully successful only when all three candidates independently clear the evidence gate and score at least 85.
+
+Acceptance criteria:
+
+- New live radar candidates classify evidence as demand, payment, channel, feasibility, or counter-evidence, with source date, strength, what the source proves, and what it does not prove.
+- A live candidate requires at least two independent demand facts and at least one strong fact in every required evidence class before persistence.
+- A structured assessment records the current alternative, competitive landscape, automated delivery flow, first-100-visitor acquisition plan, external dependencies, failure reasons, and unresolved unknowns.
+- The program calculates a 100-point research score from demand, payment, acquisition, closure, differentiation, feasibility, and recurring-value dimensions. A candidate below 85, or below the critical dimension floors, is rejected before persistence.
+- Codex and OpenWorker receive the same conservative research doctrine: scan broadly across verticals, return at most three deeply researched candidates, never lower the threshold to fill slots, direct user/payment evidence outranks marketing pages, negative evidence is mandatory, and manual fulfillment is not an acceptable core loop.
+- A run with three gate-passing candidates at 85 or above is `succeeded`. A run with zero to two qualifying candidates persists the honest partial report but is marked `partial`, never `succeeded` or operationally `failed`.
+- The Radar UI shows an explicit qualified-count target of three and distinguishes full success, partial research, and execution failure.
+- Historical and demo opportunities remain readable after a non-destructive SQLite migration, but cannot start a new experiment unless the current deep-research gate passes.
+- The Radar UI shows the score breakdown, gate result, evidence categories and strengths, proof limitations, competitive alternatives, closure path, dependencies, failure reasons, and unknowns without changing the existing visual system.
+- Domain, database, MCP, API, Web, browser, mobile, typecheck, lint, build, and patch-hygiene checks pass with direct evidence recorded in `docs/RADAR-DEEP-RESEARCH-ACCEPTANCE.md`, `WORKLOG.md`, and `REVIEW.md`.

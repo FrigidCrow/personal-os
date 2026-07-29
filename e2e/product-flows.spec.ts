@@ -48,7 +48,7 @@ test("shell, dashboard, themes, mobile navigation and accessibility states", asy
       const scheduleDialog = page.getByRole("dialog", { name: "机会雷达自动调研" });
       await expect(scheduleDialog.getByLabel("每天执行时间", { exact: true })).toHaveValue("08:00");
       await expect(scheduleDialog.getByLabel("个人能力与目标画像", { exact: true })).not.toHaveValue("");
-      await expect(scheduleDialog.getByText("系统固定成交门槛", { exact: true })).toBeVisible();
+      await expect(scheduleDialog.getByText("系统固定深度门槛", { exact: true })).toBeVisible();
       await scheduleDialog.getByLabel("每天执行时间", { exact: true }).fill("09:15");
       await tracedMutation(
         page,
@@ -470,9 +470,27 @@ test("opportunity report converts to an experiment, edits it and records a resul
       minimalExperiment: "整理过去项目的重复维护事项并制作一页内部方案。",
       successCondition: "找到两类以上重复需求并得到一次明确沟通意向。",
       stopCondition: "需求主要是无法限定范围的紧急支持。",
+      assessment: {
+        currentAlternative: "小团队继续依赖人工巡检和临时修复。",
+        currentAlternativeCost: "每周至少投入数小时处理重复故障。",
+        competitiveLandscape: "存在单次外包、内部维护和低价工具三类替代方案。",
+        automatedDeliveryFlow: "用户选择套餐并付款，系统自动开通监控、发送报告并进入异常工单流程。",
+        acquisitionPlan: "通过一个精确故障关键词页面获取首批 100 个目标访问者。",
+        dependencies: [],
+        failureReasons: ["用户继续内部维护。", "故障频率不足以支撑月费。", "不同工具的接入成本过高。"],
+        unknowns: ["真实续费率尚未验证。"],
+        scores: { demand: 17, payment: 17, acquisition: 13, closure: 13, differentiation: 8, feasibility: 9, recurringValue: 8 }
+      },
       status: "candidate",
       isDemo: true,
-      evidence: [{ label: "测试证据", sourceUrl: "https://example.com/evidence", type: "fact", summary: "E2E 使用的本地确定性证据。" }]
+      evidence: [
+        { label: "需求事实一", sourceUrl: "https://example.com/e2e-demand-1", type: "fact", category: "demand", strength: "strong", sourceDate: "2026-07-29", summary: "E2E 强需求证据。", proves: "验证第一条直接需求事实。", limitations: "不代表未来收入。" },
+        { label: "需求事实二", sourceUrl: "https://example.com/e2e-demand-2", type: "fact", category: "demand", strength: "medium", sourceDate: "2026-07-29", summary: "E2E 第二条独立需求证据。", proves: "验证第二个需求来源。", limitations: "样本规模有限。" },
+        { label: "付费事实", sourceUrl: "https://example.com/e2e-payment", type: "fact", category: "payment", strength: "strong", sourceDate: "2026-07-29", summary: "E2E 付费证据。", proves: "验证付费证据字段。", limitations: "没有预测转化率。" },
+        { label: "渠道事实", sourceUrl: "https://example.com/e2e-channel", type: "fact", category: "channel", strength: "strong", sourceDate: "2026-07-29", summary: "E2E 渠道证据。", proves: "验证可访问销售入口。", limitations: "没有保证获客量。" },
+        { label: "可实现事实", sourceUrl: "https://example.com/e2e-feasibility", type: "fact", category: "feasibility", strength: "strong", sourceDate: "2026-07-29", summary: "E2E 可实现性证据。", proves: "验证自动交付路径。", limitations: "没有覆盖所有第三方工具。" },
+        { label: "反证", sourceUrl: "https://example.com/e2e-counter", type: "fact", category: "counter", strength: "strong", sourceDate: "2026-07-29", summary: "E2E 反证。", proves: "验证免费替代方案风险。", limitations: "竞争强度仍需真实调研。" }
+      ]
     });
   } finally {
     radarDatabase.close();
@@ -487,10 +505,16 @@ test("opportunity report converts to an experiment, edits it and records a resul
   );
   await expect(page.getByText("演示机会报告已生成", { exact: true })).toBeVisible();
   await expect(page.getByText("1 份", { exact: true })).toBeVisible();
-  await expect(page.getByText("1 个机会", { exact: true })).toBeVisible();
+  await expect(page.getByText("1/3 个合格", { exact: true })).toBeVisible();
   await expect(page.getByText("测试渠道", { exact: true })).toBeVisible();
   await expect(page.getByText("制作一页服务边界说明，选择一个公开买家入口并验证一次购买意向。", { exact: true })).toBeVisible();
-  expect(databaseRows("SELECT * FROM daily_report_opportunities").length).toBeLessThanOrEqual(5);
+  expect(databaseRows("SELECT * FROM daily_report_opportunities").length).toBeLessThanOrEqual(3);
+  await page.locator(".opportunity-panel").first().screenshot({ path: testInfo.outputPath("radar-deep-research-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".opportunity-panel").first().screenshot({ path: testInfo.outputPath("radar-deep-research-mobile.png") });
+  const radarOverflow = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth }));
+  expect(radarOverflow.scrollWidth).toBe(radarOverflow.width);
+  await page.setViewportSize({ width: 1440, height: 1000 });
 
   const candidate = page.locator(".opportunity-panel").filter({ has: page.getByRole("button", { name: "启动最小实验" }) }).first();
   const title = (await candidate.getByRole("heading", { level: 2 }).textContent())?.trim() ?? "";

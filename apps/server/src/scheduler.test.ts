@@ -22,7 +22,7 @@ describe("daily radar scheduler", () => {
 
   it("executes one due live report and advances to the next day", async () => {
     database.configureRadarSchedule({ enabled: true, expression: "0 8 * * *", timezone: "Asia/Tokyo", catchUp: true, executor: "codex", searchProfile: "技术服务", customInstructions: "" }, "2026-07-28T23:00:00.000Z");
-    const radar = { generateDemo: vi.fn(), generateLive: vi.fn().mockResolvedValue({}) };
+    const radar = { generateDemo: vi.fn(), generateLive: vi.fn().mockResolvedValue({ opportunities: Array.from({ length: 3 }, () => ({ researchGatePassed: true, score: 85 })) }) };
     const result = await runDailyRadarTick(database, radar, new Date("2026-07-28T23:00:00.000Z"), "live");
 
     expect(result).toBe("succeeded");
@@ -34,6 +34,16 @@ describe("daily radar scheduler", () => {
       lastStatus: "succeeded",
       lastError: null
     }));
+  });
+
+  it("marks a completed scan partial when fewer than three candidates qualify", async () => {
+    database.configureRadarSchedule({ enabled: true, expression: "0 8 * * *", timezone: "Asia/Tokyo", catchUp: true, executor: "codex", searchProfile: "技术服务", customInstructions: "" }, "2026-07-28T23:00:00.000Z");
+    const radar = { generateDemo: vi.fn(), generateLive: vi.fn().mockResolvedValue({ opportunities: [{ researchGatePassed: true, score: 91 }] }) };
+
+    const result = await runDailyRadarTick(database, radar, new Date("2026-07-28T23:00:00.000Z"), "live");
+
+    expect(result).toBe("partial");
+    expect(database.getRadarSchedule().lastStatus).toBe("partial");
   });
 
   it("skips an overdue run when catch-up is disabled", async () => {

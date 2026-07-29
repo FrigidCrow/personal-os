@@ -8,6 +8,7 @@ import {
   assertAgentRunTransition,
   assertTaskTransition,
   calculateOpportunityScore,
+  evaluateOpportunityResearchGate,
   dailyReportInputSchema,
   experimentInputSchema,
   incomeAssetInputSchema,
@@ -17,6 +18,7 @@ import {
   projectInputSchema,
   radarScheduleInputSchema,
   radarScheduleStatusSchema,
+  RADAR_QUALIFIED_TARGET,
   taskInputSchema,
   type AgentExecutor,
   type AgentRun,
@@ -142,7 +144,12 @@ function mapEvidence(row: Row): Evidence {
     label: String(row.label),
     sourceUrl: String(row.source_url),
     type: row.evidence_type as Evidence["type"],
-    summary: String(row.summary)
+    category: row.evidence_category as Evidence["category"],
+    strength: row.evidence_strength as Evidence["strength"],
+    sourceDate: nullableString(row.source_date),
+    summary: String(row.summary),
+    proves: String(row.proves),
+    limitations: String(row.limitations)
   };
 }
 
@@ -361,6 +368,8 @@ export class PersonalOsDatabase {
         minimal_experiment TEXT NOT NULL,
         success_condition TEXT NOT NULL,
         stop_condition TEXT NOT NULL,
+        assessment TEXT,
+        radar_claim_started_at TEXT,
         status TEXT NOT NULL,
         is_demo INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
@@ -373,7 +382,12 @@ export class PersonalOsDatabase {
         label TEXT NOT NULL,
         source_url TEXT NOT NULL,
         evidence_type TEXT NOT NULL,
-        summary TEXT NOT NULL
+        evidence_category TEXT NOT NULL DEFAULT 'demand',
+        evidence_strength TEXT NOT NULL DEFAULT 'weak',
+        source_date TEXT,
+        summary TEXT NOT NULL,
+        proves TEXT NOT NULL DEFAULT '历史证据未单独记录证明范围。',
+        limitations TEXT NOT NULL DEFAULT '历史证据未单独记录局限。'
       );
 
       CREATE TABLE IF NOT EXISTS experiments (
@@ -501,6 +515,13 @@ export class PersonalOsDatabase {
     this.ensureColumn("opportunities", "pricing_model", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("opportunities", "sales_channels", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureColumn("opportunities", "first_sale_plan", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("opportunities", "assessment", "TEXT");
+    this.ensureColumn("opportunities", "radar_claim_started_at", "TEXT");
+    this.ensureColumn("opportunity_evidence", "evidence_category", "TEXT NOT NULL DEFAULT 'demand'");
+    this.ensureColumn("opportunity_evidence", "evidence_strength", "TEXT NOT NULL DEFAULT 'weak'");
+    this.ensureColumn("opportunity_evidence", "source_date", "TEXT");
+    this.ensureColumn("opportunity_evidence", "proves", "TEXT NOT NULL DEFAULT '历史证据未单独记录证明范围。'");
+    this.ensureColumn("opportunity_evidence", "limitations", "TEXT NOT NULL DEFAULT '历史证据未单独记录局限。'");
     this.ensureColumn("radar_schedule", "executor", "TEXT NOT NULL DEFAULT 'openworker'");
     this.ensureColumn("radar_schedule", "search_profile", "TEXT NOT NULL DEFAULT '操作者会开发软件、使用 Codex、承接客户项目，希望以低维护的产品化服务或数字资产建立经常性收入。'");
     this.ensureColumn("radar_schedule", "custom_instructions", "TEXT NOT NULL DEFAULT ''");
@@ -864,7 +885,7 @@ export class PersonalOsDatabase {
     return row ? this.hydrateOpportunity(row) : null;
   }
 
-  createOpportunity(raw: OpportunityInput, id = randomUUID()): Opportunity {
+  createOpportunity(raw: OpportunityInput, id = randomUUID(), radarClaimStartedAt: string | null = null): Opportunity {
     const input = opportunityInputSchema.parse(raw);
     const timestamp = now();
     const insert = this.connection.transaction(() => {
@@ -874,26 +895,53 @@ export class PersonalOsDatabase {
           sales_channels, first_sale_plan, confidence, personal_fit,
           validation_effort_hours, validation_budget, time_to_revenue, recurring_potential,
           maintenance_hours_monthly, hypothesis, minimal_experiment, success_condition,
-          stop_condition, status, is_demo, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          stop_condition, assessment, radar_claim_started_at, status, is_demo, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id, input.title, input.payer, input.pain, input.summary, input.businessModel,
         input.offer, input.pricingModel, JSON.stringify(input.salesChannels), input.firstSalePlan,
         input.confidence, input.personalFit, input.validationEffortHours, input.validationBudget,
         input.timeToRevenue, input.recurringPotential, input.maintenanceHoursMonthly,
-        input.hypothesis, input.minimalExperiment, input.successCondition, input.stopCondition,
+        input.hypothesis, input.minimalExperiment, input.successCondition, input.stopCondition, JSON.stringify(input.assessment), radarClaimStartedAt,
         input.status, input.isDemo ? 1 : 0, timestamp, timestamp
       );
       const statement = this.connection.prepare(`
-        INSERT INTO opportunity_evidence (id, opportunity_id, label, source_url, evidence_type, summary)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO opportunity_evidence (
+          id, opportunity_id, label, source_url, evidence_type, evidence_category,
+          evidence_strength, source_date, summary, proves, limitations
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const evidence of input.evidence) {
-        statement.run(randomUUID(), id, evidence.label, evidence.sourceUrl, evidence.type, evidence.summary);
+        statement.run(
+          randomUUID(), id, evidence.label, evidence.sourceUrl, evidence.type,
+          evidence.category, evidence.strength, evidence.sourceDate, evidence.summary,
+          evidence.proves, evidence.limitations
+        );
       }
     });
     insert();
     return this.requireOpportunity(id);
+  }
+
+  createQualifiedRadarOpportunity(raw: OpportunityInput, claimStartedAt: string | null = null, id = randomUUID()): Opportunity {
+    const input = opportunityInputSchema.parse(raw);
+    const gate = evaluateOpportunityResearchGate(input);
+    if (!gate.passed) throw new Error(`Opportunity rejected by deep-research gate: ${gate.reasons.join(" ")}`);
+    return this.connection.transaction(() => {
+      if (claimStartedAt) {
+        const count = Number((this.connection.prepare(
+          "SELECT COUNT(*) AS count FROM opportunities WHERE radar_claim_started_at = ?"
+        ).get(claimStartedAt) as { count: number }).count);
+        if (count >= RADAR_QUALIFIED_TARGET) throw new Error("Radar claim already saved the maximum of three qualified opportunities.");
+      }
+      return this.createOpportunity(input, id, claimStartedAt);
+    })();
+  }
+
+  listRadarClaimOpportunityIds(claimStartedAt: string): string[] {
+    return (this.connection.prepare(
+      "SELECT id FROM opportunities WHERE radar_claim_started_at = ? ORDER BY created_at"
+    ).all(claimStartedAt) as Array<{ id: string }>).map((row) => row.id);
   }
 
   listExperiments(): Experiment[] {
@@ -964,6 +1012,9 @@ export class PersonalOsDatabase {
 
   createExperimentFromOpportunity(opportunityId: string, overrides: Partial<ExperimentInput> = {}): Experiment {
     const opportunity = this.requireOpportunity(opportunityId);
+    if (!opportunity.researchGatePassed) {
+      throw new Error(`Opportunity has not passed the deep-research gate: ${opportunity.researchGateReasons.join(" ")}`);
+    }
     return this.createExperiment({
       opportunityId,
       title: opportunity.title,
@@ -1132,14 +1183,14 @@ export class PersonalOsDatabase {
     return schedule;
   }
 
-  completeRadarClaim(claimStartedAt: string, nextRunAt: string): RadarSchedule {
+  completeRadarClaim(claimStartedAt: string, nextRunAt: string, fullyQualified: boolean): RadarSchedule {
     this.assertActiveRadarClaim(claimStartedAt);
     const completedAt = this.timestamp();
     this.connection.prepare(`
       UPDATE radar_schedule SET next_run_at = ?, last_completed_at = ?,
-        last_status = 'succeeded', last_error = NULL, updated_at = ?
+        last_status = ?, last_error = NULL, updated_at = ?
       WHERE id = 1 AND last_status = 'running' AND last_started_at = ?
-    `).run(nextRunAt, completedAt, completedAt, claimStartedAt);
+    `).run(nextRunAt, completedAt, fullyQualified ? "succeeded" : "partial", completedAt, claimStartedAt);
     return this.getRadarSchedule();
   }
 
@@ -1726,6 +1777,25 @@ export class PersonalOsDatabase {
     const assetProjectId = "22222222-2222-4222-8222-222222222222";
     const opportunityId = "33333333-3333-4333-8333-333333333333";
     const opportunityTwoId = "44444444-4444-4444-8444-444444444444";
+    const demoAssessment: NonNullable<OpportunityInput["assessment"]> = {
+      currentAlternative: "演示用户目前使用电子表格和人工整理完成相同工作。",
+      currentAlternativeCost: "演示数据假设每周需要数小时，真实成本尚待核验。",
+      competitiveLandscape: "演示竞争格局用于验证界面层级，不代表真实市场结论。",
+      automatedDeliveryFlow: "用户上传数据，系统生成预览，付款后自动解锁完整结果。",
+      acquisitionPlan: "通过一个精确问题关键词页面验证首批 100 个目标访问者。",
+      dependencies: [{ name: "官方支付商户号", type: "qualification", status: "verified", details: "演示记录假设已明确申请路径，真实上线前仍需完成申请。", sourceUrl: "https://example.com/demo-payment-requirement" }],
+      failureReasons: ["用户继续使用免费表格。", "目标流量不足。", "数据格式差异导致自动处理失败。"],
+      unknowns: ["真实支付转化率尚未验证。"],
+      scores: { demand: 18, payment: 18, acquisition: 13, closure: 13, differentiation: 8, feasibility: 9, recurringValue: 8 }
+    };
+    const demoEvidence = (slug: string): OpportunityInput["evidence"] => [
+      { label: "演示需求事实一", sourceUrl: `https://example.com/${slug}-demand-1`, type: "fact", category: "demand", strength: "strong", sourceDate: "2026-07-28", summary: "用于验证强需求证据的演示记录。", proves: "证明界面和门禁能够处理一条直接需求事实。", limitations: "不代表真实市场需求。" },
+      { label: "演示需求事实二", sourceUrl: `https://example.com/${slug}-demand-2`, type: "fact", category: "demand", strength: "medium", sourceDate: "2026-07-28", summary: "用于验证独立需求来源计数。", proves: "证明存在第二个独立 URL。", limitations: "不代表真实用户样本。" },
+      { label: "演示付费事实", sourceUrl: `https://example.com/${slug}-payment`, type: "fact", category: "payment", strength: "strong", sourceDate: "2026-07-28", summary: "用于验证付费证据类别。", proves: "证明结构可以记录真实采用或付费证据。", limitations: "演示记录没有真实交易。" },
+      { label: "演示渠道事实", sourceUrl: `https://example.com/${slug}-channel`, type: "fact", category: "channel", strength: "strong", sourceDate: "2026-07-28", summary: "用于验证销售渠道证据类别。", proves: "证明结构可以记录渠道入口和限制。", limitations: "演示入口不代表实际可获客。" },
+      { label: "演示可实现事实", sourceUrl: `https://example.com/${slug}-feasibility`, type: "fact", category: "feasibility", strength: "strong", sourceDate: "2026-07-28", summary: "用于验证输入、输出和实现条件。", proves: "证明结构可以记录实现依据。", limitations: "没有完成真实平台兼容测试。" },
+      { label: "演示反证", sourceUrl: `https://example.com/${slug}-counter`, type: "fact", category: "counter", strength: "strong", sourceDate: "2026-07-28", summary: "用于验证免费替代品和失败风险。", proves: "证明研究包含主动反证。", limitations: "真实竞争强度仍需重新调查。" }
+    ];
 
     this.createProject({
       name: "客户交付自动化",
@@ -1807,22 +1877,10 @@ export class PersonalOsDatabase {
       minimalExperiment: "生成一份真实样例，展示给十位目标工作室经营者，在开发产品前询问是否愿意参加付费试点。",
       successCondition: "七天内获得两次有效沟通，或一个付费试点。",
       stopCondition: "与十位相关对象沟通后仍无有效反馈。",
+      assessment: demoAssessment,
       status: "shortlisted",
       isDemo: true,
-      evidence: [
-        {
-          label: "演示用买家信号",
-          sourceUrl: "https://example.com/demo-agency-reporting-signal",
-          type: "fact",
-          summary: "这是一条用于界面验收的样例证据，采取行动前必须替换为真实来源。"
-        },
-        {
-          label: "持续服务模式推断",
-          sourceUrl: "https://example.com/demo-recurring-model",
-          type: "inference",
-          summary: "订阅收费只是待验证假设，仍然需要真实客户反馈。"
-        }
-      ]
+      evidence: demoEvidence("demo-reporting")
     }, opportunityId);
 
     this.createOpportunity({
@@ -1846,16 +1904,10 @@ export class PersonalOsDatabase {
       minimalExperiment: "制作一个匿名的改造前后样例，向五位已有联系人提供付费审计名额。",
       successCondition: "一个付费审计，或两次明确的购买沟通。",
       stopCondition: "五次相关报价后仍没有购买沟通。",
+      assessment: demoAssessment,
       status: "candidate",
       isDemo: true,
-      evidence: [
-        {
-          label: "演示用工作流缺口",
-          sourceUrl: "https://example.com/demo-agent-guidance-gap",
-          type: "fact",
-          summary: "这是一条用于界面验收的样例证据，开始测试前必须核对真实来源。"
-        }
-      ]
+      evidence: demoEvidence("demo-agent-audit")
     }, opportunityTwoId);
 
     const experiment = this.createExperimentFromOpportunity(opportunityId, {
@@ -1908,14 +1960,18 @@ export class PersonalOsDatabase {
       minimalExperiment: String(row.minimal_experiment),
       successCondition: String(row.success_condition),
       stopCondition: String(row.stop_condition),
+      assessment: row.assessment ? JSON.parse(String(row.assessment)) as Opportunity["assessment"] : null,
       status: row.status as Opportunity["status"],
       isDemo: booleanFromDb(row.is_demo)
     };
+    const gate = evaluateOpportunityResearchGate({ ...input, evidence });
     return {
       id: String(row.id),
       ...input,
       evidence,
       score: calculateOpportunityScore(input),
+      researchGatePassed: gate.passed,
+      researchGateReasons: gate.reasons,
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at)
     };

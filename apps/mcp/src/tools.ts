@@ -1,5 +1,6 @@
 import type { PersonalOsDatabase } from "@personal-os/database";
 import { CronExpressionParser } from "cron-parser";
+import { OPPORTUNITY_RESEARCH_SCORE_THRESHOLD, RADAR_QUALIFIED_TARGET } from "@personal-os/domain";
 import type {
   AgentExecutor,
   AgentRunEventType,
@@ -162,20 +163,26 @@ export function createPersonalOsTools(
         searchProfile: schedule.searchProfile,
         customInstructions: schedule.customInstructions,
         hardRequirements: [
-          "Return at most five opportunities in Simplified Chinese.",
-          "Every opportunity must identify a concrete offer, payer, pricing model, first-sale plan, and at least one verifiable sales channel.",
-          "Every sales channel must include a direct public URL and a specific access method. If no channel can be verified, omit the candidate.",
-          "Cite direct sources, label fact versus inference, and never claim guaranteed income.",
+          `Scan broadly across multiple verticals, then deeply research at most ${RADAR_QUALIFIED_TARGET} candidates. Never lower the standard to fill a slot.`,
+          `Only save candidates whose program score is at least ${OPPORTUNITY_RESEARCH_SCORE_THRESHOLD} and whose research gate passes. Three qualified candidates are required for a fully successful run.`,
+          "For every candidate provide two independent demand facts plus strong dated fact evidence for demand, payment, channel, feasibility, and counter-evidence. Marketing pages alone do not prove demand or payment.",
+          "Record what every source proves and does not prove. Include current alternatives, competitive landscape, automated delivery flow, first-100-visitor acquisition plan, dependencies, three failure reasons, unknowns, and the complete score breakdown.",
+          "Every sales channel must include a direct public URL, exact access method, qualifications, cost, and restrictions. Generic advice to use a social network is not a channel.",
+          "Reject manual fulfillment, unavailable commercial-account dependencies, gray data access, and ideas without a compliant Chinese payment and automated delivery path.",
+          "Use Simplified Chinese for user-facing content, label fact versus inference, and never claim guaranteed income.",
           "Do not contact anyone, publish, purchase, create accounts, or perform any external write."
         ]
       };
     },
     saveRadarOpportunity: (claimStartedAt: string, input: OpportunityInput) => {
       database.assertActiveRadarClaim(claimStartedAt);
-      return database.createOpportunity({ ...input, status: "candidate", isDemo: false });
+      return database.createQualifiedRadarOpportunity({ ...input, status: "candidate", isDemo: false }, claimStartedAt);
     },
     saveRadarReport: (claimStartedAt: string, input: DailyReportInput) => {
       database.assertActiveRadarClaim(claimStartedAt);
+      const claimOpportunityIds = new Set(database.listRadarClaimOpportunityIds(claimStartedAt));
+      const unrelated = input.opportunityIds.find((id) => !claimOpportunityIds.has(id));
+      if (unrelated) throw new Error(`Radar report includes an opportunity outside the active claim: ${unrelated}`);
       return database.createDailyReport({ ...input, generatedBy: "openworker", isDemo: false });
     },
     completeRadarRun: (claimStartedAt: string) => {
@@ -184,7 +191,16 @@ export function createPersonalOsTools(
         currentDate: new Date(),
         tz: schedule.timezone
       }).next().toDate().toISOString();
-      return database.completeRadarClaim(claimStartedAt, nextRunAt);
+      const reportDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: schedule.timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(new Date(claimStartedAt));
+      const report = database.getReportByDate(reportDate);
+      if (!report) throw new Error("Save the radar report before completing the run.");
+      const fullyQualified = report.opportunities.length === RADAR_QUALIFIED_TARGET && report.opportunities.every((item) => item.researchGatePassed && item.score >= OPPORTUNITY_RESEARCH_SCORE_THRESHOLD);
+      return database.completeRadarClaim(claimStartedAt, nextRunAt, fullyQualified);
     },
     failRadarRun: (claimStartedAt: string, reason: string) => {
       const schedule = database.assertActiveRadarClaim(claimStartedAt);

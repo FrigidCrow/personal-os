@@ -199,3 +199,28 @@ Direct evidence:
 The current AI news result is deliberately still in Needs Review. Rendering is verified, but accepting its factual content and sources remains a human decision.
 
 Opportunity radar monetization verdict: **Passed - ready for user acceptance.**
+
+## Opportunity radar deep-research gate review
+
+Status: **Passed**
+
+The prior breadth-oriented report is now superseded by a conservative research gate. A run may scan any number of verticals, but it can persist no more than three candidates. Every candidate must independently reach 85/100, clear the critical score floors, include two independent demand facts, and contain strong dated facts for demand, payment, channel, feasibility, and counter-evidence. Full success means exactly 3/3. Zero to two is an honest `partial` result, never success and never an operational failure.
+
+Direct evidence:
+
+| Acceptance check | Result | Evidence |
+|---|---|---|
+| Three-candidate success invariant | Passed | MCP contract saves three qualified candidates, rejects a fourth, creates their report, and completes as `succeeded` |
+| Partial-result semantics | Passed | MCP and scheduler tests verify one qualified candidate completes as `partial` |
+| Evidence and score gate | Passed | Domain and database tests verify 85 pass, 84 reject, missing strong payment reject, two demand sources, five categories, five unique strong URLs, and dimension floors |
+| Persistence cap | Passed | Candidate count and insert execute inside one SQLite transaction; the fourth candidate is rejected |
+| Historical compatibility | Passed | Additive migrations preserve old opportunities; a legacy shallow record remains readable but cannot start an experiment |
+| Operator UI | Passed | Desktop and 390px screenshots render the gate, seven scores, alternatives, acquisition and delivery paths, dependencies, failure reasons, unknowns, and evidence limitations |
+| Full regression | Passed | 7 files / 80 tests, 8/8 Playwright, TypeScript, ESLint, production build, dependency audit with 0 vulnerabilities, and clean patch hygiene |
+| Live deployment | Passed | Personal OS 5273/8787 and OpenWorker 5274/8765 restarted healthy; refreshed OpenWorker MCP registry reports `personal_os` connected |
+
+The implementation followed the existing visual system with design variance 4, motion intensity 2, and visual density 8. It adds no second component library, icon family, decorative motion, or new theme language. The mobile seven-score grid was reviewed at 390px and the last score now spans the final row without horizontal overflow.
+
+Known limitation: program validation can prove that research has the required structure, thresholds, URL diversity, dates, and declared evidence strength. It cannot prove, without a separate source-verification service, that each cited page semantically supports the model's claim. The UI therefore exposes proof scope and limitations, and human review remains required before spending money or starting real market activity.
+
+Opportunity radar deep-research verdict: **Passed - deployed for the next scheduled run.**

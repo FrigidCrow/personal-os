@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { opportunityInputSchema, type Opportunity, type OpportunityInput } from "@personal-os/domain";
 import { createDatabase, PersonalOsDatabase } from "./index.js";
+
+function opportunityAsInput(opportunity: Opportunity, title = opportunity.title): OpportunityInput {
+  return opportunityInputSchema.parse({ ...opportunity, title });
+}
 
 describe("PersonalOsDatabase", () => {
   let database: PersonalOsDatabase;
@@ -206,10 +211,55 @@ describe("PersonalOsDatabase", () => {
     expect(database.getOpportunity(opportunity!.id)?.status).toBe("experiment");
   });
 
-  it("keeps daily reports at five opportunities or fewer", () => {
+  it("rejects shallow research and never stores more than three qualified candidates for one radar claim", () => {
+    const qualified = opportunityAsInput(database.listOpportunities()[0]!);
+    const missingPaymentProof = {
+      ...qualified,
+      title: "缺少强付费证据的候选",
+      evidence: qualified.evidence.map((item) => item.category === "payment" ? { ...item, strength: "medium" as const } : item)
+    };
+
+    expect(() => database.createQualifiedRadarOpportunity(missingPaymentProof)).toThrow("payment");
+
+    const claimStartedAt = "2026-07-29T00:00:00.000Z";
+    for (let index = 1; index <= 3; index += 1) {
+      database.createQualifiedRadarOpportunity(opportunityAsInput(database.listOpportunities()[0]!, `合格候选 ${index}`), claimStartedAt);
+    }
+    expect(database.listRadarClaimOpportunityIds(claimStartedAt)).toHaveLength(3);
+    expect(() => database.createQualifiedRadarOpportunity(
+      opportunityAsInput(database.listOpportunities()[0]!, "不应被保存的第四个候选"),
+      claimStartedAt
+    )).toThrow("maximum of three");
+  });
+
+  it("keeps legacy shallow opportunities visible but blocks experiment conversion", () => {
+    const qualified = opportunityAsInput(database.listOpportunities()[0]!);
+    const legacy = database.createOpportunity({
+      ...qualified,
+      title: "历史浅层机会",
+      assessment: null,
+      evidence: [{
+        label: "历史单条证据",
+        sourceUrl: "https://example.com/legacy-shallow-evidence",
+        type: "fact",
+        category: "demand",
+        strength: "weak",
+        sourceDate: null,
+        summary: "迁移前只保存过一条普通证据。",
+        proves: "历史记录只证明曾经保存过一个来源。",
+        limitations: "没有结构化尽调，也不能证明需求或付费。"
+      }]
+    });
+
+    expect(legacy.researchGatePassed).toBe(false);
+    expect(legacy.researchGateReasons).toContain("缺少结构化深度尽调。");
+    expect(() => database.createExperimentFromOpportunity(legacy.id)).toThrow("deep-research gate");
+  });
+
+  it("keeps daily reports at three opportunities or fewer", () => {
     const report = database.getLatestDailyReport();
     expect(report).not.toBeNull();
-    expect(report!.opportunities.length).toBeLessThanOrEqual(5);
+    expect(report!.opportunities.length).toBeLessThanOrEqual(3);
   });
 
   it("lists daily reports newest first for radar history", () => {

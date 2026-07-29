@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PersonalOsDatabase } from "@personal-os/database";
+import { opportunityInputSchema, type Opportunity, type OpportunityInput } from "@personal-os/domain";
 import { createPersonalOsTools } from "./tools.js";
+
+function opportunityAsInput(opportunity: Opportunity, title: string): OpportunityInput {
+  return opportunityInputSchema.parse({ ...opportunity, title, isDemo: false });
+}
 
 describe("Personal OS MCP tool contract", () => {
   let database: PersonalOsDatabase;
@@ -158,7 +163,8 @@ describe("Personal OS MCP tool contract", () => {
       minimalExperiment: existing.minimalExperiment,
       successCondition: existing.successCondition,
       stopCondition: existing.stopCondition,
-      evidence: existing.evidence.map(({ label, sourceUrl, type, summary }) => ({ label, sourceUrl, type, summary })),
+      assessment: existing.assessment,
+      evidence: existing.evidence.map(({ label, sourceUrl, type, category, strength, sourceDate, summary, proves, limitations }) => ({ label, sourceUrl, type, category, strength, sourceDate, summary, proves, limitations })),
       status: "candidate",
       isDemo: false
     });
@@ -172,8 +178,42 @@ describe("Personal OS MCP tool contract", () => {
     });
     const completed = tools.completeRadarRun(claim.claimStartedAt);
 
-    expect(completed).toEqual(expect.objectContaining({ lastStatus: "succeeded", nextRunAt: expect.any(String) }));
+    expect(completed).toEqual(expect.objectContaining({ lastStatus: "partial", nextRunAt: expect.any(String) }));
     expect(database.getReportByDate(claim.reportDate)?.generatedBy).toBe("openworker");
+  });
+
+  it("marks a radar run successful only after exactly three 85-plus candidates pass the gate", () => {
+    database.configureRadarSchedule({
+      enabled: true,
+      expression: "0 8 * * *",
+      timezone: "Asia/Tokyo",
+      catchUp: true,
+      executor: "openworker",
+      searchProfile: "跨垂直扫描可自动交付的中国市场机会",
+      customInstructions: "不为凑数降低门槛。"
+    }, "2020-01-01T00:00:00.000Z");
+
+    const claim = tools.claimDueRadar("openworker");
+    if (!claim.claimed) throw new Error("Expected a radar claim");
+    const template = database.listOpportunities()[0]!;
+    const opportunityIds = [1, 2, 3].map((index) => tools.saveRadarOpportunity(
+      claim.claimStartedAt,
+      opportunityAsInput(template, `跨垂直合格候选 ${index}`)
+    ).id);
+    expect(() => tools.saveRadarOpportunity(
+      claim.claimStartedAt,
+      opportunityAsInput(template, "第四个合格候选")
+    )).toThrow("maximum of three");
+
+    tools.saveRadarReport(claim.claimStartedAt, {
+      reportDate: claim.reportDate,
+      title: "三项合格机会雷达日报",
+      summary: "三个候选均通过 85 分与五类强证据门禁。",
+      generatedBy: "openworker",
+      opportunityIds,
+      isDemo: false
+    });
+    expect(tools.completeRadarRun(claim.claimStartedAt)).toEqual(expect.objectContaining({ lastStatus: "succeeded" }));
   });
 
   it("creates an immutable approval request instead of performing an external write", () => {

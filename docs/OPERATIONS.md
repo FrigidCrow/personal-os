@@ -194,4 +194,4 @@ OpenWorker 的 headless automation MCP 附加与运行时 allowlist 修复记录
 | 06:30 | 最近 24 小时 AI 新闻与 AI 新技术晨报 | OpenWorker，当前 DeepSeek 配置 + 只读 Web 搜索 | Agent 控制面的 Needs Review Run |
 | 08:00 | 最小投入赚钱机会雷达 | OpenWorker，当前 DeepSeek 配置 + 只读 Web 搜索 | 机会雷达页与机会列表 |
 
-06:30 任务为低风险只读报告，成功后进入 Needs Review，人工接受后 Run 进入 Done，定时任务定义回到 Ready 等待下一次 Cron。08:00 雷达由 Server 保存调度定义，OpenWorker 原子领取后把通过销售渠道门槛的机会和日报直接写入 SQLite。两者都不会外联、发布、购买、创建账户或登录。电脑和服务恢复后，两项自动化都只补最近一次错过的周期。
+06:30 任务为低风险只读报告，成功后进入 Needs Review，人工接受后 Run 进入 Done，定时任务定义回到 Ready 等待下一次 Cron。08:00 雷达由 Server 保存调度定义，OpenWorker 原子领取后跨垂直扫描并深挖候选；只有同时通过 85 分、五类强证据和销售闭环门禁的机会才会写入 SQLite。恰好三个合格候选才记为完全成功，零到两个会保留报告并标记为未达标。两者都不会外联、发布、购买、创建账户或登录。电脑和服务恢复后，两项自动化都只补最近一次错过的周期。

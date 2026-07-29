@@ -1,6 +1,6 @@
 import { CronExpressionParser } from "cron-parser";
 import type { PersonalOsDatabase } from "@personal-os/database";
-import type { RadarScheduleInput } from "@personal-os/domain";
+import { OPPORTUNITY_RESEARCH_SCORE_THRESHOLD, RADAR_QUALIFIED_TARGET, type RadarScheduleInput } from "@personal-os/domain";
 import type { RadarService } from "./radar.js";
 import type { AgentDispatcher } from "./dispatcher.js";
 
@@ -27,7 +27,7 @@ export async function runDailyRadarTick(
   currentTime = new Date(),
   mode: "demo" | "live" = process.env.CODEX_MODE === "live" ? "live" : "demo",
   scheduleGraceMilliseconds = 60_000
-): Promise<"disabled" | "initialized" | "waiting" | "awaiting_worker" | "skipped" | "succeeded" | "failed"> {
+): Promise<"disabled" | "initialized" | "waiting" | "awaiting_worker" | "skipped" | "succeeded" | "partial" | "failed"> {
   const schedule = database.getRadarSchedule();
   if (!schedule.enabled) return "disabled";
 
@@ -81,14 +81,15 @@ export async function runDailyRadarTick(
     lastError: null
   });
   try {
-    if (mode === "live") await radar.generateLive();
-    else radar.generateDemo();
+    const report = mode === "live" ? await radar.generateLive() : radar.generateDemo();
+    const fullyQualified = report.opportunities.length === RADAR_QUALIFIED_TARGET && report.opportunities.every((item) => item.researchGatePassed && item.score >= OPPORTUNITY_RESEARCH_SCORE_THRESHOLD);
+    const completionStatus = fullyQualified ? "succeeded" : "partial";
     database.updateRadarScheduleRuntime({
       lastCompletedAt: new Date().toISOString(),
-      lastStatus: "succeeded",
+      lastStatus: completionStatus,
       lastError: null
     });
-    return "succeeded";
+    return completionStatus;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Daily radar failed.";
     database.updateRadarScheduleRuntime({

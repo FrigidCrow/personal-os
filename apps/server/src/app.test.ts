@@ -232,12 +232,12 @@ describe("Personal OS API", () => {
     );
   });
 
-  it("generates at most five opportunities in a demo report", async () => {
+  it("generates at most three opportunities in a demo report", async () => {
     const response = await app.request("/api/reports/generate-demo", { method: "POST" });
     expect(response.status).toBe(201);
     const report = await response.json();
     expect(report.isDemo).toBe(true);
-    expect(report.opportunities.length).toBeLessThanOrEqual(5);
+    expect(report.opportunities.length).toBeLessThanOrEqual(3);
   });
 
   it("persists editable radar schedule settings and exposes report history", async () => {

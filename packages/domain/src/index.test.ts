@@ -6,6 +6,7 @@ import {
   canTransitionAgentRun,
   canTransitionTask,
   dailyReportInputSchema,
+  evaluateOpportunityResearchGate,
   isActiveRecurringTask,
   isRecurringTask,
   opportunityInputSchema,
@@ -117,6 +118,41 @@ describe("opportunity rules", () => {
     ],
     isDemo: true
   };
+  const datedFact = (category: "demand" | "payment" | "channel" | "feasibility" | "counter", suffix: string, strength: "strong" | "medium" = "strong") => ({
+    label: `${category} evidence ${suffix}`,
+    sourceUrl: `https://example.com/${category}-${suffix}`,
+    type: "fact" as const,
+    category,
+    strength,
+    sourceDate: "2026-07-29",
+    summary: "Direct evidence used by the deterministic gate test.",
+    proves: "The required evidence class is represented.",
+    limitations: "The source does not guarantee future revenue."
+  });
+  const assessment = {
+    currentAlternative: "Spreadsheet work",
+    currentAlternativeCost: "Four hours each week",
+    competitiveLandscape: "One paid tool and one free substitute",
+    automatedDeliveryFlow: "Upload, preview, pay, and automatically download",
+    acquisitionPlan: "One exact-intent search page for the first 100 visitors",
+    dependencies: [],
+    failureReasons: ["Users keep the spreadsheet", "Traffic is too low", "Input formats drift"],
+    unknowns: ["Paid conversion rate"],
+    scores: { demand: 17, payment: 17, acquisition: 13, closure: 13, differentiation: 8, feasibility: 9, recurringValue: 8 }
+  };
+  const qualifiedOpportunity = opportunityInputSchema.parse({
+    ...opportunity,
+    isDemo: false,
+    assessment,
+    evidence: [
+      datedFact("demand", "one"),
+      datedFact("demand", "two", "medium"),
+      datedFact("payment", "one"),
+      datedFact("channel", "one"),
+      datedFact("feasibility", "one"),
+      datedFact("counter", "one")
+    ]
+  });
 
   it("requires traceable evidence", () => {
     expect(opportunityInputSchema.safeParse(opportunity).success).toBe(true);
@@ -133,14 +169,31 @@ describe("opportunity rules", () => {
     expect(calculateOpportunityScore(opportunity)).toBeGreaterThan(70);
   });
 
-  it("limits daily reports to five opportunities", () => {
+  it("passes only a dated, independently sourced 85-point deep-research candidate", () => {
+    expect(calculateOpportunityScore(qualifiedOpportunity)).toBe(85);
+    expect(evaluateOpportunityResearchGate(qualifiedOpportunity)).toEqual({ passed: true, score: 85, reasons: [] });
+  });
+
+  it("rejects a high self-score when a required strong evidence class is missing", () => {
+    const evidence = qualifiedOpportunity.evidence.filter((item) => item.category !== "payment");
+    const result = evaluateOpportunityResearchGate({ ...qualifiedOpportunity, evidence });
+    expect(result.passed).toBe(false);
+    expect(result.reasons.join(" ")).toContain("payment");
+  });
+
+  it("rejects a structurally complete candidate below 85", () => {
+    const assessmentAt84 = { ...assessment, scores: { ...assessment.scores, recurringValue: 7 } };
+    expect(evaluateOpportunityResearchGate({ ...qualifiedOpportunity, assessment: assessmentAt84 }).passed).toBe(false);
+  });
+
+  it("limits daily reports to three opportunities", () => {
     expect(
       dailyReportInputSchema.safeParse({
         reportDate: "2026-07-28",
         title: "Daily radar",
         summary: "A short report.",
         generatedBy: "demo",
-        opportunityIds: Array.from({ length: 6 }, (_, index) =>
+        opportunityIds: Array.from({ length: 4 }, (_, index) =>
           `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`
         ),
         isDemo: true

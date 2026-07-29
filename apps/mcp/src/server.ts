@@ -165,7 +165,7 @@ export function createPersonalOsMcpServer(
 
   server.registerTool("save_daily_report", {
     title: "Save daily report",
-    description: "Save a daily report with no more than five opportunity ids.",
+    description: "Save a daily report with no more than three opportunity ids.",
     inputSchema: dailyReportInputSchema
   }, async (input) => toolResult(tools.saveDailyReport(input)));
 
@@ -177,7 +177,7 @@ export function createPersonalOsMcpServer(
 
   server.registerTool("save_radar_opportunity", {
     title: "Save a radar opportunity",
-    description: "Save one channel-verified opportunity against the active radar claim.",
+    description: "Save one 85+ deep-research opportunity against the active radar claim. Program gates reject weak evidence and more than three candidates.",
     inputSchema: z.object({
       claimStartedAt: z.string().datetime(),
       opportunity: opportunityInputSchema
@@ -186,7 +186,7 @@ export function createPersonalOsMcpServer(
 
   server.registerTool("save_radar_report", {
     title: "Save an OpenWorker radar report",
-    description: "Save the daily report after all channel-verified opportunities have been persisted.",
+    description: "Save the daily report after all qualified opportunities have been persisted. Zero to two candidates produce a partial run.",
     inputSchema: z.object({
       claimStartedAt: z.string().datetime(),
       report: dailyReportInputSchema
@@ -195,7 +195,7 @@ export function createPersonalOsMcpServer(
 
   server.registerTool("complete_radar_run", {
     title: "Complete an opportunity radar run",
-    description: "Mark the active radar claim successful and schedule the next occurrence.",
+    description: "Finish the active radar claim and schedule the next occurrence. Only three qualified 85+ candidates produce succeeded; fewer produce partial.",
     inputSchema: z.object({ claimStartedAt: z.string().datetime() })
   }, async ({ claimStartedAt }) => toolResult(tools.completeRadarRun(claimStartedAt)));
 
