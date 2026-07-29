@@ -168,6 +168,11 @@ node /Users/frigidcrow/Documents/Codex/dev/personal-os/apps/mcp/dist/index.js
 - `save_artifact`
 - `submit_run_result`
 - `fail_run`
+- `claim_due_radar`
+- `save_radar_opportunity`
+- `save_radar_report`
+- `complete_radar_run`
+- `fail_radar_run`
 
 MCP 环境至少包含：
 
@@ -176,7 +181,7 @@ DATABASE_PATH=/Users/frigidcrow/Documents/Codex/dev/personal-os/data/personal-os
 WORKER_LEASE_MILLISECONDS=600000
 ```
 
-OpenWorker 自动化 `Personal OS Pull Worker` 已启用，每五分钟尝试领取一个任务。运行时 `tool_allowlist` 包含上面的十个 Personal OS 控制平面工具以及只读的 `web_search` 与 `web_fetch`。当前模型为 `deepseek:deepseek-v4-pro`；已用一次真实 MCP 领取、心跳和结果回传确认配置生效。长链路、强格式约束的每日 AI 研究目前仍由 Codex 执行。模型可在 OpenWorker Settings 中替换。不要把 OpenWorker Token、认证 seed 或模型密钥写入 Personal OS 仓库、日志、计划文档或 MCP 参数。
+OpenWorker 自动化 `Personal OS Pull Worker` 已启用，每五分钟先尝试领取一个普通任务，没有普通任务时再尝试领取到期的机会雷达。运行时 `tool_allowlist` 包含上面的十五个 Personal OS 工具以及只读的 `web_search` 与 `web_fetch`。当前使用 OpenWorker Settings 中配置的 DeepSeek 模型。普通任务仍提交到 Needs Review；雷达通过专用 claim 保存结构化机会与日报。空轮询是正常 Idle 状态，不是 Personal OS 任务失败。模型可在 OpenWorker Settings 中替换。不要把 OpenWorker Token、认证 seed 或模型密钥写入 Personal OS 仓库、日志、计划文档或 MCP 参数。
 
 OpenWorker 的 headless automation MCP 附加与运行时 allowlist 修复记录在其独立仓库提交 `428adf4`。升级 OpenWorker 后应先运行该仓库完整测试，再验证 `/v1/mcp` 中 `personal_os` 为 connected，并执行一次无外部写操作的真实领取任务。
 
@@ -186,7 +191,7 @@ OpenWorker 的 headless automation MCP 附加与运行时 allowlist 修复记录
 
 | 时间 | 自动化 | 执行器 | 结果位置 |
 |---|---|---|---|
-| 06:30 | 最近 24 小时 AI 新闻与 AI 新技术晨报 | Codex，只读工作区 + 实时 Web 搜索 | Agent 控制面中的已完成 Run |
-| 08:00 | 最小投入赚钱机会雷达 | Codex，只读实时研究 | 机会雷达页与机会列表 |
+| 06:30 | 最近 24 小时 AI 新闻与 AI 新技术晨报 | OpenWorker，当前 DeepSeek 配置 + 只读 Web 搜索 | Agent 控制面的 Needs Review Run |
+| 08:00 | 最小投入赚钱机会雷达 | OpenWorker，当前 DeepSeek 配置 + 只读 Web 搜索 | 机会雷达页与机会列表 |
 
-06:30 任务为低风险只读报告，成功后自动进入 Done，保留完整结果供回看，不会外联、发布、购买或登录。下一次 Cron 到期时，Dispatcher 会把 Done 任务重新准备为 Ready 后运行。08:00 雷达由 Server 内的 cron 调度，结果直接写入 SQLite。两者都要求电脑处于唤醒状态且 Personal OS API 正在运行；任务 Cron 开启 catch-up，机会雷达当前不补跑休眠期间错过的周期。
+06:30 任务为低风险只读报告，成功后进入 Needs Review，人工接受后 Run 进入 Done，定时任务定义回到 Ready 等待下一次 Cron。08:00 雷达由 Server 保存调度定义，OpenWorker 原子领取后把通过销售渠道门槛的机会和日报直接写入 SQLite。两者都不会外联、发布、购买、创建账户或登录。电脑和服务恢复后，两项自动化都只补最近一次错过的周期。

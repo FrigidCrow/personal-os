@@ -176,3 +176,26 @@ Direct evidence:
 Frontend review used the relevant product-UI portions of `design-taste-frontend`: clear state hierarchy, one existing accent, restrained feedback, complete action states, accessible confirmation, responsive scroll-snap, and no added decorative motion or second design system.
 
 Recurring lifecycle verdict: **Passed - ready for user acceptance.**
+
+## Opportunity radar monetization and OpenWorker recovery review
+
+Status: **Passed**
+
+The opportunity radar now treats a reachable sales path as an invariant rather than optional commentary. Users can edit the saved operator profile and additional search instructions from `机会雷达 → 定时设置`, while the system always requires an offer, payer, pricing model, first-sale plan, and at least one structured sales channel with a URL and access method.
+
+Direct evidence:
+
+| Acceptance check | Result | Evidence |
+|---|---|---|
+| User-owned discovery rules | Passed | Radar settings edit and persist operator profile, custom instructions, schedule, timezone, catch-up, enabled state, and executor |
+| Channel gate before persistence | Passed | Domain and MCP tests reject candidates without a structured sales channel; historical ungated records cannot start an experiment |
+| Actionable opportunity presentation | Passed | Live desktop and 390px browser reviews show payer, pricing, offer, channel link/access method, and first-sale plan before the experiment section |
+| OpenWorker radar lifecycle | Passed | Fresh 8765 sidecar exposed 25 tools; a due radar run was atomically claimed, saved, completed, and advanced to the next 08:00 occurrence |
+| Live monetization result | Passed | 2026-07-29 OpenWorker report contains five Chinese opportunities and every record passed the offer/payer/pricing/first-sale/channel checks |
+| Empty-queue semantics | Passed | Pull Worker checks ordinary tasks first, then due radar; only a genuinely empty system reports the explicit Chinese Idle message |
+| Scheduled task recovery | Passed | AI news completed to Needs Review through OpenWorker; radar completed with `succeeded`, no error, and next run 2026-07-30 08:00 JST |
+| Full regression | Passed | 7 test files / 73 tests, 8/8 Playwright journeys, TypeScript, ESLint, production build, dependency audit, and patch hygiene |
+
+The current AI news result is deliberately still in Needs Review. Rendering is verified, but accepting its factual content and sources remains a human decision.
+
+Opportunity radar monetization verdict: **Passed - ready for user acceptance.**

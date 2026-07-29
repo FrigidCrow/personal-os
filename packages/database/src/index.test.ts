@@ -233,6 +233,7 @@ describe("PersonalOsDatabase", () => {
       expression: "0 8 * * *",
       timezone: "Asia/Tokyo",
       catchUp: true,
+      executor: "openworker",
       nextRunAt: null,
       lastStatus: "idle"
     }));
@@ -241,12 +242,17 @@ describe("PersonalOsDatabase", () => {
       enabled: true,
       expression: "45 7 * * *",
       timezone: "Asia/Shanghai",
-      catchUp: false
+      catchUp: false,
+      executor: "openworker",
+      searchProfile: "面向小团队的自动化服务",
+      customInstructions: "排除需要外联才能验证的渠道。"
     }, "2026-07-29T23:45:00.000Z");
     expect(updated).toEqual(expect.objectContaining({
       expression: "45 7 * * *",
       timezone: "Asia/Shanghai",
       catchUp: false,
+      executor: "openworker",
+      searchProfile: "面向小团队的自动化服务",
       nextRunAt: "2026-07-29T23:45:00.000Z"
     }));
   });

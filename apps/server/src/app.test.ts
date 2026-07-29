@@ -271,6 +271,10 @@ describe("Personal OS API", () => {
     }));
     expect(database.getRadarSchedule()).toEqual(expect.objectContaining({ expression: "15 9 * * *", timezone: "Asia/Shanghai" }));
 
+    const queued = await app.request("/api/reports/run-now", { method: "POST" });
+    expect(queued.status).toBe(202);
+    expect(await queued.json()).toEqual(expect.objectContaining({ executor: "openworker", lastStatus: "idle", nextRunAt: expect.any(String) }));
+
     const invalid = await app.request("/api/reports/schedule", {
       method: "PATCH",
       headers: { "content-type": "application/json" },

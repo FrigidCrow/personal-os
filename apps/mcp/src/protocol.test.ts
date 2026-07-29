@@ -37,7 +37,12 @@ describe("Personal OS MCP protocol", () => {
       "request_approval",
       "get_approval_status",
       "submit_run_result",
-      "fail_run"
+      "fail_run",
+      "claim_due_radar",
+      "save_radar_opportunity",
+      "save_radar_report",
+      "complete_radar_run",
+      "fail_radar_run"
     ]));
     expect(names).not.toContain("accept_run");
     expect(names).not.toContain("publish");

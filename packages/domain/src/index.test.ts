@@ -77,7 +77,10 @@ describe("radar schedule defaults", () => {
       enabled: true,
       expression: "0 8 * * *",
       timezone: "Asia/Tokyo",
-      catchUp: true
+      catchUp: true,
+      executor: "openworker",
+      searchProfile: "操作者会开发软件、使用 Codex、承接客户项目，希望以低维护的产品化服务或数字资产建立经常性收入。",
+      customInstructions: ""
     });
   });
 });
@@ -89,6 +92,10 @@ describe("opportunity rules", () => {
     pain: "Weekly reporting is assembled by hand.",
     summary: "Package a repeatable reporting workflow.",
     businessModel: "Setup fee plus monthly maintenance",
+    offer: "A configured weekly client report plus monthly monitoring",
+    pricingModel: "Setup fee plus a fixed monthly retainer",
+    salesChannels: [{ name: "Upwork", accessMethod: "Reply to public reporting automation briefs.", sourceUrl: "https://www.upwork.com/freelance-jobs/" }],
+    firstSalePlan: "Publish one sample, shortlist ten matching briefs, and submit one tailored proposal.",
     confidence: 72,
     personalFit: 88,
     validationEffortHours: 2,
@@ -116,6 +123,10 @@ describe("opportunity rules", () => {
     expect(
       opportunityInputSchema.safeParse({ ...opportunity, evidence: [] }).success
     ).toBe(false);
+  });
+
+  it("rejects ideas without a verifiable sales channel", () => {
+    expect(opportunityInputSchema.safeParse({ ...opportunity, salesChannels: [] }).success).toBe(false);
   });
 
   it("rewards fit and low effort without claiming certainty", () => {

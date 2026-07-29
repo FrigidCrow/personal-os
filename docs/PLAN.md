@@ -339,3 +339,23 @@ Acceptance criteria:
 - Existing recurring tasks whose last accepted run left them in Done are migrated by presentation and lifecycle rules without deleting history.
 - The scheduled card continues to expose its latest run state, next execution time, pause/resume control, review entry when needed, and task detail.
 - Domain, database, API, browser, mobile, typecheck, lint, build, and patch-hygiene checks pass with direct evidence recorded in `WORKLOG.md` and `REVIEW.md`.
+
+## 14. Opportunity radar monetization gate and reliable worker execution
+
+Status: Implemented and verified
+Date: 2026-07-29
+
+The opportunity radar must produce testable sales paths, not only plausible ideas. Its discovery rules belong to the user, while the minimum evidence and sales-channel gate remain system invariants.
+
+Acceptance criteria:
+
+- The opportunity radar UI lets the user edit the operator profile and additional search instructions without editing source code.
+- Schedule, timezone, catch-up behavior, and executor are stored in SQLite and remain editable from the radar page.
+- Every newly generated opportunity includes a concrete offer, target payer, pricing approach, at least one verifiable sales channel with a direct URL and access method, and a first-sale plan.
+- A candidate without a verifiable sales channel is rejected before persistence and does not appear in a daily report.
+- The opportunity card presents the offer, buyer, channels, and first-sale path before the minimum experiment and evidence sections.
+- OpenWorker may atomically claim an overdue radar job, receive only the configured read-only research brief, save schema-validated opportunities and one daily report, and mark the radar run succeeded or failed.
+- OpenWorker idle polling is reported as an idle state, not described as a failed Personal OS task.
+- The existing AI news recurring task is routed to OpenWorker so the configured DeepSeek model can execute it while Codex usage is unavailable.
+- Permanent Codex quota errors remain visible with their original reason and are not misreported as an empty OpenWorker queue.
+- Domain, database, MCP, API, scheduler, browser, mobile, typecheck, lint, build, and live integration checks pass with evidence recorded in `WORKLOG.md` and `REVIEW.md`.

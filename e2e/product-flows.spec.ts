@@ -47,6 +47,8 @@ test("shell, dashboard, themes, mobile navigation and accessibility states", asy
       await page.getByRole("button", { name: "定时设置", exact: true }).click();
       const scheduleDialog = page.getByRole("dialog", { name: "机会雷达自动调研" });
       await expect(scheduleDialog.getByLabel("每天执行时间", { exact: true })).toHaveValue("08:00");
+      await expect(scheduleDialog.getByLabel("个人能力与目标画像", { exact: true })).not.toHaveValue("");
+      await expect(scheduleDialog.getByText("系统固定成交门槛", { exact: true })).toBeVisible();
       await scheduleDialog.getByLabel("每天执行时间", { exact: true }).fill("09:15");
       await tracedMutation(
         page,
@@ -453,6 +455,10 @@ test("opportunity report converts to an experiment, edits it and records a resul
       pain: "流程上线后仍有监控、修复和小幅调整需求",
       summary: "用固定范围的月度维护验证经常性收入需求。",
       businessModel: "固定月费加超额需求单独报价",
+      offer: "自动化流程监控、故障修复和每月一次小幅调整。",
+      pricingModel: "固定月费加超范围需求单独报价",
+      salesChannels: [{ name: "测试渠道", accessMethod: "通过公开服务目录验证目标买家入口。", sourceUrl: "https://example.com/channel" }],
+      firstSalePlan: "制作一页服务边界说明，选择一个公开买家入口并验证一次购买意向。",
       confidence: 72,
       personalFit: 86,
       validationEffortHours: 2,
@@ -482,6 +488,8 @@ test("opportunity report converts to an experiment, edits it and records a resul
   await expect(page.getByText("演示机会报告已生成", { exact: true })).toBeVisible();
   await expect(page.getByText("1 份", { exact: true })).toBeVisible();
   await expect(page.getByText("1 个机会", { exact: true })).toBeVisible();
+  await expect(page.getByText("测试渠道", { exact: true })).toBeVisible();
+  await expect(page.getByText("制作一页服务边界说明，选择一个公开买家入口并验证一次购买意向。", { exact: true })).toBeVisible();
   expect(databaseRows("SELECT * FROM daily_report_opportunities").length).toBeLessThanOrEqual(5);
 
   const candidate = page.locator(".opportunity-panel").filter({ has: page.getByRole("button", { name: "启动最小实验" }) }).first();

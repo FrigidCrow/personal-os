@@ -122,6 +122,9 @@ function mapRadarSchedule(row: Row): RadarSchedule {
     expression: String(row.expression),
     timezone: String(row.timezone),
     catchUp: booleanFromDb(row.catch_up),
+    executor: row.executor as RadarSchedule["executor"],
+    searchProfile: String(row.search_profile),
+    customInstructions: String(row.custom_instructions),
     nextRunAt: nullableString(row.next_run_at),
     lastStartedAt: nullableString(row.last_started_at),
     lastCompletedAt: nullableString(row.last_completed_at),
@@ -343,6 +346,10 @@ export class PersonalOsDatabase {
         pain TEXT NOT NULL,
         summary TEXT NOT NULL,
         business_model TEXT NOT NULL,
+        offer TEXT NOT NULL DEFAULT '',
+        pricing_model TEXT NOT NULL DEFAULT '',
+        sales_channels TEXT NOT NULL DEFAULT '[]',
+        first_sale_plan TEXT NOT NULL DEFAULT '',
         confidence INTEGER NOT NULL,
         personal_fit INTEGER NOT NULL,
         validation_effort_hours REAL NOT NULL,
@@ -415,6 +422,9 @@ export class PersonalOsDatabase {
         expression TEXT NOT NULL DEFAULT '0 8 * * *',
         timezone TEXT NOT NULL DEFAULT 'Asia/Tokyo',
         catch_up INTEGER NOT NULL DEFAULT 1,
+        executor TEXT NOT NULL DEFAULT 'openworker',
+        search_profile TEXT NOT NULL DEFAULT '操作者会开发软件、使用 Codex、承接客户项目，希望以低维护的产品化服务或数字资产建立经常性收入。',
+        custom_instructions TEXT NOT NULL DEFAULT '',
         next_run_at TEXT,
         last_started_at TEXT,
         last_completed_at TEXT,
@@ -487,6 +497,13 @@ export class PersonalOsDatabase {
     this.ensureColumn("tasks", "last_scheduled_at", "TEXT");
     this.ensureColumn("tasks", "automation_paused", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("tasks", "automation_completed_at", "TEXT");
+    this.ensureColumn("opportunities", "offer", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("opportunities", "pricing_model", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("opportunities", "sales_channels", "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureColumn("opportunities", "first_sale_plan", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("radar_schedule", "executor", "TEXT NOT NULL DEFAULT 'openworker'");
+    this.ensureColumn("radar_schedule", "search_profile", "TEXT NOT NULL DEFAULT '操作者会开发软件、使用 Codex、承接客户项目，希望以低维护的产品化服务或数字资产建立经常性收入。'");
+    this.ensureColumn("radar_schedule", "custom_instructions", "TEXT NOT NULL DEFAULT ''");
     this.connection.prepare(`
       UPDATE tasks
       SET status = 'ready', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -853,13 +870,15 @@ export class PersonalOsDatabase {
     const insert = this.connection.transaction(() => {
       this.connection.prepare(`
         INSERT INTO opportunities (
-          id, title, payer, pain, summary, business_model, confidence, personal_fit,
+          id, title, payer, pain, summary, business_model, offer, pricing_model,
+          sales_channels, first_sale_plan, confidence, personal_fit,
           validation_effort_hours, validation_budget, time_to_revenue, recurring_potential,
           maintenance_hours_monthly, hypothesis, minimal_experiment, success_condition,
           stop_condition, status, is_demo, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id, input.title, input.payer, input.pain, input.summary, input.businessModel,
+        input.offer, input.pricingModel, JSON.stringify(input.salesChannels), input.firstSalePlan,
         input.confidence, input.personalFit, input.validationEffortHours, input.validationBudget,
         input.timeToRevenue, input.recurringPotential, input.maintenanceHoursMonthly,
         input.hypothesis, input.minimalExperiment, input.successCondition, input.stopCondition,
@@ -1052,7 +1071,8 @@ export class PersonalOsDatabase {
     const input = radarScheduleInputSchema.parse(raw);
     this.connection.prepare(`
       UPDATE radar_schedule SET
-        enabled = ?, expression = ?, timezone = ?, catch_up = ?, next_run_at = ?,
+        enabled = ?, expression = ?, timezone = ?, catch_up = ?, executor = ?,
+        search_profile = ?, custom_instructions = ?, next_run_at = ?,
         last_status = 'idle', last_error = NULL, updated_at = ?
       WHERE id = 1
     `).run(
@@ -1060,6 +1080,9 @@ export class PersonalOsDatabase {
       input.expression,
       input.timezone,
       input.catchUp ? 1 : 0,
+      input.executor,
+      input.searchProfile,
+      input.customInstructions,
       nextRunAt,
       this.timestamp()
     );
@@ -1085,6 +1108,61 @@ export class PersonalOsDatabase {
       patch.lastError !== undefined ? patch.lastError : current.lastError,
       this.timestamp()
     );
+    return this.getRadarSchedule();
+  }
+
+  claimDueRadar(executor: AgentExecutor, staleAfterMilliseconds = 30 * 60_000): RadarSchedule | null {
+    const claimedAt = this.timestamp();
+    const staleBefore = new Date(this.clock().getTime() - staleAfterMilliseconds).toISOString();
+    const result = this.connection.prepare(`
+      UPDATE radar_schedule
+      SET last_started_at = ?, last_status = 'running', last_error = NULL, updated_at = ?
+      WHERE id = 1 AND enabled = 1 AND executor = ?
+        AND next_run_at IS NOT NULL AND next_run_at <= ?
+        AND (last_status != 'running' OR last_started_at IS NULL OR last_started_at <= ?)
+    `).run(claimedAt, claimedAt, executor, claimedAt, staleBefore);
+    return result.changes === 1 ? this.getRadarSchedule() : null;
+  }
+
+  assertActiveRadarClaim(claimStartedAt: string): RadarSchedule {
+    const schedule = this.getRadarSchedule();
+    if (schedule.lastStatus !== "running" || schedule.lastStartedAt !== claimStartedAt) {
+      throw new Error("Radar claim is not active.");
+    }
+    return schedule;
+  }
+
+  completeRadarClaim(claimStartedAt: string, nextRunAt: string): RadarSchedule {
+    this.assertActiveRadarClaim(claimStartedAt);
+    const completedAt = this.timestamp();
+    this.connection.prepare(`
+      UPDATE radar_schedule SET next_run_at = ?, last_completed_at = ?,
+        last_status = 'succeeded', last_error = NULL, updated_at = ?
+      WHERE id = 1 AND last_status = 'running' AND last_started_at = ?
+    `).run(nextRunAt, completedAt, completedAt, claimStartedAt);
+    return this.getRadarSchedule();
+  }
+
+  failRadarClaim(claimStartedAt: string, nextRunAt: string, reason: string): RadarSchedule {
+    this.assertActiveRadarClaim(claimStartedAt);
+    const completedAt = this.timestamp();
+    this.connection.prepare(`
+      UPDATE radar_schedule SET next_run_at = ?, last_completed_at = ?,
+        last_status = 'failed', last_error = ?, updated_at = ?
+      WHERE id = 1 AND last_status = 'running' AND last_started_at = ?
+    `).run(nextRunAt, completedAt, reason, completedAt, claimStartedAt);
+    return this.getRadarSchedule();
+  }
+
+  queueRadarNow(): RadarSchedule {
+    const schedule = this.getRadarSchedule();
+    if (!schedule.enabled) throw new Error("Enable radar scheduling before queuing a run.");
+    if (schedule.lastStatus === "running") throw new Error("Radar research is already running.");
+    const queuedAt = this.timestamp();
+    this.connection.prepare(`
+      UPDATE radar_schedule SET next_run_at = ?, last_status = 'idle',
+        last_error = NULL, updated_at = ? WHERE id = 1
+    `).run(queuedAt, queuedAt);
     return this.getRadarSchedule();
   }
 
@@ -1714,6 +1792,10 @@ export class PersonalOsDatabase {
       pain: "每周都要手工从任务、提交和部署记录中整理客户报告。",
       summary: "验证一次性配置费加低维护月度服务的标准化方案。",
       businessModel: "一次性配置费加月度订阅",
+      offer: "为小型软件工作室配置自动客户周报，并按月维护数据连接。",
+      pricingModel: "一次性配置费加固定月费",
+      salesChannels: [{ name: "Upwork", accessMethod: "在自动化与客户报告相关公开需求中提交带样例的定制提案。", sourceUrl: "https://www.upwork.com/freelance-jobs/" }],
+      firstSalePlan: "制作一份匿名样例，筛选十条匹配的公开需求，先提交一条针对性提案并记录回复。",
       confidence: 68,
       personalFit: 91,
       validationEffortHours: 2,
@@ -1749,6 +1831,10 @@ export class PersonalOsDatabase {
       pain: "代码仓库缺少简洁的代理指令、测试命令和安全执行边界。",
       summary: "验证一项标准化审计服务，交付 AGENTS.md、工作流 Skill 和实施清单。",
       businessModel: "固定范围审计加可选维护服务",
+      offer: "交付一次 AI 编码仓库接入审计和可选月度规则维护。",
+      pricingModel: "固定范围审计费加可选维护月费",
+      salesChannels: [{ name: "GitHub Marketplace", accessMethod: "从公开的 AI 开发工具与仓库治理需求中识别团队，再通过其公开采购入口验证需求。", sourceUrl: "https://github.com/marketplace" }],
+      firstSalePlan: "准备匿名前后对比样例，选择一个具有公开采购入口的团队，先验证是否愿意购买固定范围审计。",
       confidence: 62,
       personalFit: 87,
       validationEffortHours: 3,
@@ -1807,6 +1893,10 @@ export class PersonalOsDatabase {
       pain: String(row.pain),
       summary: String(row.summary),
       businessModel: String(row.business_model),
+      offer: String(row.offer),
+      pricingModel: String(row.pricing_model),
+      salesChannels: JSON.parse(String(row.sales_channels)) as Opportunity["salesChannels"],
+      firstSalePlan: String(row.first_sale_plan),
       confidence: Number(row.confidence),
       personalFit: Number(row.personal_fit),
       validationEffortHours: Number(row.validation_effort_hours),

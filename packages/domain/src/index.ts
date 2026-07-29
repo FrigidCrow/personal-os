@@ -62,7 +62,7 @@ export const approvalActionTypeSchema = z.enum([
   "other"
 ]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "rejected", "expired"]);
-export const generatedBySchema = z.enum(["demo", "codex", "manual"]);
+export const generatedBySchema = z.enum(["demo", "codex", "openworker", "manual"]);
 export const radarScheduleStatusSchema = z.enum(["idle", "running", "succeeded", "failed", "skipped"]);
 
 const optionalText = z.string().trim().max(2000).nullable().optional();
@@ -116,12 +116,22 @@ export const evidenceInputSchema = z.object({
   summary: z.string().trim().min(1).max(1000)
 });
 
+export const salesChannelInputSchema = z.object({
+  name: z.string().trim().min(1).max(180),
+  accessMethod: z.string().trim().min(1).max(1000),
+  sourceUrl: z.string().url()
+});
+
 export const opportunityInputSchema = z.object({
   title: z.string().trim().min(1).max(180),
   payer: z.string().trim().min(1).max(300),
   pain: z.string().trim().min(1).max(1000),
   summary: z.string().trim().min(1).max(1500),
   businessModel: z.string().trim().min(1).max(500),
+  offer: z.string().trim().min(1).max(1000),
+  pricingModel: z.string().trim().min(1).max(500),
+  salesChannels: z.array(salesChannelInputSchema).min(1).max(8),
+  firstSalePlan: z.string().trim().min(1).max(3000),
   confidence: z.number().int().min(0).max(100),
   personalFit: z.number().int().min(0).max(100),
   validationEffortHours: z.number().finite().min(0).max(1000),
@@ -197,7 +207,10 @@ export const radarScheduleInputSchema = z.object({
   enabled: z.boolean().default(true),
   expression: z.string().trim().min(1).max(120).default("0 8 * * *"),
   timezone: z.string().trim().min(1).max(100).default("Asia/Tokyo"),
-  catchUp: z.boolean().default(true)
+  catchUp: z.boolean().default(true),
+  executor: agentExecutorSchema.default("openworker"),
+  searchProfile: z.string().trim().min(1).max(3000).default("操作者会开发软件、使用 Codex、承接客户项目，希望以低维护的产品化服务或数字资产建立经常性收入。"),
+  customInstructions: z.string().trim().max(5000).default("")
 });
 
 export type ProjectLane = z.infer<typeof projectLaneSchema>;

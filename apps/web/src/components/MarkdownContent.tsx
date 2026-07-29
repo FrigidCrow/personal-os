@@ -5,7 +5,7 @@ export function MarkdownContent({ content, compact = false }: { content: string;
   return (
     <div className={`markdown-content${compact ? " markdown-content-compact" : ""}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
         components={{
           a: ({ href, children, title }) => <a href={href} title={title} target="_blank" rel="noreferrer">{children}</a>
         }}

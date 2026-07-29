@@ -120,6 +120,62 @@ describe("Personal OS MCP tool contract", () => {
     expect(leaseDuration).toBe(600_000);
   });
 
+  it("claims and completes channel-gated radar research", () => {
+    database.configureRadarSchedule({
+      enabled: true,
+      expression: "0 8 * * *",
+      timezone: "Asia/Tokyo",
+      catchUp: true,
+      executor: "openworker",
+      searchProfile: "面向个人技术服务",
+      customInstructions: "优先验证公开销售渠道。"
+    }, "2020-01-01T00:00:00.000Z");
+
+    const claim = tools.claimDueRadar("openworker");
+    expect(claim).toEqual(expect.objectContaining({ claimed: true, reportDate: expect.any(String) }));
+    if (!claim.claimed) throw new Error("Expected a radar claim");
+    expect(tools.claimDueRadar("openworker")).toEqual(expect.objectContaining({ claimed: false }));
+
+    const existing = database.listOpportunities()[0]!;
+    const created = tools.saveRadarOpportunity(claim.claimStartedAt, {
+      title: "带销售渠道的测试机会",
+      payer: existing.payer,
+      pain: existing.pain,
+      summary: existing.summary,
+      businessModel: existing.businessModel,
+      offer: existing.offer,
+      pricingModel: existing.pricingModel,
+      salesChannels: existing.salesChannels,
+      firstSalePlan: existing.firstSalePlan,
+      confidence: existing.confidence,
+      personalFit: existing.personalFit,
+      validationEffortHours: existing.validationEffortHours,
+      validationBudget: existing.validationBudget,
+      timeToRevenue: existing.timeToRevenue,
+      recurringPotential: existing.recurringPotential,
+      maintenanceHoursMonthly: existing.maintenanceHoursMonthly,
+      hypothesis: existing.hypothesis,
+      minimalExperiment: existing.minimalExperiment,
+      successCondition: existing.successCondition,
+      stopCondition: existing.stopCondition,
+      evidence: existing.evidence.map(({ label, sourceUrl, type, summary }) => ({ label, sourceUrl, type, summary })),
+      status: "candidate",
+      isDemo: false
+    });
+    tools.saveRadarReport(claim.claimStartedAt, {
+      reportDate: claim.reportDate,
+      title: "机会雷达日报",
+      summary: "仅保存通过销售渠道门槛的候选。",
+      generatedBy: "openworker",
+      opportunityIds: [created.id],
+      isDemo: false
+    });
+    const completed = tools.completeRadarRun(claim.claimStartedAt);
+
+    expect(completed).toEqual(expect.objectContaining({ lastStatus: "succeeded", nextRunAt: expect.any(String) }));
+    expect(database.getReportByDate(claim.reportDate)?.generatedBy).toBe("openworker");
+  });
+
   it("creates an immutable approval request instead of performing an external write", () => {
     const task = database.createTask({
       title: "Draft external reply",

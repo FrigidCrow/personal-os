@@ -135,7 +135,9 @@ export function createApp(dependencies: AppDependencies): Hono {
       error.message.includes("not awaiting approval") ||
       error.message.includes("cannot be cancelled") ||
       error.message.includes("Active run already exists") ||
-      error.message.includes("Duplicate idempotency")
+      error.message.includes("Duplicate idempotency") ||
+      error.message.includes("already running") ||
+      error.message.includes("Enable radar scheduling")
     ) {
       return context.json({ error: "INVALID_STATE", message: error.message }, 409);
     }
@@ -338,6 +340,13 @@ export function createApp(dependencies: AppDependencies): Hono {
     const body = z.object({ mode: z.enum(["demo", "live"]).default("demo") }).parse(await context.req.json());
     const report = body.mode === "live" ? await radar.generateLive() : radar.generateDemo();
     return context.json(report, 201);
+  });
+  app.post("/api/reports/run-now", (context) => {
+    const schedule = database.getRadarSchedule();
+    if (schedule.executor !== "openworker") {
+      throw new Error("Radar run-now queue requires the OpenWorker executor.");
+    }
+    return context.json(database.queueRadarNow(), 202);
   });
 
   app.get("/api/agent-runs", (context) => {

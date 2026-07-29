@@ -118,7 +118,7 @@ GUI 当前依赖审计报告 7 项上游告警：3 moderate、3 high、1 critica
 
 #### 集成状态
 
-Phase A 至 E 已按顺序完成。OpenWorker 自动化 `Personal OS Pull Worker` 对控制平面使用精确的十工具 allowlist，每五分钟领取一次任务，并允许两个只读内置工具 `web_search` 与 `web_fetch`。worker 租约设为 600000 ms。历史 Ollama 验收与当前 `deepseek:deepseek-v4-pro` 验收均已完成 list、原子 claim、running event、heartbeat、context 和 result 回传。强格式、长链路的 06:30 AI 日报由 Codex 以只读实时研究策略执行；08:00 机会雷达同样使用 Codex。OpenWorker 仍是独立项目，Personal OS 只保存通用 AgentRun、必要事件、产物和审批证据。
+Phase A 至 E 已按顺序完成。OpenWorker 自动化 `Personal OS Pull Worker` 每五分钟先尝试领取一个普通任务，没有任务时再尝试领取到期的机会雷达调研。运行时 allowlist 包含十个通用控制平面工具、五个雷达专用工具，以及只读的 `web_search` 与 `web_fetch`。worker 租约设为 600000 ms。历史 Ollama 验收与当前 DeepSeek 验收均已完成 list、原子 claim、running event、heartbeat、context 和 result 回传。06:30 AI 日报与 08:00 机会雷达现由 OpenWorker 执行，以避开 Codex 额度不可用时的连续失败；Codex 仍保留为显式备选。OpenWorker 仍是独立项目，Personal OS 只保存通用 AgentRun、必要事件、产物、审批证据、结构化机会与日报。
 
 Review 中发现并修复了五个真实集成缺口：headless automation 未附加 MCP、prompt-only 工具约束不可靠、模型易混淆 taskId/runId、两分钟租约不足以覆盖本地推理，以及 OpenWorker Live 运行被错误标为 Demo。完整证据见 `docs/FULL-E2E-ACCEPTANCE.md`。
 
@@ -644,3 +644,30 @@ MVP2 完成必须同时满足：
 ```
 
 不在通用运行模型完成前直接接 OpenWorker；否则会把 Codex 专用结构复制成第二套并行系统，增加后续迁移成本。
+
+## 19. 机会雷达 OpenWorker 执行补充
+
+机会雷达保留独立的 SQLite 调度定义，因为它的产物是结构化机会和日报，不是需要人工接受后才生效的普通任务结果。OpenWorker 仍通过同一个 Personal OS MCP 连接领取工作，但使用专门的原子领取与完成协议：
+
+```text
+OpenWorker 每五分钟轮询
+  -> 优先领取一个普通 Agent Run
+  -> 没有普通任务时领取到期的 Radar Run
+  -> 读取用户搜索画像与自定义规则
+  -> 只读公开网络调研
+  -> 逐条保存通过销售渠道门槛的机会
+  -> 保存一份日报
+  -> 标记成功并计算下一次执行
+```
+
+雷达专用 MCP 工具：
+
+- `claim_due_radar`
+- `save_radar_opportunity`
+- `save_radar_report`
+- `complete_radar_run`
+- `fail_radar_run`
+
+销售渠道门槛是不可由提示词关闭的系统规则。每个新机会必须有具体产品、目标付费者、定价方式、第一单步骤，以及至少一个包含公开直达 URL 和具体进入方法的销售渠道。没有可核验渠道的候选不能保存，也不能出现在日报中。
+
+用户可从机会雷达页面修改执行时间、时区、补跑策略、执行器、个人能力画像和额外搜索规则。执行器默认为 OpenWorker，以复用其当前 DeepSeek 配置；Codex 仍可作为显式备选，但额度错误必须原样显示，不得被空队列状态覆盖。

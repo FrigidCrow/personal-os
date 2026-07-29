@@ -27,7 +27,7 @@ export async function runDailyRadarTick(
   currentTime = new Date(),
   mode: "demo" | "live" = process.env.CODEX_MODE === "live" ? "live" : "demo",
   scheduleGraceMilliseconds = 60_000
-): Promise<"disabled" | "initialized" | "waiting" | "skipped" | "succeeded" | "failed"> {
+): Promise<"disabled" | "initialized" | "waiting" | "awaiting_worker" | "skipped" | "succeeded" | "failed"> {
   const schedule = database.getRadarSchedule();
   if (!schedule.enabled) return "disabled";
 
@@ -71,6 +71,8 @@ export async function runDailyRadarTick(
     });
     return "skipped";
   }
+
+  if (schedule.executor === "openworker") return "awaiting_worker";
 
   database.updateRadarScheduleRuntime({
     nextRunAt,

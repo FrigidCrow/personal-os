@@ -1,4 +1,5 @@
 import type { PersonalOsDatabase } from "@personal-os/database";
+import { CronExpressionParser } from "cron-parser";
 import type {
   AgentExecutor,
   AgentRunEventType,
@@ -142,6 +143,57 @@ export function createPersonalOsTools(
     createAssetCandidate: (input: IncomeAssetInput) => database.createAsset({ ...input, stage: input.stage ?? "idea" }),
     saveOpportunity: (input: OpportunityInput) => database.createOpportunity(input),
     saveDailyReport: (input: DailyReportInput) => database.createDailyReport(input),
+    claimDueRadar: (executor: AgentExecutor = "openworker") => {
+      const schedule = database.claimDueRadar(executor);
+      if (!schedule) return { claimed: false as const, reason: "No due radar research is available." };
+      const claimStartedAt = schedule.lastStartedAt!;
+      const reportDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: schedule.timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(new Date(claimStartedAt));
+      return {
+        claimed: true as const,
+        claimStartedAt,
+        scheduledFor: schedule.nextRunAt,
+        reportDate,
+        timezone: schedule.timezone,
+        searchProfile: schedule.searchProfile,
+        customInstructions: schedule.customInstructions,
+        hardRequirements: [
+          "Return at most five opportunities in Simplified Chinese.",
+          "Every opportunity must identify a concrete offer, payer, pricing model, first-sale plan, and at least one verifiable sales channel.",
+          "Every sales channel must include a direct public URL and a specific access method. If no channel can be verified, omit the candidate.",
+          "Cite direct sources, label fact versus inference, and never claim guaranteed income.",
+          "Do not contact anyone, publish, purchase, create accounts, or perform any external write."
+        ]
+      };
+    },
+    saveRadarOpportunity: (claimStartedAt: string, input: OpportunityInput) => {
+      database.assertActiveRadarClaim(claimStartedAt);
+      return database.createOpportunity({ ...input, status: "candidate", isDemo: false });
+    },
+    saveRadarReport: (claimStartedAt: string, input: DailyReportInput) => {
+      database.assertActiveRadarClaim(claimStartedAt);
+      return database.createDailyReport({ ...input, generatedBy: "openworker", isDemo: false });
+    },
+    completeRadarRun: (claimStartedAt: string) => {
+      const schedule = database.assertActiveRadarClaim(claimStartedAt);
+      const nextRunAt = CronExpressionParser.parse(schedule.expression, {
+        currentDate: new Date(),
+        tz: schedule.timezone
+      }).next().toDate().toISOString();
+      return database.completeRadarClaim(claimStartedAt, nextRunAt);
+    },
+    failRadarRun: (claimStartedAt: string, reason: string) => {
+      const schedule = database.assertActiveRadarClaim(claimStartedAt);
+      const nextRunAt = CronExpressionParser.parse(schedule.expression, {
+        currentDate: new Date(),
+        tz: schedule.timezone
+      }).next().toDate().toISOString();
+      return database.failRadarClaim(claimStartedAt, nextRunAt, reason);
+    },
     recordExperimentResult: (experimentId: string, status: Extract<ExperimentStatus, "measuring" | "won" | "lost" | "pivoted">, resultSummary: string) =>
       database.recordExperimentResult(experimentId, { status, resultSummary })
   };

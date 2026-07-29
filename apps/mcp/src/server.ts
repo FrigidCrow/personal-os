@@ -121,7 +121,7 @@ export function createPersonalOsMcpServer(
     inputSchema: z.object({
       taskId: z.string().uuid(),
       runId: z.string().uuid(),
-      finalResponse: z.string().trim().min(1).max(8000),
+      finalResponse: z.string().trim().min(1).max(24_000),
       verificationSummary: z.string().trim().min(1).max(4000),
       artifactPaths: z.array(z.string().trim().min(1).max(1000)).max(100).default([])
     })
@@ -168,6 +168,45 @@ export function createPersonalOsMcpServer(
     description: "Save a daily report with no more than five opportunity ids.",
     inputSchema: dailyReportInputSchema
   }, async (input) => toolResult(tools.saveDailyReport(input)));
+
+  server.registerTool("claim_due_radar", {
+    title: "Claim due opportunity radar research",
+    description: "Atomically claim one due read-only opportunity radar run. An empty result is an idle poll, not a failed task.",
+    inputSchema: z.object({ executor: agentExecutorSchema.default("openworker") })
+  }, async ({ executor }) => toolResult(tools.claimDueRadar(executor)));
+
+  server.registerTool("save_radar_opportunity", {
+    title: "Save a radar opportunity",
+    description: "Save one channel-verified opportunity against the active radar claim.",
+    inputSchema: z.object({
+      claimStartedAt: z.string().datetime(),
+      opportunity: opportunityInputSchema
+    })
+  }, async ({ claimStartedAt, opportunity }) => toolResult(tools.saveRadarOpportunity(claimStartedAt, opportunity)));
+
+  server.registerTool("save_radar_report", {
+    title: "Save an OpenWorker radar report",
+    description: "Save the daily report after all channel-verified opportunities have been persisted.",
+    inputSchema: z.object({
+      claimStartedAt: z.string().datetime(),
+      report: dailyReportInputSchema
+    })
+  }, async ({ claimStartedAt, report }) => toolResult(tools.saveRadarReport(claimStartedAt, report)));
+
+  server.registerTool("complete_radar_run", {
+    title: "Complete an opportunity radar run",
+    description: "Mark the active radar claim successful and schedule the next occurrence.",
+    inputSchema: z.object({ claimStartedAt: z.string().datetime() })
+  }, async ({ claimStartedAt }) => toolResult(tools.completeRadarRun(claimStartedAt)));
+
+  server.registerTool("fail_radar_run", {
+    title: "Fail an opportunity radar run",
+    description: "Record a concise failure reason and schedule the next occurrence.",
+    inputSchema: z.object({
+      claimStartedAt: z.string().datetime(),
+      reason: z.string().trim().min(1).max(2000)
+    })
+  }, async ({ claimStartedAt, reason }) => toolResult(tools.failRadarRun(claimStartedAt, reason)));
 
   server.registerTool("record_experiment_result", {
     title: "Record experiment result",

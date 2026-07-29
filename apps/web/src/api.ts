@@ -58,6 +58,9 @@ export interface RadarScheduleData {
   expression: string;
   timezone: string;
   catchUp: boolean;
+  executor: "codex" | "openworker";
+  searchProfile: string;
+  customInstructions: string;
   mode: "demo" | "live";
   nextRunAt: string | null;
   lastRunAt: string | null;
@@ -70,7 +73,7 @@ export interface RadarScheduleData {
   updatedAt: string;
 }
 
-export type RadarScheduleInput = Pick<RadarScheduleData, "enabled" | "expression" | "timezone" | "catchUp">;
+export type RadarScheduleInput = Pick<RadarScheduleData, "enabled" | "expression" | "timezone" | "catchUp" | "executor" | "searchProfile" | "customInstructions">;
 
 export type TaskPatch = Partial<Omit<TaskInput, "status">>;
 export type ExperimentPatch = Partial<ExperimentInput>;
@@ -127,6 +130,7 @@ export const api = {
   reports: () => request<ItemList<DailyReport>>("/api/reports"),
   reportSchedule: () => request<RadarScheduleData>("/api/reports/schedule"),
   updateReportSchedule: (input: RadarScheduleInput) => request<RadarScheduleData>("/api/reports/schedule", { method: "PATCH", body: JSON.stringify(input) }),
+  queueReportNow: () => request<RadarScheduleData>("/api/reports/run-now", { method: "POST" }),
   latestReport: () => request<DailyReport>("/api/reports/latest"),
   generateReport: (mode: "demo" | "live") => request<DailyReport>("/api/reports/generate", { method: "POST", body: JSON.stringify({ mode }) }),
   runs: () => request<ItemList<AgentRun>>("/api/agent-runs"),

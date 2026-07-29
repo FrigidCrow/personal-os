@@ -237,3 +237,33 @@ Phase E verification so far:
 - TypeScript, ESLint, full production build, and patch hygiene passed.
 - Live API confirmed `每日 AI 新闻与新技术晨报` is Ready, active, not completed, and scheduled for 06:30 Asia/Tokyo.
 - Rendered desktop and 390px mobile evidence is stored in `review-artifacts/scheduled-task-column.png` and `review-artifacts/scheduled-task-column-mobile.png`.
+
+## 2026-07-29 - Opportunity radar monetization gate and OpenWorker recovery
+
+### Plan
+
+- Diagnosed the two reported scheduled failures before changing code. The AI news task exhausted Codex usage on all three attempts; the opportunity radar failed for the same reason. OpenWorker's `no claimable tasks` message was a successful idle poll, not either failed execution.
+- Added acceptance criteria to `docs/PLAN.md` for editable discovery rules, a non-optional sales-channel gate, dedicated OpenWorker radar claiming, correct idle reporting, and live executor recovery.
+- Applied the product-UI portions of `design-taste-frontend` with variance 4, motion 2, and density 8, preserving the current graphite, orange, Radix Themes, and Phosphor system.
+
+### Work
+
+- Added SQLite-backed radar executor, operator profile, and custom instructions. The radar settings dialog now edits all three alongside time, timezone, catch-up, and enabled state.
+- Added required opportunity fields for the concrete offer, pricing, structured sales channels, direct channel URLs, access methods, and first-sale plan. Zod rejects new candidates without at least one channel before persistence.
+- Added a `成交路径` section to opportunity cards. Historical records without the new fields are clearly marked as not having passed the channel gate and cannot be converted into experiments.
+- Added atomic OpenWorker radar claim, save, complete, fail, stale-claim recovery, and run-now queue operations. The server scheduler leaves OpenWorker jobs claimable instead of invoking Codex.
+- Expanded the OpenWorker MCP and runtime allowlist with five radar-only tools. The five-minute pull worker now checks ordinary tasks first, then due radar research, and reports an explicit Chinese Idle message when neither exists.
+- Routed the live 06:30 AI news task from Codex to OpenWorker, returned it from Blocked to Ready, and queued a live recovery run. Reconfigured the 08:00 opportunity radar for OpenWorker with a saved custom search rule and queued a live recovery run.
+- Updated README, operations guidance, and the automation architecture plan to describe the DeepSeek-backed execution path and the sales-channel invariant.
+
+### Review
+
+- Unit and integration tests: 7 files / 73 tests passed.
+- Full Playwright acceptance: 8/8 passed, including editable radar rules, the fixed sales gate copy, rendered sales channels, and first-sale plan.
+- TypeScript, ESLint, production builds, dependency audit, and patch hygiene passed.
+- In-app browser review covered the settings dialog, historical channel-gate state, OpenWorker execution label, desktop layout, 390px mobile layout, and browser console. No console errors were found.
+- Live OpenWorker recovery completed after terminating the orphaned pre-upgrade sidecar and starting a fresh 8765 process. The refreshed MCP registry exposed 25 Personal OS tools, including all five radar claim/save/complete/fail operations.
+- The recovered 06:30 AI news run reached Needs Review through OpenWorker. Its Chinese Markdown renders correctly in the review UI; the report remains intentionally unaccepted for human source review.
+- The recovered 08:00 opportunity radar reached `succeeded` at 2026-07-29 13:50 JST and scheduled its next run for 2026-07-30 08:00 JST. The OpenWorker/DeepSeek run used 38 steps and saved a five-opportunity Chinese report.
+- Live API validation confirmed all five saved opportunities contain a concrete offer, payer, pricing model, first-sale plan, and one or more structured sales channels with a URL and access method. The desktop and 390px radar views render these fields as the `成交路径已验证` section.
+- The live verification also proved that an empty ordinary task queue is followed by `claim_due_radar`; it no longer causes the due radar job to be skipped. A true empty poll now returns the explicit Chinese Idle message.
