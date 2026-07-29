@@ -293,3 +293,28 @@ Phase E verification so far:
 - TypeScript, ESLint, all production builds, dependency audit with zero vulnerabilities, and `git diff --check` passed.
 - Live health after deployment reports SQLite `ok`, zero active or stale runs, zero pending approvals, next Radar run at `2026-07-29T23:00:00.000Z`, and OpenWorker `personal_os` registered and connected.
 - The program can validate evidence structure and declared strength but cannot independently guarantee the semantic truth of every cited page. Real evidence should still be reviewed before authorizing spend or launching an experiment.
+
+## 2026-07-29 - Opportunity radar live-state visibility
+
+### Plan
+
+- Used the user's screenshot to confirm that immediate research was represented as generic `idle / 等待执行`, with no explicit queued state and no visible active-run strip.
+- Added the live-state acceptance criteria to `docs/PLAN.md` and the Radar acceptance matrix before implementation.
+- Applied `design-taste-frontend` as a preserve-mode product UI fix with variance 4, motion 2, and density 8. The change uses the existing Radix, Geist, graphite, orange, and Phosphor system.
+
+### Work
+
+- Added `queued` to the domain schedule status. Immediate and automatic due OpenWorker research now persist `queued` before claim, and claim still atomically changes it to `running`.
+- Prevented duplicate immediate runs while queued or running and mapped duplicate requests to the existing invalid-state response.
+- Added an active status strip with real queue/start timestamps and explicit `已加入调研队列` or `正在中文调研` copy. No unsupported search phases are invented.
+- Changed the primary action to `已加入队列` or `正在中文调研` and disabled it for both active states.
+- Changed active schedule and report polling to three seconds, restoring the one-minute schedule interval when inactive. A transition to a terminal state invalidates reports, opportunities, and dashboard data.
+- Adjusted the timing fact from generic `下次调研` to `排队时间` or `开始时间` while active.
+
+### Review
+
+- Unit/integration result remains 7 files / 80 tests passed; database, API, and scheduler checks now cover queued persistence, automatic queueing, and duplicate rejection.
+- Full Playwright result: 8/8 journeys passed. A focused rerun directly verified queued and running copy, disabled buttons, three-second transition polling, and 390px width without overflow.
+- Direct screenshots: `radar-queued-desktop.png`, `radar-running-mobile.png`, and the live deployed `review-artifacts/radar-live-running.png`.
+- TypeScript, ESLint, production build, and `git diff --check` passed.
+- Deployed API and Web without restarting the active OpenWorker research. Live 5273 showed `正在中文调研`, `OpenWorker 已领取任务`, and the real 15:10 start time; the action was disabled.

@@ -67,7 +67,7 @@ export interface RadarScheduleData {
   lastReportDate: string | null;
   lastStartedAt: string | null;
   lastCompletedAt: string | null;
-  lastStatus: "idle" | "running" | "succeeded" | "partial" | "failed" | "skipped";
+  lastStatus: "idle" | "queued" | "running" | "succeeded" | "partial" | "failed" | "skipped";
   lastError: string | null;
   createdAt: string;
   updatedAt: string;

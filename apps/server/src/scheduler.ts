@@ -72,7 +72,12 @@ export async function runDailyRadarTick(
     return "skipped";
   }
 
-  if (schedule.executor === "openworker") return "awaiting_worker";
+  if (schedule.executor === "openworker") {
+    if (!["queued", "running"].includes(schedule.lastStatus)) {
+      database.updateRadarScheduleRuntime({ lastStatus: "queued", lastError: null });
+    }
+    return "awaiting_worker";
+  }
 
   database.updateRadarScheduleRuntime({
     nextRunAt,

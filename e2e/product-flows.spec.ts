@@ -58,6 +58,37 @@ test("shell, dashboard, themes, mobile navigation and accessibility states", asy
         () => scheduleDialog.getByRole("button", { name: "保存定时设置", exact: true }).click()
       );
       await expect(page.getByRole("heading", { name: "每天 09:15 自动寻找低成本机会", exact: true })).toBeVisible();
+      await tracedMutation(
+        page,
+        testInfo,
+        "radar-queue-now",
+        (response) => response.url().endsWith("/api/reports/run-now") && response.request().method() === "POST",
+        () => page.getByRole("button", { name: "立即中文调研", exact: true }).click()
+      );
+      await expect(page.locator(".radar-active-run").getByText("已加入调研队列", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "已加入队列", exact: true })).toBeDisabled();
+      await page.locator(".radar-schedule-panel").screenshot({ path: testInfo.outputPath("radar-queued-desktop.png") });
+
+      const radarStateDatabase = createDatabase(e2eDatabasePath, false);
+      try {
+        radarStateDatabase.updateRadarScheduleRuntime({ lastStatus: "running", lastStartedAt: new Date().toISOString() });
+      } finally {
+        radarStateDatabase.close();
+      }
+      await expect(page.locator(".radar-active-run").getByText("正在中文调研", { exact: true })).toBeVisible({ timeout: 6_000 });
+      await expect(page.getByRole("button", { name: "正在中文调研", exact: true })).toBeDisabled();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.locator(".radar-schedule-panel").screenshot({ path: testInfo.outputPath("radar-running-mobile.png") });
+      const activeRadarOverflow = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth }));
+      expect(activeRadarOverflow.scrollWidth).toBe(activeRadarOverflow.width);
+      await page.setViewportSize({ width: 1440, height: 1000 });
+
+      const resetRadarDatabase = createDatabase(e2eDatabasePath, false);
+      try {
+        resetRadarDatabase.updateRadarScheduleRuntime({ lastStatus: "idle", nextRunAt: "2099-01-01T00:00:00.000Z" });
+      } finally {
+        resetRadarDatabase.close();
+      }
     }
   }
 

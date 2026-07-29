@@ -379,3 +379,20 @@ Acceptance criteria:
 - Historical and demo opportunities remain readable after a non-destructive SQLite migration, but cannot start a new experiment unless the current deep-research gate passes.
 - The Radar UI shows the score breakdown, gate result, evidence categories and strengths, proof limitations, competitive alternatives, closure path, dependencies, failure reasons, and unknowns without changing the existing visual system.
 - Domain, database, MCP, API, Web, browser, mobile, typecheck, lint, build, and patch-hygiene checks pass with direct evidence recorded in `docs/RADAR-DEEP-RESEARCH-ACCEPTANCE.md`, `WORKLOG.md`, and `REVIEW.md`.
+
+## 16. Opportunity radar live-state visibility
+
+Status: Implemented and verified
+Date: 2026-07-29
+
+The immediate-research action must expose its real lifecycle. Queued work is not idle, and active research must be visible without waiting a full minute or inferring state from the next-run timestamp.
+
+Acceptance criteria:
+
+- Clicking immediate research stores an explicit `queued` state and immediately renders `已加入调研队列`.
+- OpenWorker claiming the job changes the state to `running`, rendered as `正在中文调研` with its actual start time.
+- The primary action is disabled while queued or running and cannot enqueue duplicates.
+- The Radar page polls every three seconds only while queued or running, then returns to the normal one-minute interval.
+- A compact active-state strip appears inside the existing schedule panel on desktop and mobile without inventing unsupported sub-steps.
+- Automatic due OpenWorker research also enters `queued` before claim, rather than remaining `idle`.
+- Domain, database, scheduler, API, browser, mobile, typecheck, lint, build, and patch-hygiene checks pass with direct evidence recorded in `WORKLOG.md` and `REVIEW.md`.

@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Checkbox, Dialog, Select, TextArea, TextField } from "@radix-ui/themes";
 import { ArrowSquareOut, CalendarBlank, CheckCircle, Clock, Crosshair, Flask, GearSix, Lightning, ShieldCheck, Sparkle, WarningCircle } from "@phosphor-icons/react";
-import { api, type RadarScheduleInput } from "../api";
+import { api, type RadarScheduleData, type RadarScheduleInput } from "../api";
 import { DemoBanner, EmptyState, ErrorState, LoadingState, SectionHeader } from "../components/UI";
 import { useSuccessToast } from "../components/SuccessToast";
 
@@ -44,8 +44,8 @@ function expressionFromTime(time: string): string {
   return `${Number(minute)} ${Number(hour)} * * *`;
 }
 
-function runStatusLabel(status: "idle" | "running" | "succeeded" | "partial" | "failed" | "skipped" | undefined): string {
-  return { idle: "等待执行", running: "正在调研", succeeded: "最近一次完全成功", partial: "最近一次未达标", failed: "最近一次执行失败", skipped: "最近一次已跳过" }[status ?? "idle"];
+function runStatusLabel(status: RadarScheduleData["lastStatus"] | undefined): string {
+  return { idle: "等待执行", queued: "已加入调研队列", running: "正在中文调研", succeeded: "最近一次完全成功", partial: "最近一次未达标", failed: "最近一次执行失败", skipped: "最近一次已跳过" }[status ?? "idle"];
 }
 
 const evidenceCategoryLabels = { demand: "需求", payment: "付费", channel: "渠道", feasibility: "可实现", counter: "反证" } as const;
@@ -74,10 +74,34 @@ export function RadarPage() {
     searchProfile: "操作者会开发软件、使用 Codex、承接客户项目，希望以低维护的产品化服务或数字资产建立经常性收入。",
     customInstructions: ""
   });
-  const reports = useQuery({ queryKey: ["reports"], queryFn: api.reports });
-  const schedule = useQuery({ queryKey: ["report-schedule"], queryFn: api.reportSchedule, refetchInterval: 60_000 });
+  const previousScheduleStatus = useRef<RadarScheduleData["lastStatus"] | undefined>(undefined);
+  const schedule = useQuery({
+    queryKey: ["report-schedule"],
+    queryFn: api.reportSchedule,
+    refetchInterval: (query) => {
+      const status = (query.state.data as RadarScheduleData | undefined)?.lastStatus;
+      return status === "queued" || status === "running" ? 3_000 : 60_000;
+    }
+  });
+  const radarIsActive = schedule.data?.lastStatus === "queued" || schedule.data?.lastStatus === "running";
+  const reports = useQuery({ queryKey: ["reports"], queryFn: api.reports, refetchInterval: radarIsActive ? 3_000 : false });
   const reportItems = reports.data?.items ?? [];
   const selectedReport = reportItems.find((item) => item.id === selectedReportId) ?? reportItems[0] ?? null;
+
+  useEffect(() => {
+    const previous = previousScheduleStatus.current;
+    const current = schedule.data?.lastStatus;
+    const previousWasActive = previous === "queued" || previous === "running";
+    const currentIsActive = current === "queued" || current === "running";
+    if (previousWasActive && current && !currentIsActive) {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["reports"] }),
+        queryClient.invalidateQueries({ queryKey: ["opportunities"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      ]);
+    }
+    previousScheduleStatus.current = current;
+  }, [queryClient, schedule.data?.lastStatus]);
 
   const openScheduleSettings = () => {
     const current = schedule.data;
@@ -140,6 +164,9 @@ export function RadarPage() {
   if (reports.error) return <ErrorState error={reports.error} retry={() => reports.refetch()} />;
   const items = selectedReport?.opportunities ?? [];
   const timezone = schedule.data?.timezone ?? "Asia/Tokyo";
+  const queued = schedule.data?.lastStatus === "queued";
+  const running = schedule.data?.lastStatus === "running";
+  const activeTimestamp = running ? schedule.data?.lastStartedAt ?? null : queued ? schedule.data?.nextRunAt ?? null : schedule.data?.nextRunAt ?? null;
 
   return (
     <div className="page-stack">
@@ -188,7 +215,7 @@ export function RadarPage() {
         </div>
         <nav className="radar-actions" aria-label="生成日报">
           <button className="secondary-button" onClick={() => generate.mutate("demo")} disabled={generate.isPending}><Sparkle size={17} />生成演示</button>
-          <button className="primary-button" onClick={() => schedule.data?.executor === "openworker" ? queueNow.mutate() : generate.mutate("live")} disabled={generate.isPending || queueNow.isPending || !schedule.data?.enabled}><Sparkle size={17} weight="fill" />{queueNow.isPending ? "正在加入队列" : generate.isPending ? "Codex 正在中文调研" : "立即中文调研"}</button>
+          <button className="primary-button" onClick={() => schedule.data?.executor === "openworker" ? queueNow.mutate() : generate.mutate("live")} disabled={generate.isPending || queueNow.isPending || radarIsActive || !schedule.data?.enabled}><Sparkle size={17} weight="fill" />{queueNow.isPending ? "正在加入队列" : queued ? "已加入队列" : running || generate.isPending ? "正在中文调研" : "立即中文调研"}</button>
         </nav>
       </section>
 
@@ -200,11 +227,22 @@ export function RadarPage() {
           {schedule.data?.lastError ? <p className="radar-schedule-error">{runStatusLabel(schedule.data.lastStatus)}：{schedule.data.lastError}</p> : null}
         </div>
         <dl className="radar-schedule-facts">
-          <div><dt><Clock size={15} />下次调研</dt><dd>{formatDateTime(schedule.data?.nextRunAt ?? null, timezone)}</dd></div>
+          <div><dt><Clock size={15} />{queued ? "排队时间" : running ? "开始时间" : "下次调研"}</dt><dd>{formatDateTime(activeTimestamp, timezone)}</dd></div>
           <div><dt><CalendarBlank size={15} />上次完成</dt><dd>{formatDateTime(schedule.data?.lastRunAt ?? null, timezone)}</dd></div>
           <div><dt><Crosshair size={15} />本期门槛</dt><dd>3 个候选，分别 ≥ 85 分</dd></div>
           <div><dt><Clock size={15} />状态</dt><dd>{runStatusLabel(schedule.data?.lastStatus)}</dd></div>
         </dl>
+        {radarIsActive ? (
+          <div className="radar-active-run" data-status={schedule.data?.lastStatus} role="status" aria-live="polite">
+            <div className="radar-active-run-icon">{queued ? <Clock size={18} weight="duotone" /> : <Crosshair size={18} weight="duotone" />}</div>
+            <div>
+              <span>{queued ? "已加入调研队列" : "正在中文调研"}</span>
+              <strong>{queued ? "等待 OpenWorker 领取" : "OpenWorker 已领取任务"}</strong>
+              <p>{queued ? "领取后这里会自动切换为正在中文调研，通常不超过五分钟。" : "正在只读检索公开网络并校验证据，完成后报告会自动出现在下方。"}</p>
+            </div>
+            <time dateTime={activeTimestamp ?? undefined}>{formatDateTime(activeTimestamp, timezone)}</time>
+          </div>
+        ) : null}
       </section>
       {schedule.error ? <p className="inline-error">无法读取自动调研计划：{schedule.error.message}</p> : null}
 

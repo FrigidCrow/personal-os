@@ -64,7 +64,10 @@ describe("daily radar scheduler", () => {
 
     expect(result).toBe("awaiting_worker");
     expect(radar.generateLive).not.toHaveBeenCalled();
-    expect(database.getRadarSchedule().nextRunAt).toBe("2026-07-28T23:00:00.000Z");
+    expect(database.getRadarSchedule()).toEqual(expect.objectContaining({
+      nextRunAt: "2026-07-28T23:00:00.000Z",
+      lastStatus: "queued"
+    }));
   });
 
   it("rejects invalid expressions and timezones", () => {

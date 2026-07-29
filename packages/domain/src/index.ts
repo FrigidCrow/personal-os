@@ -67,7 +67,7 @@ export const approvalActionTypeSchema = z.enum([
 ]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "rejected", "expired"]);
 export const generatedBySchema = z.enum(["demo", "codex", "openworker", "manual"]);
-export const radarScheduleStatusSchema = z.enum(["idle", "running", "succeeded", "partial", "failed", "skipped"]);
+export const radarScheduleStatusSchema = z.enum(["idle", "queued", "running", "succeeded", "partial", "failed", "skipped"]);
 
 export const OPPORTUNITY_RESEARCH_SCORE_THRESHOLD = 85;
 export const RADAR_QUALIFIED_TARGET = 3;

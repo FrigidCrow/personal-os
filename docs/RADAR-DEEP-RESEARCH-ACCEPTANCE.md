@@ -17,5 +17,7 @@ Date: 2026-07-29
 | R10 | Desktop and mobile Radar UI expose the research gate and its supporting evidence | Passed | Playwright screenshots `radar-deep-research-desktop.png` and `radar-deep-research-mobile.png`; 390px document width has no overflow. |
 | R11 | Automated, type, lint, build, browser, and patch-hygiene gates pass | Passed | 7 files / 80 tests, TypeScript, ESLint, all production builds, 0 dependency vulnerabilities, clean `git diff --check`, and 8/8 Playwright journeys. |
 | R12 | Runs with zero to two qualifiers are marked partial and are never presented as fully successful | Passed | Scheduler and MCP tests verify one qualifier returns `partial`; UI labels zero-result reports as `0/3` and 未达标. |
+| R13 | Immediate research has distinct queued and running states that are visible in the Radar UI | Passed | Browser verifies `已加入调研队列` immediately and `正在中文调研` after OpenWorker claim; live 5273 renders the active running strip with its start time. |
+| R14 | Queued/running work refreshes promptly and cannot be enqueued twice | Passed | Active status polls every three seconds, both active states disable the action, database rejects duplicate queueing, and desktop/mobile browser checks pass. |
 
 Known evidence boundary: the program enforces required fields, URL uniqueness, dates, evidence classes, declared strength, score floors, and blocking dependencies. It does not independently prove that every cited page semantically supports the model's summary; factual source review remains necessary before spending money or launching an experiment.

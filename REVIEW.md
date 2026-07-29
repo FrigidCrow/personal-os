@@ -224,3 +224,25 @@ The implementation followed the existing visual system with design variance 4, m
 Known limitation: program validation can prove that research has the required structure, thresholds, URL diversity, dates, and declared evidence strength. It cannot prove, without a separate source-verification service, that each cited page semantically supports the model's claim. The UI therefore exposes proof scope and limitations, and human review remains required before spending money or starting real market activity.
 
 Opportunity radar deep-research verdict: **Passed - deployed for the next scheduled run.**
+
+## Opportunity radar live-state visibility review
+
+Status: **Passed**
+
+The screenshot-reported gap was real: immediate research wrote the due timestamp but reused `idle`, so the page could only say `等待执行`. The lifecycle now distinguishes `queued` from `running`, exposes both states in the schedule panel, and prevents a second click while work is active.
+
+Direct evidence:
+
+| Acceptance check | Result | Evidence |
+|---|---|---|
+| Immediate queue feedback | Passed | Browser click receives HTTP 202, renders `已加入调研队列`, changes the CTA to `已加入队列`, and disables it |
+| Running feedback | Passed | Database claim transition is observed by the browser within the three-second active polling interval and renders `正在中文调研` |
+| Duplicate prevention | Passed | Database test rejects a second queue request while queued; the UI action is disabled for queued and running |
+| Automatic schedule behavior | Passed | Scheduler test verifies a due OpenWorker run persists `queued` while remaining claimable |
+| Responsive UI | Passed | Desktop queued and 390px running screenshots render the status strip with no document overflow |
+| Live deployment | Passed | Live 5273 rendered `正在中文调研`, the actual 15:10 start time, and a disabled action while the user's OpenWorker run continued uninterrupted |
+| Regression | Passed | 7 files / 80 tests, 8/8 Playwright, focused browser rerun, TypeScript, ESLint, production build, and patch hygiene |
+
+The status strip uses restrained state feedback only. It introduces no fake progress percentage, fabricated search steps, extra design system, icon family, or decorative animation.
+
+Opportunity radar live-state visibility verdict: **Passed - deployed.**

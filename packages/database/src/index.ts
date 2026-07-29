@@ -1208,10 +1208,10 @@ export class PersonalOsDatabase {
   queueRadarNow(): RadarSchedule {
     const schedule = this.getRadarSchedule();
     if (!schedule.enabled) throw new Error("Enable radar scheduling before queuing a run.");
-    if (schedule.lastStatus === "running") throw new Error("Radar research is already running.");
+    if (["queued", "running"].includes(schedule.lastStatus)) throw new Error("Radar research is already running or queued.");
     const queuedAt = this.timestamp();
     this.connection.prepare(`
-      UPDATE radar_schedule SET next_run_at = ?, last_status = 'idle',
+      UPDATE radar_schedule SET next_run_at = ?, last_status = 'queued',
         last_error = NULL, updated_at = ? WHERE id = 1
     `).run(queuedAt, queuedAt);
     return this.getRadarSchedule();

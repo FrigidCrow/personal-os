@@ -273,7 +273,7 @@ describe("Personal OS API", () => {
 
     const queued = await app.request("/api/reports/run-now", { method: "POST" });
     expect(queued.status).toBe(202);
-    expect(await queued.json()).toEqual(expect.objectContaining({ executor: "openworker", lastStatus: "idle", nextRunAt: expect.any(String) }));
+    expect(await queued.json()).toEqual(expect.objectContaining({ executor: "openworker", lastStatus: "queued", nextRunAt: expect.any(String) }));
 
     const invalid = await app.request("/api/reports/schedule", {
       method: "PATCH",

@@ -305,6 +305,10 @@ describe("PersonalOsDatabase", () => {
       searchProfile: "面向小团队的自动化服务",
       nextRunAt: "2026-07-29T23:45:00.000Z"
     }));
+
+    const queued = database.queueRadarNow();
+    expect(queued).toEqual(expect.objectContaining({ lastStatus: "queued", nextRunAt: expect.any(String) }));
+    expect(() => database.queueRadarNow()).toThrow("already running or queued");
   });
 });
 

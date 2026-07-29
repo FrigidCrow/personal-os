@@ -449,6 +449,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
 .radar-schedule-facts > div:nth-last-child(-n+2) { border-bottom: 0; }
 .radar-schedule-facts dt { display: flex; align-items: center; gap: 6px; color: var(--ink-faint); font-size: 8.5px; }
 .radar-schedule-facts dd { margin: 7px 0 0; overflow-wrap: anywhere; font-family: "Geist Mono Variable", monospace; font-size: 10.5px; font-weight: 570; }
+.radar-active-run { grid-column: 1 / -1; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 13px; align-items: center; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-left: 3px solid var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--accent-faint) 78%, var(--surface-strong)); }
+.radar-active-run[data-status="running"] { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.radar-active-run-icon { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 11px; color: var(--accent); background: var(--surface-strong); }
+.radar-active-run span { display: block; color: var(--accent); font-family: "Geist Mono Variable", monospace; font-size: 8.5px; }
+.radar-active-run strong { display: block; margin-top: 4px; font-size: 12px; font-weight: 620; }
+.radar-active-run p { margin: 4px 0 0; color: var(--ink-soft); font-size: 9.5px; line-height: 1.45; }
+.radar-active-run time { color: var(--ink-soft); font-family: "Geist Mono Variable", monospace; font-size: 9px; white-space: nowrap; }
 .report-history-panel { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
 .report-history-panel > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 20px 22px 16px; border-bottom: 1px solid var(--line); }
 .report-history-panel > header span { color: var(--accent); font-family: "Geist Mono Variable", monospace; font-size: 8.5px; letter-spacing: 0.06em; }
@@ -923,6 +930,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important
   .radar-actions { width: 100%; flex-wrap: wrap; }
   .radar-schedule-panel { padding: 18px; }
   .radar-schedule-lead { padding: 0; }
+  .radar-active-run { grid-template-columns: 38px minmax(0, 1fr); padding: 13px; }
+  .radar-active-run-icon { width: 38px; height: 38px; }
+  .radar-active-run time { grid-column: 2; }
   .radar-schedule-statusline { align-items: flex-start; flex-direction: column; }
   .radar-schedule-facts { grid-template-columns: 1fr; }
   .radar-schedule-facts > div, .radar-schedule-facts > div:nth-child(even), .radar-schedule-facts > div:nth-last-child(-n+2) { border-right: 0; border-bottom: 1px solid var(--line); }
