@@ -1,0 +1,20 @@
+{
+  "name": "@personal-os/api-v2",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "node ../../scripts/build-node.mjs apps/api-v2/src/index.ts apps/api-v2/dist/index.js",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.12",
+    "@personal-os/vnext-application": "*",
+    "@personal-os/vnext-contracts": "*",
+    "@personal-os/vnext-infrastructure": "*",
+    "@personal-os/vnext-runtime": "*",
+    "hono": "^4.12.32",
+    "zod": "^4.4.3"
+  }
+}

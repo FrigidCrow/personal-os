@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI 新闻与技术晨报"
+  short_description: "Prepare a sourced Chinese AI news and technology brief"
+  default_prompt: "Use $prepare-ai-briefing to prepare today's sourced Chinese AI briefing."

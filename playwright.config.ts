@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { defineConfig } from "@playwright/test";
 
 const root = resolve(import.meta.dirname);
-const databasePath = resolve(root, "review-artifacts", "e2e.db");
+const databasePath = resolve(root, "review-artifacts", "e2e-current.db");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -10,45 +10,37 @@ export default defineConfig({
   workers: 1,
   timeout: 60_000,
   expect: { timeout: 10_000 },
-  outputDir: "review-artifacts/playwright-output",
-  reporter: [
-    ["line"],
-    ["html", { outputFolder: "review-artifacts/playwright-report", open: "never" }]
-  ],
+  outputDir: "review-artifacts/playwright-current-output",
+  reporter: [["line"], ["html", { outputFolder: "review-artifacts/playwright-current-report", open: "never" }]],
   use: {
-    baseURL: "http://127.0.0.1:15273",
+    baseURL: "http://127.0.0.1:15373",
     viewport: { width: 1440, height: 1000 },
     colorScheme: "dark",
-    trace: "on",
-    screenshot: "on",
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
     video: "off"
   },
   webServer: [
     {
       name: "api",
-      command: "node scripts/prepare-e2e.mjs && npx tsx apps/server/src/index.ts",
-      url: "http://127.0.0.1:18787/api/health/live",
+      command: "node scripts/prepare-e2e.mjs && npx tsx apps/api-v2/src/index.ts",
+      url: "http://127.0.0.1:18887/api/v2/health",
       reuseExistingServer: false,
       timeout: 60_000,
       stdout: "pipe",
       stderr: "pipe",
-      env: {
-        HOST: "127.0.0.1",
-        PORT: "18787",
-        DATABASE_PATH: databasePath,
-        CODEX_MODE: "demo"
-      },
+      env: { PORT: "18887", PERSONAL_OS_V2_DATABASE_PATH: databasePath, PERSONAL_OS_ALLOWED_ROOTS: root },
       gracefulShutdown: { signal: "SIGTERM", timeout: 1_000 }
     },
     {
       name: "web",
-      command: "npx vite apps/web --config apps/web/vite.config.ts --host 127.0.0.1 --port 15273 --strictPort",
-      url: "http://127.0.0.1:15273",
+      command: "npx vite apps/web-v2 --config apps/web-v2/vite.config.ts --host 127.0.0.1 --port 15373 --strictPort",
+      url: "http://127.0.0.1:15373",
       reuseExistingServer: false,
       timeout: 60_000,
       stdout: "pipe",
       stderr: "pipe",
-      env: { VITE_API_PROXY_TARGET: "http://127.0.0.1:18787" },
+      env: { VITE_API_PROXY_TARGET: "http://127.0.0.1:18887" },
       gracefulShutdown: { signal: "SIGTERM", timeout: 1_000 }
     }
   ]

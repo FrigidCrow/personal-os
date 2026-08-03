@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal OS Agent Run"
+  short_description: "Safely execute and report a governed Personal OS run"
+  default_prompt: "Use $personal-os-agent-run to execute this governed run and report verified progress."

@@ -1,7 +1,0 @@
-[mcp_servers.personal_os]
-command = "npm"
-args = ["run", "start", "-w", "@personal-os/mcp"]
-startup_timeout_sec = 10
-tool_timeout_sec = 30
-enabled = true
-default_tools_approval_mode = "writes"
