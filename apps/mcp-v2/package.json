@@ -1,0 +1,13 @@
+{
+  "name": "@personal-os/mcp-v2",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/build-mcp.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.4.3"
+  }
+}

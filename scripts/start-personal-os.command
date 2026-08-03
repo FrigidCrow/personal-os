@@ -7,8 +7,10 @@ openworker_root="${OPENWORKER_ROOT_OVERRIDE:-/Users/frigidcrow/Documents/Codex/d
 openworker_gui_root="$openworker_root/surfaces/gui"
 openworker_state_root="${OPENWORKER_STATE_ROOT_OVERRIDE:-/Users/frigidcrow/.config/coworker}"
 openworker_token_file="$openworker_state_root/personal-os-8765.token"
+openworker_runtime="${OPENWORKER_RUNTIME_OVERRIDE:-$HOME/.local/share/personal-os-v2/openworker-runtime}"
+openworker_workspace="${OPENWORKER_WORKSPACE_OVERRIDE:-$HOME/.local/share/personal-os-v2/openworker-workspace}"
 personal_web_url="http://127.0.0.1:5273"
-personal_api_health_url="http://127.0.0.1:8787/api/health"
+personal_api_health_url="http://127.0.0.1:8787/api/v2/health"
 openworker_web_url="http://127.0.0.1:5274"
 openworker_health_url="http://127.0.0.1:8765/v1/health"
 check_only=false
@@ -25,7 +27,7 @@ fail() {
 on_error() {
   local exit_code=$?
   print -u2 "\nPersonal OS 没有完全启动。"
-  print -u2 "Personal OS 日志：$personal_os_root/logs"
+  print -u2 "Personal OS 日志：$HOME/.local/share/personal-os-v2/logs"
   print -u2 "OpenWorker 日志：$openworker_root/logs"
   /usr/bin/osascript -e 'display notification "请查看启动窗口中的错误和日志" with title "Personal OS 启动失败"' >/dev/null 2>&1 || true
   if [[ -t 0 ]]; then
@@ -43,22 +45,6 @@ require_command() {
 
 port_is_listening() {
   /usr/sbin/lsof -nP -iTCP:"$1" -sTCP:LISTEN -t >/dev/null 2>&1
-}
-
-stop_owned_listener() {
-  local port="$1"
-  local expected_path="$2"
-  local pid command
-  pid=$(/usr/sbin/lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)
-  [[ -z "$pid" ]] && return 0
-  command=$(ps -p "$pid" -o command=)
-  [[ "$command" == *"$expected_path"* ]] || fail "端口 $port 被其他程序占用：$command"
-  kill "$pid"
-  for _ in {1..30}; do
-    port_is_listening "$port" || return 0
-    sleep 0.2
-  done
-  fail "无法停止端口 $port 上的旧服务"
 }
 
 wait_for_url() {
@@ -80,11 +66,10 @@ require_command npm
 require_command /usr/bin/curl
 require_command /usr/sbin/lsof
 require_command /usr/bin/open
-require_command /usr/bin/screen
 require_command launchctl
 
 [[ -f "$personal_os_root/package.json" ]] || fail "找不到 Personal OS：$personal_os_root"
-[[ -x "$openworker_root/.venv/bin/openworker-server" ]] || fail "找不到 OpenWorker Python 环境：$openworker_root/.venv"
+[[ -x "$openworker_runtime/bin/openworker-server" ]] || fail "找不到 OpenWorker 运行时：$openworker_runtime"
 [[ -f "$openworker_gui_root/package.json" ]] || fail "找不到 OpenWorker Web：$openworker_gui_root"
 
 if $check_only; then
@@ -101,8 +86,9 @@ if [[ ! -d node_modules ]]; then
   npm install
 fi
 npm run build
+npm run deploy:runtime
 
-mkdir -p "$openworker_root/logs" "$openworker_state_root"
+mkdir -p "$openworker_root/logs" "$openworker_state_root" "$openworker_workspace"
 if [[ ! -d "$openworker_gui_root/node_modules" ]]; then
   print "首次运行：安装 OpenWorker Web 依赖…"
   cd "$openworker_gui_root"
@@ -123,30 +109,17 @@ fi
 umask 077
 print -rn -- "$openworker_api_token" > "$openworker_token_file"
 
-uid=$(/usr/bin/id -u)
-launchctl bootout "gui/$uid/com.frigidcrow.personal-os.openworker-web" >/dev/null 2>&1 || true
-launchctl bootout "gui/$uid/com.frigidcrow.personal-os.openworker-server" >/dev/null 2>&1 || true
-stop_owned_listener 5274 "$openworker_gui_root"
-
-if ! /usr/bin/curl -fsS -H "X-OpenWorker-Token: $openworker_api_token" "$openworker_health_url" >/dev/null 2>&1; then
-  /usr/bin/screen -S personal-os-openworker -X quit >/dev/null 2>&1 || true
-  if port_is_listening 8765; then
-    stop_owned_listener 8765 "openworker-server"
-  fi
-  COWORKER_API_TOKEN="$openworker_api_token" \
-    /usr/bin/screen -dmS personal-os-openworker /bin/zsh -lc \
-      "cd '$openworker_root' && exec '$openworker_root/.venv/bin/openworker-server' --cwd '$personal_os_root' --host 127.0.0.1 --port 8765 >>'$openworker_root/logs/personal-os-worker-server.log' 2>&1"
-fi
-wait_for_url "$openworker_health_url" "OpenWorker Server · 127.0.0.1:8765"
-cd "$personal_os_root"
-
 CODEX_MODE=live \
   PERSONAL_OS_TIMEZONE="Asia/Tokyo" \
+  PERSONAL_OS_ALLOWED_ROOTS="${PERSONAL_OS_ALLOWED_ROOTS:-$personal_os_root:/Users/frigidcrow/Dev/qishui-music}" \
   INCLUDE_OPENWORKER=true \
-  INCLUDE_OPENWORKER_SERVER=false \
+  INCLUDE_OPENWORKER_SERVER=true \
   OPENWORKER_ROOT="$openworker_root" \
+  OPENWORKER_RUNTIME="$openworker_runtime" \
+  OPENWORKER_WORKSPACE="$openworker_workspace" \
   OPENWORKER_API_TOKEN="$openworker_api_token" \
   npm run launchagent:install -- --apply
+wait_for_url "$openworker_health_url" "OpenWorker Server · 127.0.0.1:8765"
 wait_for_url "$personal_api_health_url" "Personal OS API · 127.0.0.1:8787"
 wait_for_url "$personal_web_url" "Personal OS Web · 127.0.0.1:5273"
 wait_for_url "$openworker_web_url" "OpenWorker Web · 127.0.0.1:5274"

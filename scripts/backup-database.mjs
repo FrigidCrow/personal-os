@@ -1,15 +1,14 @@
 import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 
-const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const source = resolve(projectRoot, process.env.DATABASE_PATH ?? "data/personal-os.db");
-const destinationDirectory = resolve(projectRoot, process.env.PERSONAL_OS_BACKUP_DIR ?? "backups");
+const source = resolve(process.env.PERSONAL_OS_V2_DATABASE_PATH ?? join(homedir(), ".local", "share", "personal-os-v2", "data", "personal-os-v2.db"));
+const destinationDirectory = resolve(process.env.PERSONAL_OS_BACKUP_DIR ?? join(homedir(), ".local", "share", "personal-os-v2", "backups"));
 const keep = Math.max(1, Number(process.env.PERSONAL_OS_BACKUP_KEEP ?? 14));
 const dryRun = process.argv.includes("--dry-run");
 const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
-const destination = join(destinationDirectory, `personal-os-${timestamp}.db`);
+const destination = join(destinationDirectory, `personal-os-v2-${timestamp}.db`);
 
 if (dryRun) {
   console.log(JSON.stringify({ dryRun: true, source, destination, keep }));
@@ -27,7 +26,7 @@ try {
 }
 
 const backups = readdirSync(destinationDirectory)
-  .filter((name) => /^personal-os-.*\.db$/.test(name))
+  .filter((name) => /^personal-os-v2-.*\.db$/.test(name))
   .map((name) => ({ name, path: join(destinationDirectory, name), mtime: statSync(join(destinationDirectory, name)).mtimeMs }))
   .sort((left, right) => right.mtime - left.mtime);
 for (const backup of backups.slice(keep)) rmSync(backup.path);

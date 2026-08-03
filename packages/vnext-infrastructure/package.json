@@ -1,0 +1,15 @@
+{
+  "name": "@personal-os/vnext-infrastructure",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@personal-os/vnext-application": "*",
+    "@personal-os/vnext-contracts": "*",
+    "better-sqlite3": "^13.0.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}

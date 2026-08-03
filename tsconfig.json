@@ -16,9 +16,12 @@
     "jsx": "react-jsx",
     "types": ["node", "vitest/globals"],
     "paths": {
-      "@personal-os/domain": ["./packages/domain/src/index.ts"],
-      "@personal-os/database": ["./packages/database/src/index.ts"]
+      "@personal-os/vnext-contracts": ["./packages/vnext-contracts/src/index.ts"],
+      "@personal-os/vnext-domain": ["./packages/vnext-domain/src/index.ts"],
+      "@personal-os/vnext-application": ["./packages/vnext-application/src/index.ts"],
+      "@personal-os/vnext-infrastructure": ["./packages/vnext-infrastructure/src/index.ts"],
+      "@personal-os/vnext-runtime": ["./packages/vnext-runtime/src/index.ts"]
     }
   },
-  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts", "eslint.config.js", "vite.config.ts"]
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts", "scripts/**/*.ts", "eslint.config.js", "vite.config.ts"]
 }

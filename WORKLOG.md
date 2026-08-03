@@ -1,5 +1,164 @@
 # Work Log
 
+## 2026-07-30 - Asset investment and return ledger planning
+
+### Plan
+
+- Extend the future Asset area with an operating-unit ledger that answers actual money invested, actual money received, cash profit, payback, ROI and time invested for one Project, Radar, product, experiment or custom initiative.
+- Keep actual cash, expected amounts and time as separate views so forecasts cannot masquerade as realized returns.
+
+### Work
+
+- Added `docs/ASSET-ROI-LEDGER-PLAN.md` with the accounting unit, entry lifecycle, calculation rules, attribution, shared-cost allocation, correction semantics, UI structure, MVP boundary and direct calculation examples.
+- Integrated the ledger into the control-layer Asset information architecture and Phase 3 acceptance checklist.
+- Added the initiative to `docs/PLAN.md`; no schema, API or UI implementation was started in this planning change.
+
+### Review
+
+- The cash ledger is deliberately narrower than accounting software: no payment connection, tax workflow, invoicing automation or silent exchange-rate lookup.
+- Actual ROI uses only paid costs and received revenue. Runtime usage with an unknown price remains unknown, and time remains hours unless the user explicitly configures an opportunity-cost view.
+
+### Test
+
+- Documentation links and patch hygiene checked; implementation checks remain Pending by design.
+
+## 2026-07-30 - AI Runtime visual control layer planning
+
+### Plan
+
+- Reframe Personal OS as the local visual control layer above Codex and OpenWorker rather than a second task manager.
+- Retire the Task Kanban from primary navigation without deleting task data or compatibility APIs.
+- Make Workflow, Run, Artifact, Approval, Project Context and Runtime Capability the user-facing objects.
+
+### Work
+
+- Added `docs/AI-RUNTIME-CONTROL-LAYER-PLAN.md` with the product definition, five-item information architecture, Runtime visibility contract, non-destructive Task queue retirement and three implementation phases.
+- Added a direct-evidence acceptance checklist. Only Phase 0 is checked; navigation and UI work remain explicitly Pending.
+- Updated the Qishui source definition and live Radar revision 8 with the verified official-download versus exportability distinction, five explicit audio coverage states and a no-repeat rule for known protected storage.
+- Updated the live Task acceptance criteria and ran revision-8 preflight successfully with nine checks.
+- Attempted to create an immutable Skill Candidate. The platform correctly refused promotion because revision 8 still requires two independent successful rehearsals and one failure drill; no gate was bypassed and no schedule was enabled.
+
+### Review
+
+- The current seven-item navigation and repeated Task/Run/Radar surfaces confirm that the problem is object-model duplication, not missing Kanban polish.
+- Phase 0 is truthful across Radar, repository Skill, local library and Obsidian. The Qishui offline file remains `protected_storage`, not `available`.
+- The broader control-layer redesign is a plan only; TasksPage and all existing data remain intact until Phase 1 acceptance is implemented.
+
+### Test
+
+- Personal OS passed 104/104 tests across 9 files, TypeScript, ESLint, all production builds and patch hygiene.
+- Live health reports both Codex and OpenWorker available, SQLite quick check `ok`, zero foreign-key violations and no stale Runs.
+- Live Qishui revision 8 preflight passed 9/9; its schedule remains disabled and Skill promotion truthfully reports two successful rehearsals plus one failure drill still required.
+
+## 2026-07-30 - Qishui minimum daily library sync
+
+### Plan
+
+- Narrow the current production milestone to official 热歌榜 Top10 and 新歌榜 Top10, title/artist extraction, cross-day dedupe, entitled official download, canonical local audio paths and automatic Obsidian daily notes.
+- Make the versioned `qishui-daily-sync` Skill and selected AI Runtime the workflow authority. The AI owns ordering, screenshot judgment, retries and recovery; local code exposes only AVD lifecycle, OCR and deterministic archive/validation operations.
+- Prove one real official download can be exported from the current emulator before enabling batch download. Preserve login, VIP, DRM and protected-storage boundaries as explicit gates.
+- Keep audio binaries local-only and ignored by Git. Repeated tracks reference the existing canonical path instead of copying or downloading the file again.
+
+### Work
+
+- Created `.agents/skills/qishui-daily-sync` with runtime, recovery and success contracts plus an atomic tool reference; generated `agents/openai.yaml` and passed Skill validation.
+- Removed the intermediate `qishui_device_tool.py` after review showed it merely wrapped ADB actions that Codex can perform directly. Kept `qishui_archive_tool.py` only for strict single-chart persistence and deterministic library/diff/Obsidian synchronization.
+- Deleted the obsolete 726-line monolithic daily wrapper, the 1161-line UIAutomator bridge and its bridge-specific test suite after removing every production and documentation reference.
+- Updated the live Qishui Radar to revision 7 with `qishui-daily-sync` and direct AI-driven ADB/image interaction. Codex is the current supported runtime; automatic OpenWorker fallback is disabled until its declared tool manifest proves local Shell/ADB and image capability.
+- Changed Personal OS preflight to verify the Skill, AVD and atomic tools without launching the emulator. The selected Skill runtime now owns start and stop.
+
+### Review
+
+- Review found a Python-version incompatibility in the real archive CLI (`zip(strict=True)`). It was removed before any archive mutation occurred and the live sync was rerun successfully.
+- Review confirmed the screenshot is the evidence authority: a Codex-driven atomic smoke used direct ADB, inspected the visible 热歌榜 and 新歌榜, made one visually justified swipe per chart, and confirmed continuous ranks 1–10 through screenshots plus Vision OCR. An intentionally shortened deep link opened a blank page; Codex detected it visually, restored the full configured URI and recovered without adding a navigation wrapper.
+- After the user completed login, the one-track official download succeeded inside 汽水音乐「我的 → 下载」. The client explicitly limits it to local playback during the VIP entitlement and exposes no media file outside app-private storage, so the verified coverage state is `protected_storage`; no audio path is fabricated and no media is added to Git.
+
+### Test
+
+- Qishui: 11/11 unit tests passed; Skill validation passed; the deterministic archive CLI loads; real dual-chart archive sync wrote 10 + 10 entries and the Obsidian daily note idempotently.
+- Personal OS: 104/104 tests, TypeScript, ESLint and all production builds passed.
+- Live API health passed, revision-7 Radar preflight passed all nine checks including the AI Runtime device-capability gate, and the deployed API/Web LaunchAgents were restarted from the new build.
+
+## 2026-07-29 - Radar platform implementation
+
+### Plan
+
+- Froze implementation scope to design Phases 1 through 3: unified Radar control plane, real rehearsal, deterministic promotion gates, immutable Skill versions, explicit schedule pinning, and non-destructive import of the existing opportunity radar.
+- Deferred Phase 4 arbitrary branching, parallel orchestration, shared collection caches, and automatic Skill improvement suggestions.
+- Added `docs/RADAR-PLATFORM-ACCEPTANCE.md` with 28 Pending checks and explicit release, migration, rollback, safety, UI, and test gates before changing business code.
+- Kept the specialized opportunity scheduler as the only scheduling authority for the imported opportunity radar during this MVP so migration cannot create duplicate daily runs.
+
+### Work
+
+- Added typed Radar definition, source policy, input/output contracts, ordered steps, deterministic success policy, capability manifest, lifecycle, run mode, preflight, step, evaluation, and immutable Skill Version contracts.
+- Added deterministic output checks for content length, unique source URLs, required sections, Chinese content, forbidden phrases, and JSON parseability.
+- Added additive SQLite tables for definitions, preflights, step state, run evaluations, and Skill versions plus `run_mode`, definition revision, and Skill Version pinning on Agent Runs.
+- Imported the specialized opportunity radar idempotently as a manual control-plane Task with its approved repository Skill. Its existing `radar_schedule` remains the only execution authority, preventing a duplicate generic Cron.
+- Added database state transitions for draft revisioning, persisted preflight, real step updates, two-success plus failure-drill promotion readiness, immutable candidate creation, human approval, and explicit production version binding.
+- Kept a live schedule pinned when its editable definition advances to a new draft revision. Production Runs record the approved Skill's definition revision rather than the newer unapproved draft.
+
+Work A verification:
+
+- Domain and database suites pass with 2 files / 39 tests.
+- TypeScript passes.
+- Focused tests cover unsafe Skill names, path traversal, duplicate step keys, deterministic validation, rehearsal metadata, real step state, promotion blocking, immutable approval, pinned-version execution, and idempotent opportunity-radar import.
+
+### Work B - execution and promotion lifecycle
+
+- Added the Radar Platform service and HTTP routes for create/edit, preflight, real rehearsal, deterministic evaluation, failed-step checkpoint retry, failure drill, Skill candidate generation, human approval, explicit schedule binding, and production run-now.
+- Extended Dispatcher, Codex and OpenWorker metadata with rehearsal/production mode, definition revision and pinned Skill Version. Generic production always injects the approved content and SHA-256 rather than the editable draft.
+- Added `update_radar_step` to Personal OS MCP and the OpenWorker allowlist. Both rehearsal and production runs now initialize persisted steps; terminal checkpoints are immutable at the MCP boundary.
+- A failed step creates a new rehearsal Run, copies prior passed/skipped summaries as checkpoints, increments retry count only on the resumed step, and keeps the failed source Run unchanged.
+- Added the two-success plus failure-drill promotion gate. Candidate content stays in SQLite until the local user approves it; approval validates frontmatter, name, size, credential patterns, path safety, content hash and unrelated-Skill conflicts before atomic materialization.
+- Added a Codex-specific project gate. A Codex Radar cannot be created or preflighted without a project whose local Git repository still exists; OpenWorker remains valid for standalone read-only research.
+- Production schedules bind an exact approved Skill Version. Tests execute two consecutive production occurrences with the same version, definition revision and content hash.
+
+### Work C - unified Radar Web control plane
+
+- Renamed the navigation destination to `雷达`, kept the original opportunity reports intact, and added multi-Task cards with lifecycle, executor, pinned version, next run and latest status.
+- Added one six-tab Task detail surface: `定义`, `流程`, `预执行`, `Skill`, `定时`, and `运行记录`.
+- Added the complete UI flow for Radar draft creation/editing, Codex project selection, preflight, real rehearsal, deterministic evaluation, failure drill, checkpoint retry, promotion readiness, Skill content/diff/evidence review, human approval, schedule pinning and run-now.
+- Used persisted run steps only. Missing events render `等待执行器`; failed steps show their actual error and a retry action; no percentage or invented phase is generated.
+- Preserved the graphite/signal-orange Radix/Phosphor system and added explicit loading, empty, error, success, active and blocked states. The existing opportunity Radar remains the first built-in Task, not a second scheduler.
+
+### Review
+
+- Review found and fixed five implementation gaps before release: raw English schedule status, missing detail close control, a 475px intrinsic mobile dialog width, Codex creation without a project binding, and the design requirement for failed-step checkpoint retry.
+- Review also found that a hash-only approval card did not let a human actually review generated Skill content. The Skill tab now exposes complete content, change summary and evidence Run ids before approval.
+- Production Radar dispatch now initializes the same persisted step contract as rehearsal, and generated Skills explicitly require `update_radar_step`; MCP rejects submission while required steps remain incomplete.
+- The pre-migration backup is `backups/personal-os-2026-07-29T08-28-30-261Z.db`. Backup and live databases both pass `integrity_check`; live foreign-key violations are zero. Existing projects, runs, opportunities, reports, experiments, assets and schedule counts are unchanged. The only intentional legacy-table increase is one imported manual `research_radar` Task.
+
+### Test
+
+- Unit/integration: 8 files / 90 tests passed across Domain, SQLite, server, Dispatcher and MCP.
+- Browser: 9/9 Playwright journeys passed. The Radar journey creates a draft, passes preflight, deliberately fails a real step, resumes from a persisted checkpoint, completes two independent successful rehearsals, evaluates both, runs the failure drill, reviews and approves the Skill, and pins the schedule; HTTP and SQLite evidence is attached to the trace.
+- TypeScript, ESLint, all production builds and `git diff --check` pass.
+- In-app browser review covered the deployed 5273 page, all six tabs, explicit close behavior, desktop layout and 390 x 844 mobile layout. The mobile document width equals the viewport width.
+- Live API health reports SQLite `ok`, `quickCheck=ok`, zero foreign-key violations, zero active/stale Runs and zero pending approvals after deployment.
+- Final deployment moved the LaunchAgent authority database to `~/.local/share/personal-os/data/personal-os.db` after an online backup and stopped-write SQLite backup. The migrated database preserves 1 project, 2 Tasks, 7 Agent Runs, 23 opportunities, 2 reports, 1 Radar definition and 1 approved Radar Skill Version; `quick_check` passes and foreign-key violations remain zero. The former repository database and timestamped backups were retained.
+- OpenWorker now runs from a user-level runtime outside macOS-protected `Documents`; its `personal_os` MCP is connected with 26 tools and explicitly exposes `update_radar_step`. The production API reports both Codex and OpenWorker available.
+- Final post-deployment regression repeated 8 files / 90 tests, TypeScript, ESLint, production builds, 9/9 Playwright journeys, an empty browser error log, desktop visual review and live API/database health checks.
+
+## 2026-07-29 - Radar platform design
+
+### Plan
+
+- Reframed the specialized opportunity radar as one Task inside a unified `雷达` research-automation control plane.
+- Kept the current task scheduler, Agent Run lifecycle, OpenWorker/Codex adapters, approval gate, SQLite authority and repository Skills as foundations rather than proposing a second execution system.
+
+### Design work
+
+- Added `docs/RADAR-PLATFORM-DESIGN.md` with the product boundary, Task-to-Skill promotion lifecycle, rehearsal model, version pinning, ordered pipeline contract, data model, UI information architecture, API draft, capability manifest and phased implementation plan.
+- Defined Task as an editable experimental definition and Skill Version as an immutable, approved production protocol.
+- Required real read-only rehearsal, deterministic validators, two independent successes, a failure-path exercise and human approval before production scheduling.
+- Designed a non-destructive migration that imports the existing opportunity radar, schedule and repository Skill while preserving all opportunity and report data.
+- Recorded four implementation-time product decisions and provided recommended defaults; no business code, live database or existing schedule was changed.
+
+### Verification
+
+- Checked the design against the current `tasks`, `agent_runs`, Cron lifecycle, OpenWorker Pull model, Radar-specific evidence gates and `.agents/skills` layout.
+- Confirmed the plan does not authorize automatic external writes, secret storage, Skill self-approval or silent production-version changes.
+
 ## 2026-07-28 - MVP2 automated agent dispatch
 
 ### Plan
@@ -318,3 +477,454 @@ Phase E verification so far:
 - Direct screenshots: `radar-queued-desktop.png`, `radar-running-mobile.png`, and the live deployed `review-artifacts/radar-live-running.png`.
 - TypeScript, ESLint, production build, and `git diff --check` passed.
 - Deployed API and Web without restarting the active OpenWorker research. Live 5273 showed `正在中文调研`, `OpenWorker 已领取任务`, and the real 15:10 start time; the action was disabled.
+
+## 2026-07-29 - Radar workspace, runtime fallback and Qishui music pilot
+
+### Plan
+
+- Moved task-specific reports and controls out of the Radar landing page into a dedicated `/radar/:id` workspace contract.
+- Defined a preferred/backup Runtime strategy with bounded failure triggers, one handoff, separate readiness checks and a non-fallback quality gate.
+- Defined the first complex draft, `汽水热歌拆解与原创实验`, as a gated pilot rather than an immediately scheduled downloader or Suno publisher.
+- Applied the product-control-plane parts of `design-taste-frontend`, the approval and bounded-retry rules from `automation-governance-architect`, and the lyric/style/originality contract from `chinese-suno-songwriter`.
+
+### Work
+
+- Replaced the Radar homepage report canvas with active, attention, scheduled and recent-failure facts plus compact task cards. Each card now opens a full-page task workspace.
+- Preserved the opportunity report, archive, immediate research and editable schedule inside the built-in opportunity Radar's report tab.
+- Added persisted preferred executor, optional fallback, four explicit fallback triggers, maximum handoffs and per-step Runtime preference. UI editing keeps step keys, kinds, instructions and executor choices losslessly across revisions.
+- Added route-aware preflight and dispatch fallback. Unavailable/capability/timeout/tool failures can use the configured backup once; validation and content-quality failures remain on the original route and require correction.
+- Added an idempotent 11-step Qishui draft: official Top 10 capture, cross-day deduplication, legal-audio coverage, deterministic librosa/Essentia features, hit-pattern and counter-example analysis, originality transformation, Chinese Suno package, quality gate, generation approval and report persistence.
+- Kept the draft manual, unscheduled and without an approved Skill. It does not authorize DRM bypass, audio redistribution, artist/voice/melody imitation or automatic Suno credit use.
+- Backed up the live SQLite database before migration, rebuilt API/Web and deployed to loopback ports 8787/5273 without restarting the independent OpenWorker service.
+
+### Review
+
+- Unit/integration: 8 files / 93 tests passed. TypeScript, ESLint, all production builds and `git diff --check` passed.
+- Full browser acceptance: 10/10 journeys passed, including the new Qishui workflow, Runtime edit persistence, route migration, original Radar report flow, themes and 390px no-overflow checks.
+- Live health reports database `ok`, zero active/stale runs and zero pending approvals. SQLite quick/foreign-key checks pass.
+- Live Qishui state is `draft`, OpenWorker to Codex, one maximum handoff, 11 steps, manual trigger, no schedule binding, no Skill version and no runs.
+- Rendered evidence is stored in `review-artifacts/radar-control-plane-live.png`, `review-artifacts/qishui-workspace-live.png` and the Playwright Qishui mobile screenshot.
+
+## 2026-07-29 - Real Obsidian Radar export and Qishui project link
+
+### Plan
+
+- Kept SQLite authoritative for structured state and defined Obsidian as the human-readable report archive.
+- Required a server-configured Vault, a linked Project and a completed Radar result; browser requests cannot choose arbitrary filesystem destinations.
+- Applied the existing Personal OS control-surface language from `design-taste-frontend` in preserve mode instead of introducing a second visual system.
+
+### Work
+
+- Cloned the empty `git@github.com:FrigidCrow/qishui-music.git` repository to `/Users/frigidcrow/Dev/qishui-music` and linked it to the new `汽水音乐实验室` Project.
+- Created the non-destructive Obsidian hub `Projects/Qishui Music.md` and connected the Qishui Radar to it without advancing definition revision 1 or resetting its 11-step/runtime/success rules.
+- Added atomic, deterministic, collision-safe Radar Run export with YAML metadata, full Markdown output, verification summary, wiki linkage, artifact registration and audit event.
+- Added connected/blocked state to the Definition tab and export/re-export controls to Run History.
+- Fixed partial Radar PATCH handling so schema defaults cannot overwrite omitted fields when only Project linkage changes.
+- Added `OBSIDIAN_VAULT_PATH` to the API LaunchAgent and documented the storage and recovery model.
+
+### Review
+
+- 8 files / 96 unit and integration tests and 10/10 Playwright journeys pass, including traversal, premature export, collision, idempotency and the rendered export flow.
+- ESLint, TypeScript, all production builds, health, Web response and `git diff --check` pass.
+- Live API reports database `ok`, no active/stale Runs or approvals, and Qishui Obsidian state `configured=true`, `projectLinked=true`, `canExport=true`.
+- Deployment backup: `backups/personal-os-2026-07-29T13-25-00-604Z.db`. Rendered evidence: `review-artifacts/qishui-obsidian-live.png`.
+
+## 2026-07-30 - Goal-directed Radar recovery and truthful quality state
+
+### Plan
+
+- Diagnosed the two Qishui attempts independently: OpenWorker could not obtain the official chart, while the Codex fallback returned only a 747-character completion summary and never persisted its 11 step states.
+- Added a release contract in `docs/RADAR-RECOVERY-ACCEPTANCE.md` before implementation. The contract requires bounded different-strategy recovery, immutable evidence, structured Codex output, deterministic gates and a concrete input request only after lawful strategies are exhausted.
+- Applied the automation governance boundary as a controlled pilot: four attempts, no external Suno write, no private-interface reverse engineering and no false success. Used the existing Radar visual system for the status correction.
+
+### Work
+
+- Added a shared Radar evaluator that combines output-contract checks with required persisted steps. OpenWorker submissions and Codex completions now pass through the same gate.
+- Added schema-constrained Codex Radar results with exact pipeline keys, complete user-facing report, per-step evidence, recovery strategies, blocker and next actions. The adapter writes every step into SQLite before choosing recovery, input-required or review.
+- Made network and Web search follow each Radar capability manifest. A completed Codex turn only reaches Needs Review after its report and all required steps pass.
+- Added quality-failure and input-required state transitions. Invalid results leave review immediately, cannot be accepted and either schedule a bounded retry or block with the smallest required input.
+- Fixed retry context loss: every recovery carries the immutable definition, source Run/error/result, failed checks, original assignment and validated checkpoints, and must select a materially different lawful strategy.
+- Increased generic and Qishui Radar attempt budgets to four, without changing the Qishui definition revision or safety policy. Added manual recovery API/UI as a fallback when the scheduler is unavailable.
+- Reworked rehearsal evidence cards to show attempt budget, failed checks, active recovery, exhausted input and a manual continue action. Removed the misleading waiting-review plus failed-gate combination.
+- Filtered stale failed Runs whose Tasks are no longer retryable so the dispatcher does not repeatedly log impossible retries.
+- Backed up the authority database, deployed with live Codex mode and completed Qishui recovery Run `b8add224-4e27-46c5-9f46-65d1b658bed4` as attempt 3/4.
+
+### Review
+
+- Dedicated Codex tests cover successful structured completion, malformed output and input-required only after three distinct strategies plus a concrete next action.
+- Unit/integration result: 9 files / 101 tests passed. Full browser acceptance: 10/10 passed, including Radar promotion, checkpoint recovery and Obsidian export.
+- TypeScript, ESLint, production builds, `git diff --check`, SQLite `quick_check`, foreign keys, API health and Web response passed.
+- Live attempt 3/4 checked four lawful source strategies, saved a 7,645-character report, nine unique URLs, three original lyric directions, five passing snapshot tests and three clean lyric audits. It then requested one App screenshot containing chart name, ranks 1–10, song, artist and device time; no substitute chart or invented audio feature was used.
+- Live browser evidence shows attempt 3/4 waiting for that exact input, earlier attempts marked as already continued, the new-run button disabled, no false manual-recovery button, no console error and no horizontal overflow at 1440px. Screenshot: `review-artifacts/qishui-recovery-live.png`.
+- Pre-deployment backup: `backups/personal-os-2026-07-29T16-13-59-936Z.db`.
+
+## 2026-07-30 - Qishui Android emulator runtime
+
+### Plan
+
+- Added the dedicated ARM64 emulator acceptance contract to `docs/PLAN.md` before implementation.
+- Kept chart collection on visible Android UI only. APK provenance, login consent, captcha, copyright and Suno spending remain explicit gates.
+- Required idempotent lifecycle control, persistent app state, bounded resource use and actionable `input_required` results rather than terminal failure on recoverable setup gaps.
+
+### Work
+
+- Installed Android command-line tools, Platform Tools 37.0.0, Emulator 36.6.11, API 35, Build Tools 35.0.0 and the Google Play ARM64 API 35 image under the user's Android SDK.
+- Created `Qishui_Radar_API_35`, enabled host GPU acceleration, assigned 4 GB RAM and retained persistent userdata. Cold stop/start completed successfully without touching other devices.
+- Resolved the official Qishui Android distribution chain: the website's short link requires a trailing slash and redirects to the `ugapk.cn` CDN. Downloaded Qishui 20.3.0, verified `com.luna.music`, recorded SHA-256 `af25225eb944468a33738249ee2cd5a89093829280353f684775aeee12f87b45`, and installed it.
+- Added `qishui_emulator.py` for status/start/stop/store/APK installation. The later monolithic daily wrapper and UIAutomator bridge were removed when collection moved to the versioned `qishui-daily-sync` Skill plus bounded device/archive tools.
+- Replaced `monkey` application launch with resolved Launcher Activity startup. Added privacy agreement, login, SMS, captcha and risk control as human checkpoints, and removed automatic acceptance/grant clicks.
+- Personal OS preflight now starts the managed AVD, passes its exact serial to the bridge and displays the bridge's concrete recovery action. The live Qishui Radar pipeline was upgraded to revision 4 and uses the lifecycle wrapper.
+
+### Review
+
+- Qishui unit result: 20 tests passed, plus Python compile and patch hygiene.
+- Personal OS result: 104 tests passed; focused Radar Platform test has 9 passing cases; TypeScript, ESLint, production builds and patch hygiene passed.
+- Live lifecycle evidence covers stopped, cold start, boot completion, app persistence, missing-app recovery with automatic shutdown, official APK installation and live Personal OS preflight.
+- The user completed Qishui's `个人信息保护指引`; anonymous browsing and application readiness passed without an account login.
+- Real UI inspection found only `热歌榜`、`新歌榜` and `欧美榜`, consistent across the tab hierarchy. The configured `上升榜` is absent, so no available chart was substituted silently.
+- Fixed real UI parsing for private-use icon glyphs, zero-width characters, `歌手 · 专辑` lines, total counts and ranks above 10. Two visible 热歌榜 pages now produce a verified continuous 1–10 list.
+- Upgraded preflight to confirm the target chart through visible navigation, preventing app launch alone from producing a false green check. Remaining acceptance is an explicit product decision about replacing the unavailable 上升榜 target.
+
+## 2026-07-30 - AI Runtime control layer and investment/return ledger
+
+### Plan
+
+- Repositioned Personal OS as the local visual control layer above Codex and OpenWorker, with Workflow, Run, Artifact, Approval and Project Context as the visible objects.
+- Reduced primary navigation to Today, Projects, Radar, Runs and Assets. Kept Task as a private dispatcher compatibility record rather than deleting history.
+- Defined an Asset ledger that separates actual cash, forecasts and time, and supports Project, Radar, income asset, experiment, Artifact and custom operating-unit bindings.
+- Used `design-taste-frontend` to preserve the existing visual language while strengthening hierarchy, status clarity, responsive behavior and reduced-motion support.
+
+### Work
+
+- Replaced the task-centric dashboard with an attention-first Today view and added reusable Run Request entry points on Today, Projects and Runs.
+- Consolidated Codex/OpenWorker runs, approval, live event stream, workflow steps, routing explanation, capability mismatch and human acceptance into `/runs`; legacy `/tasks` and `/review` now redirect there.
+- Added server-owned Runtime capability manifests, auto/explicit routing and persisted route/fallback context without allowing the browser to call a Runtime directly.
+- Added a unified Artifact index with backfill from existing runs, reports, experiments, income assets and approved Skills. Obsidian and Git content remain linked by path rather than duplicated in SQLite.
+- Added operating-unit ledgers, entries, actual/expected summaries, time tracking, manual FX, immutable reversal, shared-cost allocation, CSV export and optional Run/Artifact/evidence attribution.
+- Added trusted Runtime cost reporting through MCP. Unknown amounts remain unknown instead of becoming zero, while known costs create an actual paid ledger entry linked to the Run and billing source.
+- Added the linked investment/return state to Project and Radar pages, while preserving the live Qishui revision 8 definition, schedule state and all existing records.
+
+### Review
+
+- Found and fixed a cost-integrity edge case where a later usage-only Runtime report could erase an already-recorded actual amount.
+- Live migration preserved 21 existing Artifacts, all Task history and the Qishui revision 8 Radar. SQLite quick check and foreign-key checks remain clean.
+- Production UI at `127.0.0.1:5273` shows exactly five primary areas and both Runtime capabilities from the live API.
+
+### Test
+
+- TypeScript, ESLint, all production builds and `git diff --check` pass.
+- Unit/integration: 9 files and 110 tests pass, including document classification, ledger calculations, shared-cost de-duplication, reversal, FX and Runtime cost idempotency.
+- Browser acceptance: 7/7 journeys pass, including legacy redirects, mobile/theme behavior, unified Run routing, Project workspace, approval, Artifact library and actual-versus-expected ledger behavior.
+- Live smoke Run `0f4df8bc-3e20-4d46-bf4f-20f8dd1ce33a` verified explicit OpenWorker routing and persistence, then was deliberately cancelled before execution.
+- Pre-deployment backup: `backups/personal-os-2026-07-30T08-44-53-087Z.db`.
+
+## 2026-08-01 - Personal OS vNext MVP1 clean rewrite
+
+### Plan
+
+- Accepted the user's high-risk rewrite boundary but kept it reversible: vNext was built beside the current system on Web 5373, API 8887 and a separate SQLite database.
+- Froze the direct acceptance matrix in `docs/PERSONAL-OS-VNEXT-MVP1-ACCEPTANCE.md` before implementation.
+- Backed up the live v1 database to `~/.local/share/personal-os/backups/personal-os-2026-08-01T12-10-07-261Z.db` before migration work.
+- Used the applicable parts of `design-taste-frontend` for the visual redesign and state/accessibility gates. The skill explicitly targets marketing surfaces rather than dashboards, so the control-console information architecture and existing Radix/Phosphor design system were preserved.
+
+### Work
+
+- Added shared vNext contracts, domain state machine, application services, SQLite repositories/migrations and executor adapters under `packages/vnext-*`.
+- Added `apps/api-v2` with request IDs, Zod validation, standard envelopes, Run lifecycle APIs, append-only events, race-safe SSE replay/live handoff, Schedule, Knowledge, Finance, Audit and Artifact endpoints.
+- Added Internal and Process Executors. Process execution uses argv, `shell:false`, an executable allowlist and allowed working-directory roots. Unconfigured Codex/OpenWorker work fails explicitly instead of returning a demo success.
+- Added Obsidian Markdown/frontmatter incremental indexing with FTS5 Chinese search and deletion tracking.
+- Added finance accounts, integer smallest-unit transactions, currency checks, monthly summaries and audit. Transaction posting/soft deletion and account-balance adjustment are atomic; a trigger-induced failure test proves rollback.
+- Added the five-zone `apps/web-v2` control console: Today, Projects, Radar, Runs and Assets. It supports desktop/mobile layouts, system/light/dark themes, real loading/empty/error states, live Run events, cancel/retry, workflow schedules, knowledge search and finance entry.
+- Added a read-only, SHA-256 keyed, versioned v1 importer. Version 2 closes the review gap by preserving Radar definitions, embedded Skill content, cron tasks and the singleton opportunity Radar schedule.
+- Rehearsed the importer against the live v1 database, then upgraded the official v2 database. It now contains 4 WorkSpecs, 12 legacy Runs, 21 Artifacts and 2 enabled schedules. The imported schedules are AI news at 06:30 and opportunity Radar at 08:00, both `Asia/Tokyo`.
+- Created an online v2 backup before the importer v2 upgrade at `~/.local/share/personal-os-v2/data/personal-os-v2-pre-importer-v2-20260801-213906.db`.
+
+### Review
+
+- Fixed four issues found during review: missing Radar/Schedule migration, non-atomic finance balance updates, an SSE replay/subscribe race, and a completed-delay AbortSignal listener leak.
+- Live v1 SHA-256 remained `2f185b0dd06247af7fd58e819c36cf0ef811750f01ee89abf199234f693fd246` after import. v2 `PRAGMA quick_check` returned `ok`; `PRAGMA foreign_key_check` returned no rows.
+- Security scan found no `shell:true`, arbitrary child-process `exec`, or embedded Secret values in vNext paths. Matches for `.exec` are SQLite DDL/test calls.
+- Visual review covered Today/Radar/Assets in dark mode and Today in light mode after Motion settled. Five-zone hierarchy, readable state contrast and imported production data were verified.
+- MVP1 deliberately does not cut over 5273/8787 and does not include real Codex/OpenWorker adapters. Those remain MVP2 gates, not hidden incomplete behavior.
+
+### Test
+
+- `npm test`: 15 files, 139 tests passed.
+- `npm run typecheck -- --pretty false`: passed.
+- `npm run lint`: passed.
+- `npm run build`: all old and vNext workspaces passed.
+- `npm run test:e2e:vnext`: 4/4 journeys passed.
+- `npm run test:e2e`: old-system regression 7/7 passed.
+- `npm run healthcheck:vnext`: healthy; Internal and Process Executors available.
+- `git diff --check`: passed.
+
+## 2026-08-01 - Personal OS vNext MVP2 AI Runtime integration
+
+### Plan
+
+- Froze the provider-native runtime design in `docs/PERSONAL-OS-VNEXT-MVP2-AI-SPEC.md` and the direct acceptance matrix in `docs/PERSONAL-OS-VNEXT-MVP2-ACCEPTANCE.md` before implementation.
+- Reused `@openai/codex-sdk` and OpenWorker's authenticated local REST/WebSocket protocol instead of adding another Agent framework.
+- Kept Codex read-only/no-network by default, OpenWorker approval/input requests fail-closed, secrets file-backed, and the old 5273/8787 authority untouched.
+- The `gsd-ai-integration-phase` workflow could not initialize because this repository has no `.planning/ROADMAP.md`; the repository's mandatory Plan → Work → Review → Test process remains authoritative.
+
+### Work
+
+- Extended the common Adapter result with fail-closed waiting states and external Runtime session IDs, and passed the linked Project into the execution context without letting transports bypass Application Service.
+- Added a provider-native Codex Adapter using streamed SDK events, AbortSignal cancellation, allowed-root/Git validation, safe prompt construction, real usage capture and read-only/no-network defaults. Personal OS isolates global Plugin/Skill search injection so a large personal Codex installation cannot consume the Runtime prompt budget; versioned WorkSpec instructions remain available.
+- Added an authenticated OpenWorker REST/WebSocket Adapter with loopback-only URL validation, file-backed Token handling, managed/project workspaces, assistant/tool event mapping, interrupt propagation and explicit waiting_input/waiting_approval mapping.
+- Registered both adapters in API v2 and made health probes asynchronous. OpenWorker health verifies the live local server and Token; Codex health distinguishes SDK configuration from live execution authentication.
+- Added a repeatable `npm run smoke:runtimes:vnext -- --codex --openworker` command. The smoke is read-only, uses no Web Search and reports each Runtime independently.
+- Replaced the vNext Web placeholders with actual Codex/OpenWorker forms: Project selection, Codex sandbox/network controls and OpenWorker agent selection. Added all Runtime and waiting events to the SSE subscriber.
+- Updated README and MVP2 implementation/acceptance documents. No old service, database, Obsidian content or project file was deleted or switched.
+
+### Review
+
+- Found that Codex SDK `ThreadItem` errors are documented non-fatal notices. The first Adapter implementation incorrectly failed the Run on a skills-budget warning even though the turn completed; it now records `runtime.warning` and only fails on top-level/turn failures.
+- Found that the Web still labelled both AI Runtimes as “待接入” and rendered Process command fields for them. Runtime-specific forms and a browser journey now prevent that dead integration.
+- Found that the original smoke stopped before OpenWorker when Codex failed. The runner now isolates both results and returns a non-zero exit only after reporting every requested Runtime.
+- Added structured/free-text Secret redaction and verified the real 64-byte OpenWorker Token is absent from the Git diff.
+
+### Test
+
+- Unit/integration: 15 files, 152/152 tests passed; vNext subset 6 files, 41/41; Runtime Adapter file 13/13.
+- Browser: vNext 5/5 journeys and old system 7/7 regression passed.
+- TypeScript, ESLint, full production build, vNext build and `git diff --check` passed.
+- Final real read-only smoke passed for Codex thread `019fbdbd-a315-7943-b012-16cfe4a04d35` and OpenWorker session `personal-os-v2-smoke-openworker-1785594757468`. The supported `skills.include_instructions = false` configuration replaced two invalid broad `skills` overrides and reduced the Codex smoke input from 37,077 to 26,285 tokens without hiding WorkSpec instructions supplied by Personal OS.
+- Live v2 health reports four available Executors. SQLite `quick_check=ok` and foreign keys are clean. v1 database SHA-256 remains `2f185b0dd06247af7fd58e819c36cf0ef811750f01ee89abf199234f693fd246`.
+- Review caught a legacy initializer that refreshed the development Qishui Task timestamp on every database open. The update is now conditional on an actual `max_attempts` migration, with a reopen-idempotency regression test; the installed v1 authority database was never changed.
+
+## 2026-08-02 - Personal OS vNext Phase 3 Runtime governance
+
+### Plan
+
+- Froze the governance contract and direct gates in `docs/PERSONAL-OS-VNEXT-PHASE3-AI-SPEC.md` and `docs/PERSONAL-OS-VNEXT-PHASE3-ACCEPTANCE.md` before implementation.
+- Kept provider-native Codex/OpenWorker sessions, SQLite and the five-zone vNext UI; no new Agent framework or production cutover was introduced.
+- Required deterministic state/protocol tests for waiting recovery, Approval replay/expiry, Artifact boundaries, trusted costs, Secret filtering and Scheduler restart behavior.
+
+### Work
+
+- Added same-Run continuation for `waiting_input` and `waiting_approval`. Codex uses `resumeThread`; OpenWorker uses its native `question_response`, `approval`, `directory_response` and `plan_response` frames.
+- Added one-per-Run pending Approval records with risk, filtered payload, 24-hour expiry, first-decision-wins resolution and fail-closed rejection/expiry continuation.
+- Separated Runtime completion from human acceptance. Successful and partial Runs now enter pending review without rewriting their execution result.
+- Persisted provider usage independently from actual money. Actual cost accepts only provider bills or manual receipts, uses smallest-unit integers and rejects conflicting rewrites.
+- Collected completed Codex file changes as Git Artifacts only after repository containment, regular-file, size and SHA-256 checks; duplicate references are idempotent and path escape fails the Run.
+- Added migration 5 with governance fields, Approval storage, Artifact uniqueness and append-only Audit UPDATE/DELETE triggers. Secret filtering now preserves `secret://` references while removing actual values without erasing numeric token counters.
+- Made API restart fail only genuinely interrupted `running` work, preserving waiting states. Added Scheduler health, pending Approval health, cross-restart firing tests, bounded catch-up and run-now independence.
+- Added Runs governance UI for input, approval, review, usage, cost and Artifacts, plus a Today approval inbox and top-bar Scheduler/Approval health.
+- Migrated the official v2 database through migration 5 after saving `review-artifacts/phase3/personal-os-v2.pre-phase3.db`; no old port or authority switch was performed.
+
+### Review
+
+- Fixed a Secret-filter false positive that replaced numeric `inputTokens`; numeric usage is now preserved while string secrets remain redacted.
+- Moved Run-state/resumability checks before an Approval decision commit, preventing a decision from being persisted against a non-waiting Run.
+- Added all-candidate validation and in-memory de-duplication before repeat Artifact registration.
+- Real OpenWorker smoke exposed an operational fault outside the Adapter: the long-lived server had 313 file descriptors and `Too many open files` while HTTP health still returned 200. A normal LaunchAgent restart reduced the count to 81 and restored execution. This remains a production-readiness observation for Phase 7.
+- Formal review found no Phase 3 release-blocking defect. Production cutover, automated high-risk actions and inferred provider pricing remain prohibited.
+
+### Test
+
+- Unit/integration: 15 files, 170/170 passed; focused vNext: 6 files, 59/59 passed.
+- Browser: vNext governance 6/6; old-system regression 7/7.
+- TypeScript, ESLint, all workspace production builds and `git diff --check` passed.
+- Official v2 database: schema migrations 1–5, `quick_check=ok`, zero foreign-key violations; exact real OpenWorker Token scan returned zero matches in v2 DB and source.
+- Real read-only Runtime smoke: Codex returned `PERSONAL_OS_CODEX_SMOKE_OK` with trusted usage; OpenWorker returned `PERSONAL_OS_OPENWORKER_SMOKE_OK` after its exhausted legacy process was restarted.
+- v1 authority had no Phase 3 logical writes or port switch; its verification-window SHA-256 remained `91f140486a4082ad21f61cf355c60a8e7422130339626beae67025903ce6e6bd`.
+
+## 2026-08-02 - Personal OS vNext Phase 4 Obsidian knowledge integration
+
+### Plan
+
+- Froze the Phase 4 knowledge contract and 17 direct gates before implementation.
+- Kept Obsidian Markdown as the original source, SQLite as the index/relationship store and the existing five-zone UI/design system.
+- Prohibited arbitrary path writes, overwrite, symlink escape, production cutover and new heavy knowledge infrastructure.
+
+### Work
+
+- Added Migration 6 `knowledge_links` with typed Project/WorkSpec/Run/Artifact relationships, uniqueness and reverse indexes.
+- Extended Markdown/frontmatter parsing for scalar, inline-array, JSON and common indented-list values; unknown entity references are counted without hiding the document.
+- Added filtered FTS5/LIKE Chinese search, document detail and reverse-link APIs, hash-idempotent indexing and deletion-safe relation queries.
+- Added controlled, Secret-filtered, no-overwrite note creation in `Inbox`, `Generated` and `Reports` using same-directory temporary files and atomic hard-link publication.
+- Added local Vault watching with per-Vault debounce, sanitized health state and deterministic shutdown.
+- Rebuilt the knowledge UI into Vault health, selectable search results and relationship detail, plus a controlled creation form and desktop/mobile states.
+
+### Review
+
+- Redacted titles before filename derivation, rechecked symlink roots on every write, added multiline frontmatter support and improved Chinese fallback snippets.
+- Visual review confirmed the existing Radix/Phosphor, warm neutral and orange-accent system remains coherent. Desktop uses a three-pane knowledge workspace; mobile collapses to one column without horizontal overflow.
+- No existing Obsidian file is rewritten. The official v2 database currently has zero registered Vaults, documents or links.
+
+### Test
+
+- Unit/integration: 15 files, 175/175; focused vNext: 6 files, 64/64.
+- Browser: vNext 6/6 and old system 7/7.
+- TypeScript, ESLint, all workspace builds, vNext build and `git diff --check` passed.
+- Official v2 upgraded through Migration 6 after online backup `review-artifacts/phase4/personal-os-v2-before-phase4-20260802.db`; `quick_check=ok`, zero FK violations.
+- v1 authority SHA-256 remained `91f140486a4082ad21f61cf355c60a8e7422130339626beae67025903ce6e6bd`; 5273/8787 and Scheduler authority were not switched.
+
+## 2026-08-02 - Personal OS vNext Phase 5 finance completion
+
+### Plan
+
+- Froze the Phase 5 finance contract and 20 direct acceptance gates before implementation.
+- Kept monetary authority in integer minor units, required immutable calculation snapshots and routed destructive or historical changes through reviewable proposals.
+- Preserved the parallel-run boundary: the v2 database could migrate, but the v1 ports, Scheduler and Runtime record authority could not switch in this phase.
+
+### Work
+
+- Added Migration 7 with categories, budgets, calculations, operating units, allocations, operating entries and finance change proposals, plus linked transfer, refund and reversal fields on transactions.
+- Implemented atomic same-currency and FX transfers, linked income/expense refunds, cumulative refund limits, balanced reporting effects and safe-integer overflow checks.
+- Replaced direct transaction deletion with first-decision-wins change proposals. Runtime actors can only propose redacted changes; a user can approve or reject update, delete and reversal actions with an Audit trail.
+- Added replayable monthly summaries, budget variance, cash-flow forecasts and rational currency conversions using BigInt half-up rounding.
+- Added operating-unit cost and revenue allocation, idempotent allocation keys, committed/expected time and a separate operating summary that does not rewrite cash facts.
+- Rebuilt the Assets finance workspace into overview, accounts, transactions, budgets, forecast, operations and proposals, with exact string-to-minor-unit input conversion and responsive desktop/mobile states.
+- Migrated the official v2 database through Migration 7 after an online backup; the v1 database and all production authorities remained untouched.
+
+### Review
+
+- Removed the old adjustment/refund-shaped bypass from ordinary transaction creation and confirmed there is no direct PATCH or DELETE transaction endpoint.
+- Proved atomic rollback for failed two-sided transfers and failed proposal application; rejected duplicate reversals and delete/reverse proposals when an active refund exists.
+- Kept transfer balance effects visible while excluding both sides from income/expense reporting. Refunds reverse only the reporting fact they reference.
+- Fixed a mobile min-content overflow in the finance command area and verified the 390px document width while retaining an internally scrollable sub-navigation.
+- Formal review found no Phase 5 release-blocking defect. Provider pricing is still not inferred and financial side effects remain review-gated.
+
+### Test
+
+- Unit/integration: 15 files, 191/191 tests passed; focused vNext: 6 files, 80/80.
+- Browser: vNext 7/7 journeys and old-system 7/7 regression passed.
+- TypeScript, ESLint, all workspace builds and the vNext production build passed; the existing bundle-size warning is non-blocking.
+- Official v2: migrations 1–7, `quick_check=ok`, zero foreign-key violations. Backup: `review-artifacts/phase5/personal-os-v2-before-phase5-20260802.db`.
+- Visual evidence: `review-artifacts/phase5/finance-ui-desktop-dark.png` and `finance-ui-mobile-light.png`.
+- v1 authority SHA-256 remained `91f140486a4082ad21f61cf355c60a8e7422130339626beae67025903ce6e6bd`; no production port, Scheduler or Runtime-record switch occurred.
+
+## 2026-08-02 - Personal OS vNext Phase 6 five-zone final integration
+
+### Plan
+
+- Froze a dedicated Phase 6 specification and 18 direct gates before implementation.
+- Limited the work to final integration of Today, Projects, Radar, Runs and Assets, plus unified search and stable cross-zone routes; no second design system or production cutover was allowed.
+- Defined each immutable workflow WorkSpec as the exact Skill version pinned by a Schedule instead of presenting an editable draft as a production version.
+
+### Work
+
+- Added a parameterized SQLite/Application global search use case for Project, WorkSpec, Run, Artifact and Knowledge, with Chinese matching, literal wildcard escaping and bounded results.
+- Added a Radix/Phosphor global search surface with `⌘K`/`Ctrl+K`, keyboard navigation, close control, loading/empty/error states and stable entity routes.
+- Added Project detail aggregation for repository/Obsidian context, WorkSpecs, Runs, Artifacts and project Operating Unit facts.
+- Added Radar fixed-version detail for Runtime, instructions, input, retries, schedules, Runs and Artifacts. Schedule rules can now be edited with Audit and next-occurrence recomputation without changing the pinned WorkSpec.
+- Made project association available to every Runtime while retaining the Codex Git requirement, so internal and OpenWorker work also appears in project context.
+- Upgraded Today into an actionable queue for waiting input, approvals, pending acceptance and failed recovery, backed by the Phase 5 monthly cash summary.
+- Added stable Run, Artifact and Knowledge routes, plus `/tasks` and `/review` compatibility redirects to Runs.
+- Replaced floating-point Run-cost conversion with exact BigInt minor-unit parsing.
+
+### Review
+
+- Fixed an update-Schema bug where inherited defaults made an empty Schedule patch appear valid.
+- Fixed the missing project selector for Internal/Process workflows and one-off Runs, which otherwise left Project aggregation structurally empty.
+- Added an explicit mobile close control to global search, removed the remaining vNext decorative gradient and tightened responsive Project/Radar layouts.
+- Rebalanced the Radar detail grid so the long fixed definition and shorter Run/Artifact panels use available desktop space without a dead column.
+- Increased the bounded file-watcher assertion window after one parallel-suite timeout; the watcher then passed three isolated repetitions, focused vNext and full regression.
+
+### Test
+
+- Unit/integration: 15 files, 194/194; focused vNext: 6 files, 83/83.
+- Browser: vNext 10/10 and old-system 7/7.
+- TypeScript, quiet ESLint, all workspace builds and `git diff --check` passed; only the existing vNext bundle-size warning remains.
+- Seven desktop/mobile routes and the search Dialog passed 390px overflow checks; light, dark, system and reduced-motion paths passed.
+- Official v2 remains schema 7 with `quick_check=ok` and zero FK violations; exact OpenWorker Token scans of Git diff and v2 DB returned zero matches.
+- v1 SHA-256 remained `91f140486a4082ad21f61cf355c60a8e7422130339626beae67025903ce6e6bd`; Phase 6 made no authority switch.
+
+## 2026-08-02 - Personal OS vNext Phase 7 production cutover
+
+### Plan
+
+- Froze 19 blocking cutover gates covering source immutability, deterministic migration, live Runtime execution, Scheduler uniqueness, rollback, Secret scanning, regression and read-only archival.
+- Defined sovereignty as the conjunction of formal Web/API LaunchAgents, the v2 authority database and the only enabled Scheduler; a parallel dev process never counted as a cutover.
+- Required three fresh-database rehearsals, a real v1 rollback under ten minutes and a final vNext reactivation before the archive could be sealed.
+
+### Work
+
+- Added schema migration 8 with append-only `legacy_records`, importer v4, source/target verifier, three-run rehearsal, cutover archive and generation-aware LaunchAgent tooling.
+- Migrated all declared v1 tables with exact entity mappings. Unsupported opportunity/report/evidence/experiment/income/radar facts remain losslessly discoverable as legacy records and database Artifacts.
+- Completed three fresh rehearsals from v1 snapshot SHA-256 `15d759…b343`; all produced canonical fingerprint `cd11d69…c0d9`, schema 8, importer 4, quick check ok and zero foreign-key violations.
+- Replaced direct `Documents/Codex` production execution with an atomic runtime package at `~/.local/share/personal-os-v2/runtime/current`, including v1/vNext API/Web and only required runtime dependencies.
+- Installed vNext on formal `5273/8787`, proved persisted Scheduler restart de-duplication, actually rolled back to v1, and switched back to vNext. Both generation changes reached healthy in 2 seconds; v1 automation remained disabled.
+- Created real production control-plane WorkSpecs and Runs for Codex and OpenWorker. Both returned the exact acceptance token, persisted session/events/audit, and were manually accepted; Codex left the Qishui repository unchanged.
+- Updated the desktop launcher and default install generation so normal future starts deploy and preserve vNext rather than restoring v1.
+
+### Review
+
+- Initial LaunchAgent switching failed with `EX_CONFIG` even though the exact Node entrypoint worked manually. The failure was isolated to macOS background access to the source directory and resolved through the local runtime package; both processes then remained `running` under launchd.
+- Full vNext E2E exposed a Run-selection race: while a new WorkSpec/Run was being created, the previous Run's acceptance control remained actionable and the new WorkSpec was absent from cache. The UI now seeds both caches atomically, disables old governance during creation and tests the selected title before acceptance.
+- Two of 19 historical Artifact paths were already missing in the v1 snapshot. Their records and source payloads were retained and the verifier reports the paths explicitly; no unexplained migration loss remains.
+- No release-blocking finding remains. The vNext bundle warning over 500 kB is a performance follow-up, not a correctness or cutover blocker.
+
+### Test
+
+- Vitest: 19 files, 203/203; focused vNext: 6 files, 84/84.
+- Browser: vNext 10/10 after the race fix; v1 regression 7/7.
+- TypeScript, full ESLint, all workspace builds and `git diff --check` passed.
+- Production health: vNext API/Web and Scheduler healthy on 8787/5273; OpenWorker remained on 8765 throughout rollback.
+- Production Runtime: Codex Run `9c9cc97d-c11f-4a41-9283-3a4457434b27`; OpenWorker Run `7186c49a-b267-4fa3-b234-e5a2b9b99400`.
+- Scheduler restart: first create 1, restarted create 0, persisted Run 1, firing 1.
+- Exact OpenWorker Token scan: 167 changed/database/plist/archive files, zero matches.
+- Machine evidence and the final v1/v2 snapshots are under `~/.local/share/personal-os-v2/cutover/release-2026-08-02-phase7`.
+
+## 2026-08-02 - Personal OS Phase 8 sovereignty cleanup
+
+### Plan
+
+- Froze an exact deletion boundary: old executable/write-authority assets leave the active system, while historical Markdown and user assets remain.
+- Chose macOS Trash for recovery instead of irreversible deletion and recorded the v2 database hash before any move.
+
+### Work
+
+- Removed the v1 API, Web, MCP, domain/database packages, E2E suite, importer, cutover tools, old database and repository MCP/Skill configuration from the active tree.
+- Rebuilt package scripts, lockfile, health, backup, deployment and LaunchAgent generation around the single current API/Web/database.
+- Exported and deleted the 954-run OpenWorker `Personal OS Pull Worker`; cleared the v1 MCP registration.
+- Deployed a current-only production Runtime and moved both previous Runtimes, v1 data root and Phase 7 cutover archive to `~/.Trash/personal-os-retired-v1-20260802-201302`.
+- Rebuilt OpenWorker from current source into the v2 runtime root, pinned its compatible MCP dependency and moved its default workspace/log paths away from the retired root.
+- Replaced old/new E2E naming with one current Playwright configuration and updated README/operations guidance.
+
+### Review
+
+- E2E initially failed because the renamed current Vault still had one old `e2e-vnext-vault` test path; corrected it and passed all 10 journeys.
+- LaunchAgent could not read the source OpenWorker virtualenv under Documents. A freshly built runtime under `~/.local/share/personal-os-v2/openworker-runtime` resolved the macOS background-access boundary.
+- Fresh dependency resolution installed incompatible `mcp==2.0.0`; pinned `mcp==1.28.1`, matching the working source environment and proving server startup.
+- No blocking old authority remains. Historical Markdown may mention v1 only as audit history.
+
+### Test
+
+- Vitest 7 files / 87 tests; Playwright 10/10.
+- TypeScript, ESLint, all current workspace builds and `git diff --check` passed.
+- Formal API/Web/Scheduler, OpenWorker API/Web and both Runtime adapters report healthy.
+- v2 database hash remained `2871ca4848be…2a0`; `quick_check=ok`.
+- OpenWorker automation list is empty; `mcpServers={}`; current Runtime contains no `api-v1` or `web-v1`.
+
+## 2026-08-03 - Personal OS Phase 9 Agent Gateway and Skills
+
+### Plan
+
+- Approved a local pilot with one authority chain: Schedule/User → immutable WorkSpec + Skill → Run → Runtime → MCP → Core API → SQLite/Audit/UI.
+- Limited the MCP surface to seven bounded tools and excluded payments, external contact, publishing, deletion, production deployment and direct database access.
+- Defined Capability expiry/revocation, structured-result, approval-resume, secret scanning and dual-Runtime live gates before deployment acceptance.
+
+### Work
+
+- Added migration 9, Skill snapshots, repository Skill registry, scoped in-memory Runtime capabilities and seven `/api/v2/runtime/mcp/*` endpoints.
+- Built an official SDK stdio MCP server and connected it to Codex per Run and OpenWorker's fixed local MCP configuration.
+- Added three versioned Skills, pinned the two production schedules, exposed Skill selection/hash in Radar UI and retained the push Scheduler model.
+- Added a structured-result success gate, detailed Codex MCP events, idempotent Skill pinning and current-only atomic Runtime deployment.
+- Cancelled the obsolete pre-Phase-9 opportunity Run/approval, retired smoke WorkSpecs and removed generated previous Runtime directories.
+
+### Review
+
+- The first real Codex smoke proved `get_run_context` but cancelled both write-like calls in headless mode. The fix auto-approves only the exact governed Personal OS MCP tool set; no Shell, filesystem or foreign MCP permission changed.
+- The failed smoke exposed a false-positive terminal rule. Skill-bound Agent Runs can no longer succeed without `submit_run_result` evidence.
+- No Blocker, Critical or unresolved High finding remains. The existing Web bundle-size warning is non-blocking.
+
+### Test
+
+- Vitest 8 files / 93 tests; Playwright 10/10.
+- TypeScript, ESLint, all workspace builds, official SDK MCP smoke and `git diff --check` passed.
+- All three Skills passed `quick_validate.py`; SQLite migration 9 has `quick_check=ok` and zero foreign-key violations.
+- Formal API/Scheduler report healthy with two enabled schedules, zero pending approvals, three Skills and seven MCP tools.
+- Real Codex Run `a7dea800-63ff-4357-8164-2cc5bb94e7c5` and OpenWorker Run `1285be3f-e7e0-4561-bf70-8c842cd1f780` both submitted the exact structured acceptance result and were accepted.

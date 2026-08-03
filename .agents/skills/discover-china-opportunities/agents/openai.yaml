@@ -1,0 +1,4 @@
+interface:
+  display_name: "中国市场机会雷达"
+  short_description: "Deeply validate sellable China-market opportunities"
+  default_prompt: "Use $discover-china-opportunities to find and validate three actionable China-market opportunities."

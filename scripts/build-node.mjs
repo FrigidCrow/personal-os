@@ -17,9 +17,5 @@ await build({
   format: "esm",
   target: "node22",
   packages: "external",
-  sourcemap: true,
-  alias: {
-    "@personal-os/domain": resolve(root, "packages/domain/src/index.ts"),
-    "@personal-os/database": resolve(root, "packages/database/src/index.ts")
-  }
+  sourcemap: true
 });
