@@ -63,6 +63,20 @@ describe("vNext SQLite migrations", () => {
     database.close();
   });
 
+  it("adds Phase 11 recoverable checkpoints and result deposition without rewriting old workflows", () => {
+    const database = new Database(":memory:");
+    applyMigrations(database, migrations.slice(0, 10));
+    const now = "2026-08-03T00:00:00.000Z";
+    database.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,revision_of_work_spec_id,revision_number,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("phase10-workflow", null, "workflow", "旧工作流", "旧定义", "internal", "{}", 5, 2, "active", null, null, 1, now, now);
+    applyMigrations(database);
+    expect(database.prepare("SELECT result_deposition_json FROM work_specs WHERE id='phase10-workflow'").get()).toEqual({ result_deposition_json: null });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='run_checkpoints'").get()).toEqual({ name: "run_checkpoints" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='run_depositions'").get()).toEqual({ name: "run_depositions" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='run_depositions_status_idx'").get()).toEqual({ name: "run_depositions_status_idx" });
+    expect(database.pragma("foreign_key_check")).toEqual([]);
+    database.close();
+  });
+
   it("creates all seven Phase 5 finance tables and backfills transaction facts", () => {
     const database = new Database(":memory:");
     applyMigrations(database, migrations.slice(0, 6));

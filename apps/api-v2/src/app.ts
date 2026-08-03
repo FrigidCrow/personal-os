@@ -28,8 +28,10 @@ import {
   projectInputSchema,
   runCreateInputSchema,
   runInputResponseSchema,
+  runRetryInputSchema,
   runReviewInputSchema,
   runtimeApprovalRequestSchema,
+  runtimeCheckpointInputSchema,
   runtimeEventInputSchema,
   runtimeResultInputSchema,
   scheduleRebindInputSchema,
@@ -43,13 +45,14 @@ import {
   type RunEvent,
   type RuntimeCapabilityScope
 } from "@personal-os/vnext-contracts";
-import type { FinanceService, KnowledgeService, PersonalOsService, RuntimeCapabilityGrant, ScheduleService, SkillRegistry, VNextStore } from "@personal-os/vnext-application";
+import { ResultDepositionService, type FinanceService, type KnowledgeService, type PersonalOsService, type RuntimeCapabilityGrant, type ScheduleService, type SkillRegistry, type VNextStore } from "@personal-os/vnext-application";
 
 export interface ApiDependencies {
   store: VNextStore;
   execution: PersonalOsService;
   schedules: ScheduleService;
   knowledge: KnowledgeService;
+  depositions?: ResultDepositionService;
   finance: FinanceService;
   skills?: SkillRegistry;
   schedulerEnabled?: boolean;
@@ -59,6 +62,7 @@ type Variables = { requestId: string };
 
 export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables: Variables }> {
   const { store, execution, schedules, knowledge, finance } = dependencies;
+  const depositions = dependencies.depositions ?? new ResultDepositionService(store, knowledge);
   const app = new Hono<{ Variables: Variables }>();
 
   app.use("*", async (context, next) => {
@@ -84,7 +88,8 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
     scheduler: { ...schedules.health(), serviceEnabled: dependencies.schedulerEnabled ?? false },
     knowledge: knowledge.health(),
     pendingApprovals: store.listApprovals("pending").length,
-    agentGateway: { protocol: "mcp-stdio", activeCapabilities: execution.getCapabilityAuthority().activeCount(), tools: 7 },
+    agentGateway: { protocol: "mcp-stdio", activeCapabilities: execution.getCapabilityAuthority().activeCount(), tools: 8 },
+    failedDepositions: depositions.list("failed").length,
     skills: { available: dependencies.skills?.list().length ?? 0 },
     executors: await execution.getExecutorHealth()
   }, context.get("requestId"))));
@@ -118,6 +123,11 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
     const input = runtimeEventInputSchema.parse(await context.req.json());
     return context.json(success(execution.appendRuntimeEvent(grant, { ...input, source: `runtime:${grant.executorType}` }, context.get("requestId")), context.get("requestId")), 201);
   });
+  app.post("/api/v2/runtime/mcp/checkpoints", async (context) => {
+    const grant = runtimeGrant(context.req.header("authorization"), "checkpoint:write", execution);
+    const input = runtimeCheckpointInputSchema.parse(await context.req.json());
+    return context.json(success(execution.saveRuntimeCheckpoint(grant, input, context.get("requestId")), context.get("requestId")), 201);
+  });
   app.get("/api/v2/runtime/mcp/knowledge/search", (context) => {
     runtimeGrant(context.req.header("authorization"), "knowledge:search", execution);
     const query = z.string().trim().min(1).max(200).parse(context.req.query("q"));
@@ -150,6 +160,10 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
     return context.json(success(run, context.get("requestId")));
   });
   app.get("/api/v2/runs/:id/events", (context) => context.json(success(store.listRunEvents(context.req.param("id"), numberQuery(context.req.query("after"), 0, 0, Number.MAX_SAFE_INTEGER)), context.get("requestId"))));
+  app.get("/api/v2/runs/:id/checkpoints", (context) => {
+    if (!store.getRun(context.req.param("id"))) throw new Error("RUN_NOT_FOUND");
+    return context.json(success(store.listRunCheckpoints(context.req.param("id")), context.get("requestId")));
+  });
   app.post("/api/v2/work-specs/:id/runs", async (context) => {
     const input = runCreateInputSchema.parse(await optionalJson(context));
     const run = execution.createRun(context.req.param("id"), { input: input.input, idempotencyKey: input.idempotencyKey, requestId: context.get("requestId") });
@@ -163,8 +177,9 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
     return context.json(success(run, context.get("requestId")), 202);
   });
   app.post("/api/v2/runs/:id/cancel", (context) => context.json(success(execution.cancelRun(context.req.param("id"), context.get("requestId")), context.get("requestId"))));
-  app.post("/api/v2/runs/:id/retry", (context) => {
-    const run = execution.retryRun(context.req.param("id"), context.get("requestId"));
+  app.post("/api/v2/runs/:id/retry", async (context) => {
+    const input = runRetryInputSchema.parse(await optionalJson(context));
+    const run = execution.retryRun(context.req.param("id"), context.get("requestId"), input.mode);
     void execution.startRun(run.id, context.get("requestId"));
     return context.json(success(run, context.get("requestId")), 202);
   });
@@ -172,10 +187,12 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
     execution.submitRunInput(context.req.param("id"), runInputResponseSchema.parse(await context.req.json()), context.get("requestId")),
     context.get("requestId")
   ), 202));
-  app.post("/api/v2/runs/:id/accept", async (context) => context.json(success(
-    execution.acceptRun(context.req.param("id"), runReviewInputSchema.parse(await optionalJson(context)), context.get("requestId")),
-    context.get("requestId")
-  )));
+  app.post("/api/v2/runs/:id/accept", async (context) => {
+    const requestId = context.get("requestId");
+    const accepted = execution.acceptRun(context.req.param("id"), runReviewInputSchema.parse(await optionalJson(context)), requestId);
+    depositions.depositAcceptedRun(accepted.id, requestId);
+    return context.json(success(accepted, requestId));
+  });
   app.post("/api/v2/runs/:id/reject", async (context) => context.json(success(
     execution.rejectRun(context.req.param("id"), runReviewInputSchema.parse(await optionalJson(context)), context.get("requestId")),
     context.get("requestId")
@@ -187,6 +204,16 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
   app.get("/api/v2/runs/:id/artifacts", (context) => {
     if (!store.getRun(context.req.param("id"))) throw new Error("RUN_NOT_FOUND");
     return context.json(success(store.listArtifactsForRun(context.req.param("id")), context.get("requestId")));
+  });
+  app.get("/api/v2/runs/:id/deposition", (context) => {
+    if (!store.getRun(context.req.param("id"))) throw new Error("RUN_NOT_FOUND");
+    return context.json(success(depositions.get(context.req.param("id")), context.get("requestId")));
+  });
+  app.post("/api/v2/runs/:id/deposition/retry", (context) => context.json(success(depositions.depositAcceptedRun(context.req.param("id"), context.get("requestId")), context.get("requestId"))));
+  app.get("/api/v2/depositions", (context) => {
+    const raw = context.req.query("status");
+    const status = raw ? z.enum(["pending", "succeeded", "failed"]).parse(raw) : undefined;
+    return context.json(success(depositions.list(status), context.get("requestId")));
   });
   app.get("/api/v2/runs/:id/events/stream", (context) => streamSSE(context, async (stream) => {
     const runId = context.req.param("id");
@@ -332,7 +359,7 @@ function statusFor(code: string): 400 | 401 | 403 | 404 | 409 | 500 | 503 {
   if (code === "RUNTIME_CAPABILITY_REQUIRED" || code === "RUNTIME_CAPABILITY_INVALID" || code === "RUNTIME_CAPABILITY_EXPIRED") return 401;
   if (code === "RUNTIME_CAPABILITY_SCOPE_DENIED") return 403;
   if (code.endsWith("_NOT_FOUND")) return 404;
-  if (code.includes("TRANSITION") || code.includes("NOT_RETRYABLE") || code.includes("ALREADY_") || code.includes("NOT_WAITING_") || code.includes("REQUIRES_COMPLETED") || code.includes("HAS_ACTIVE") || code.includes("EXCEEDS_") || code.includes("_CONFLICT") || code.endsWith("_EXISTS") || code === "MAX_ATTEMPTS_REACHED" || code === "WORK_SPEC_NOT_ACTIVE" || code === "WORK_SPEC_RETIRED" || code === "SCHEDULE_REBIND_TARGET_NOT_ACTIVE_WORKFLOW" || code === "APPROVAL_EXPIRED" || code === "SKILL_CONCURRENT_UPDATE" || code === "SKILL_CURRENT_VERSION_MISSING" || code === "SKILL_VERSION_MUST_INCREASE" || code === "SKILL_DRAFT_CHANGED_AFTER_VALIDATION") return 409;
+  if (code.includes("TRANSITION") || code.includes("NOT_RETRYABLE") || code.includes("ALREADY_") || code.includes("NOT_WAITING_") || code.includes("REQUIRES_COMPLETED") || code.includes("REQUIRES_ACCEPTED") || code.includes("HAS_ACTIVE") || code.includes("EXCEEDS_") || code.includes("_CONFLICT") || code.endsWith("_EXISTS") || code.endsWith("_IMMUTABLE") || code === "MAX_ATTEMPTS_REACHED" || code === "WORK_SPEC_NOT_ACTIVE" || code === "WORK_SPEC_RETIRED" || code === "SCHEDULE_REBIND_TARGET_NOT_ACTIVE_WORKFLOW" || code === "APPROVAL_EXPIRED" || code === "SKILL_CONCURRENT_UPDATE" || code === "SKILL_CURRENT_VERSION_MISSING" || code === "SKILL_VERSION_MUST_INCREASE" || code === "SKILL_DRAFT_CHANGED_AFTER_VALIDATION") return 409;
   if (code === "EXECUTOR_UNAVAILABLE") return 503;
   if (code.includes("NOT_ALLOWED") || code.includes("NOT_CHANGEABLE") || code.includes("NOT_REFUNDABLE") || code.includes("MISMATCH") || code.includes("MUST_") || code.includes("REQUIRES_WORKFLOW") || code.includes("PATH_ESCAPE") || code.includes("SECRET_DETECTED") || code.includes("PREFLIGHT_FAILED") || code.endsWith("_REQUIRED") || code.startsWith("INVALID_")) return 400;
   return 500;

@@ -191,7 +191,8 @@ test("运行实时日志、取消和新尝试重试", async ({ page }) => {
   await expect(page.locator(".run-detail")).toContainText("运行中");
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await expect(page.locator(".run-detail")).toContainText("已取消");
-  await page.getByRole("button", { name: "重试", exact: true }).click();
+  await expect(page.getByRole("button", { name: "全部重做" })).toBeVisible();
+  await page.getByRole("button", { name: "继续已完成步骤" }).click();
   await expect(page.locator(".run-detail")).toContainText("成功", { timeout: 6_000 });
   await expect(page.locator(".terminal")).toContainText("最终完成");
 });
@@ -248,6 +249,51 @@ test("Obsidian 搜索、关系详情与受控创建", async ({ page }) => {
   expect(knowledgeWidths.scroll).toBe(knowledgeWidths.client);
   await page.screenshot({ path: "review-artifacts/phase4/knowledge-ui-mobile.png", fullPage: true });
 
+});
+
+test("工作流验收后自动沉淀 Obsidian，并显示可恢复步骤区域", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const vaultsResponse = await page.request.get("/api/v2/knowledge/vaults");
+  const vaults = (await vaultsResponse.json() as { data: Array<{ id: string }> }).data;
+  if (vaults.length === 0) {
+    await page.request.post("/api/v2/knowledge/vaults", { data: { name: "阶段十一知识库", rootPath: resolve(process.cwd(), "review-artifacts", "e2e-current-vault") } });
+  }
+  await page.goto("/radar");
+  await page.getByRole("button", { name: "新建雷达" }).click();
+  await page.getByLabel("名称").fill("阶段十一可恢复日报");
+  await page.getByLabel("执行要求").fill("生成日报，使用检查点记录进度，验收后沉淀到知识库。");
+  await page.getByLabel("输出消息").fill("阶段十一浏览器结果");
+  await page.getByRole("checkbox", { name: "写入 Obsidian 报告" }).check();
+  await page.getByLabel("目标目录").selectOption("Reports");
+  await page.getByLabel("笔记标题模板").fill("{date}-{title}");
+  await page.getByRole("button", { name: "保存固定版本" }).click();
+  await page.getByRole("heading", { name: "阶段十一可恢复日报" }).click();
+  await expect(page.locator(".definition-panel")).toContainText("Reports · 验收后写入");
+
+  const specsResponse = await page.request.get("/api/v2/work-specs");
+  const specs = (await specsResponse.json() as { data: Array<{ id: string; title: string }> }).data;
+  const workSpec = specs.find((item) => item.title === "阶段十一可恢复日报");
+  expect(workSpec).toBeTruthy();
+  const createRunResponse = await page.request.post(`/api/v2/work-specs/${workSpec!.id}/runs`, { data: { start: true, idempotencyKey: "phase11-browser" } });
+  const run = (await createRunResponse.json() as { data: { id: string } }).data;
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v2/runs/${run.id}`);
+    return ((await response.json() as { data: { status: string } }).data.status);
+  }).toBe("succeeded");
+
+  await page.goto(`/runs/${run.id}`);
+  await expect(page.getByLabel("执行步骤")).toContainText("Runtime 保存检查点后");
+  await page.getByLabel("验收备注").fill("浏览器旅程通过");
+  await page.getByRole("button", { name: "验收通过" }).click();
+  await expect(page.locator(".deposition-state")).toContainText("Obsidian 沉淀");
+  await expect(page.locator(".deposition-state")).toContainText("Reports/");
+  await expect(page.locator(".governance-panel")).toContainText("生成物");
+  await expect(page.locator(".governance-panel")).toContainText("1 项");
+  await page.screenshot({ path: "review-artifacts/phase11/recoverable-run-deposition-desktop-dark.png", fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  await page.screenshot({ path: "review-artifacts/phase11/recoverable-run-deposition-mobile-dark.png", fullPage: true });
 });
 
 test("完整财务工作台从现金事实走到预算、预测、经营归因和审批", async ({ page }) => {
