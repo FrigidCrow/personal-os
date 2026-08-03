@@ -1,14 +1,44 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeftIcon, ArchiveBoxIcon, CalendarDotsIcon, CrosshairSimpleIcon, FingerprintIcon, LockKeyIcon, PauseIcon, PlayIcon, PlusIcon, SlidersHorizontalIcon, TerminalWindowIcon } from "@phosphor-icons/react";
-import type { Artifact, Project, Run, Schedule, SkillSnapshot, WorkSpec } from "@personal-os/vnext-contracts";
-import { Link } from "wouter";
+import {
+  ArrowLeftIcon,
+  ArchiveBoxIcon,
+  CalendarDotsIcon,
+  CheckCircleIcon,
+  CrosshairSimpleIcon,
+  FingerprintIcon,
+  FlaskIcon,
+  LockKeyIcon,
+  PauseIcon,
+  PlayIcon,
+  PlusIcon,
+  SlidersHorizontalIcon,
+  TerminalWindowIcon,
+  WarningCircleIcon,
+  WrenchIcon
+} from "@phosphor-icons/react";
+import type {
+  Artifact,
+  Project,
+  Run,
+  Schedule,
+  SkillDraftInput,
+  SkillDraftValidation,
+  SkillSnapshot,
+  WorkSpec,
+  WorkSpecPreflight,
+  WorkflowOperationsSummary
+} from "@personal-os/vnext-contracts";
+import { Link, useLocation } from "wouter";
 import { api, patch, post } from "../api";
 import { EmptyBlock, ErrorBlock, Field, LoadingBlock, PageHeader, Status, errorMessage, formatDate } from "../components";
 
+type Composer = "workflow" | "schedule" | "skill" | "revision" | null;
+
 export function RadarPage({ selectedId }: { selectedId?: string } = {}) {
   const client = useQueryClient();
-  const [composer, setComposer] = useState<"workflow" | "schedule" | null>(null);
+  const [, navigate] = useLocation();
+  const [composer, setComposer] = useState<Composer>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const specs = useQuery({ queryKey: ["work-specs"], queryFn: () => api<WorkSpec[]>("/work-specs") });
   const schedules = useQuery({ queryKey: ["schedules"], queryFn: () => api<Schedule[]>("/schedules") });
@@ -16,46 +46,108 @@ export function RadarPage({ selectedId }: { selectedId?: string } = {}) {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => api<Run[]>("/runs?limit=500") });
   const artifacts = useQuery({ queryKey: ["artifacts"], queryFn: () => api<Artifact[]>("/artifacts?limit=500") });
   const skills = useQuery({ queryKey: ["skills"], queryFn: () => api<SkillSnapshot[]>("/skills") });
-  const refresh = () => { void client.invalidateQueries({ queryKey: ["work-specs"] }); void client.invalidateQueries({ queryKey: ["schedules"] }); void client.invalidateQueries({ queryKey: ["runs"] }); };
+  const operations = useQuery({ queryKey: ["workflow-operations"], queryFn: () => api<WorkflowOperationsSummary[]>("/operations/workflows") });
+  const refresh = () => {
+    for (const queryKey of [["work-specs"], ["schedules"], ["runs"], ["workflow-operations"]]) void client.invalidateQueries({ queryKey });
+  };
   const createWorkflow = useMutation({ mutationFn: (input: unknown) => post<WorkSpec>("/work-specs", input), onSuccess: () => { refresh(); setComposer(null); } });
+  const createRevision = useMutation({
+    mutationFn: (input: unknown) => post<WorkSpec>(`/work-specs/${selectedId}/revisions`, input),
+    onSuccess: (created) => { refresh(); setComposer(null); navigate(`/radar/${created.id}`); }
+  });
   const createSchedule = useMutation({ mutationFn: (input: unknown) => post<Schedule>("/schedules", input), onSuccess: () => { refresh(); setComposer(null); } });
   const updateSchedule = useMutation({ mutationFn: ({ id, input }: { id: string; input: unknown }) => patch<Schedule>(`/schedules/${id}`, input), onSuccess: () => { refresh(); setEditingScheduleId(null); } });
   const action = useMutation({ mutationFn: ({ id, verb }: { id: string; verb: string }) => post(`/schedules/${id}/${verb}`), onSuccess: refresh });
-  if (specs.isLoading || schedules.isLoading || projects.isLoading || runs.isLoading || artifacts.isLoading || skills.isLoading) return <LoadingBlock />;
-  if (specs.error || schedules.error || projects.error || runs.error || artifacts.error || skills.error) return <ErrorBlock error={specs.error ?? schedules.error ?? projects.error ?? runs.error ?? artifacts.error ?? skills.error} />;
+  const rebind = useMutation({ mutationFn: ({ id, workSpecId }: { id: string; workSpecId: string }) => post<Schedule>(`/schedules/${id}/rebind`, { workSpecId }), onSuccess: refresh });
+  const preflight = useMutation({ mutationFn: (id: string) => api<WorkSpecPreflight>(`/work-specs/${id}/preflight`) });
+
+  const queryError = specs.error ?? schedules.error ?? projects.error ?? runs.error ?? artifacts.error ?? skills.error ?? operations.error;
+  if (specs.isLoading || schedules.isLoading || projects.isLoading || runs.isLoading || artifacts.isLoading || skills.isLoading || operations.isLoading) return <LoadingBlock />;
+  if (queryError) return <ErrorBlock error={queryError} />;
   const workflows = (specs.data ?? []).filter((item) => item.kind === "workflow" && item.lifecycleStatus !== "retired");
   const selected = selectedId ? specs.data?.find((item) => item.id === selectedId) ?? null : null;
   const selectedSchedules = (schedules.data ?? []).filter((item) => item.workSpecId === selectedId);
+  const actionPending = updateSchedule.isPending || action.isPending || rebind.isPending;
+  const actionError = updateSchedule.error ?? action.error ?? rebind.error;
+
   return <div className="page-stack">
-    <PageHeader title={selected ? selected.title : "雷达"} description={selected ? (selected.kind === "workflow" ? "查看固定 Skill 版本、调度、运行和成果。" : "这是一次性 WorkSpec，不会被生产 Schedule 复用。") : "把复杂流程先跑通，再沉淀成可以每天复用的固定执行定义。"} actions={selected ? <div className="button-group"><Link className="button secondary" href="/radar"><ArrowLeftIcon /> 全部雷达</Link>{selected.kind === "workflow" && <button className="button primary" onClick={() => setComposer("schedule")}><CalendarDotsIcon /> 添加定时</button>}</div> : <div className="button-group"><button className="button secondary" onClick={() => setComposer("schedule")}><CalendarDotsIcon /> 设置定时</button><button className="button primary" onClick={() => setComposer("workflow")}><PlusIcon /> 新建雷达</button></div>} />
+    <PageHeader
+      title={selected ? selected.title : "雷达"}
+      description={selected ? "检查、运行和升级一个固定的工作流版本。" : "把 Codex 和 OpenWorker 的复杂工作沉淀成能长期运行的流程。"}
+      actions={selected ? <div className="button-group">
+        <Link className="button secondary" href="/radar"><ArrowLeftIcon /> 全部雷达</Link>
+        {selected.kind === "workflow" && <><button className="button secondary" onClick={() => preflight.mutate(selected.id)}><FlaskIcon /> 运行体检</button><button className="button secondary" onClick={() => setComposer("revision")}><WrenchIcon /> 创建新版</button><button className="button primary" onClick={() => setComposer("schedule")}><CalendarDotsIcon /> 添加定时</button></>}
+      </div> : <div className="button-group">
+        <button className="button secondary" onClick={() => setComposer("skill")}><WrenchIcon /> Skill 工作台</button>
+        <button className="button secondary" onClick={() => setComposer("schedule")}><CalendarDotsIcon /> 设置定时</button>
+        <button className="button primary" onClick={() => setComposer("workflow")}><PlusIcon /> 新建雷达</button>
+      </div>}
+    />
+
+    {composer === "skill" && <SkillStudio skills={skills.data ?? []} onClose={() => setComposer(null)} />}
     {composer === "workflow" && <WorkflowForm projects={projects.data ?? []} skills={skills.data ?? []} pending={createWorkflow.isPending} error={createWorkflow.error} onSubmit={(input) => createWorkflow.mutate(input)} />}
+    {composer === "revision" && selected && <WorkflowForm initial={selected} revision projects={projects.data ?? []} skills={skills.data ?? []} pending={createRevision.isPending} error={createRevision.error} onSubmit={(input) => createRevision.mutate(input)} />}
     {composer === "schedule" && <ScheduleForm workflows={workflows} selectedWorkSpecId={selected?.kind === "workflow" ? selected.id : undefined} pending={createSchedule.isPending} error={createSchedule.error} onSubmit={(input) => createSchedule.mutate(input)} />}
-    {selectedId && !selected ? <EmptyBlock title="执行定义不存在" description="它可能来自旧链接，或已在迁移时被跳过。" action={<Link className="button secondary" href="/radar">返回雷达</Link>} /> : selected ? <RadarDetail workflow={selected} schedules={selectedSchedules} runs={(runs.data ?? []).filter((item) => item.workSpecId === selected.id)} artifacts={(artifacts.data ?? []).filter((item) => item.workSpecId === selected.id)} editingScheduleId={editingScheduleId} pending={updateSchedule.isPending || action.isPending} error={updateSchedule.error ?? action.error} onEdit={setEditingScheduleId} onUpdate={(id, input) => updateSchedule.mutate({ id, input })} onAction={(id, verb) => action.mutate({ id, verb })} /> : <>
-      <section className="panel"><div className="section-heading"><div><h2>固定 Skill 版本</h2><p>原先的机会雷达只是其中一个 Workflow。每张卡片对应不可变的执行快照。</p></div></div>
-        {workflows.length === 0 ? <EmptyBlock title="还没有雷达" description="先定义目标、执行器和输入，再为它添加定时规则。" /> : <div className="workflow-grid">{workflows.map((workflow) => {
-          const bound = schedules.data?.filter((item) => item.workSpecId === workflow.id) ?? [];
-          return <Link href={`/radar/${workflow.id}`} className="workflow-item" key={workflow.id}><div className="workflow-icon"><CrosshairSimpleIcon size={23} weight="duotone" /></div><div className="workflow-copy"><div><h3>{workflow.title}</h3><Status value={workflow.lifecycleStatus} /></div><p>{workflow.instructions.split(/\n\s*\n/, 1)[0]}</p><footer><span>{workflow.skill ? `${workflow.skill.name}@${workflow.skill.version}` : workflow.executorType}</span><span>{bound.length ? `${bound.length} 个定时规则` : "尚未定时"}</span></footer></div></Link>;
+    {preflight.data && selected && preflight.data.workSpecId === selected.id && <PreflightPanel value={preflight.data} />}
+    {preflight.error && <p className="form-error">{errorMessage(preflight.error, "体检失败")}</p>}
+
+    {selectedId && !selected ? <EmptyBlock title="执行定义不存在" description="它可能来自旧链接，或已经退休。" action={<Link className="button secondary" href="/radar">返回雷达</Link>} /> : selected ? <RadarDetail
+      workflow={selected}
+      workflows={workflows}
+      schedules={selectedSchedules}
+      runs={(runs.data ?? []).filter((item) => item.workSpecId === selected.id)}
+      artifacts={(artifacts.data ?? []).filter((item) => item.workSpecId === selected.id)}
+      editingScheduleId={editingScheduleId}
+      pending={actionPending}
+      error={actionError}
+      onEdit={setEditingScheduleId}
+      onUpdate={(id, input) => updateSchedule.mutate({ id, input })}
+      onAction={(id, verb) => action.mutate({ id, verb })}
+      onRebind={(id, workSpecId) => rebind.mutate({ id, workSpecId })}
+    /> : <>
+      <OperationsPanel values={operations.data ?? []} />
+      <section className="panel"><div className="section-heading"><div><h2>固定工作流</h2><p>每张卡片是一个不可变版本；旧运行不会被新版本改写。</p></div></div>
+        {workflows.length === 0 ? <EmptyBlock title="还没有雷达" description="先发布或选择一个 Skill，再创建工作流。" /> : <div className="workflow-grid">{workflows.map((workflow) => {
+          const operation = operations.data?.find((item) => item.workSpec.id === workflow.id);
+          return <Link href={`/radar/${workflow.id}`} className="workflow-item" key={workflow.id}><div className="workflow-icon"><CrosshairSimpleIcon size={23} weight="duotone" /></div><div className="workflow-copy"><div><h3>{workflow.title}</h3><HealthBadge value={operation?.health ?? "never_run"} /></div><p>{workflow.instructions.split(/\n\s*\n/, 1)[0]}</p><footer><span>{workflow.skill ? `${workflow.skill.name}@${workflow.skill.version}` : workflow.executorType} · v{workflow.revisionNumber}</span><span>{operation?.nextRunAt ? `下次 ${formatDate(operation.nextRunAt)}` : "尚未定时"}</span></footer></div></Link>;
         })}</div>}
       </section>
-      <ScheduleSection schedules={schedules.data ?? []} editingId={editingScheduleId} pending={updateSchedule.isPending || action.isPending} error={updateSchedule.error ?? action.error} onEdit={setEditingScheduleId} onUpdate={(id, input) => updateSchedule.mutate({ id, input })} onAction={(id, verb) => action.mutate({ id, verb })} />
+      <ScheduleSection schedules={schedules.data ?? []} workflows={workflows} editingId={editingScheduleId} pending={actionPending} error={actionError} onEdit={setEditingScheduleId} onUpdate={(id, input) => updateSchedule.mutate({ id, input })} onAction={(id, verb) => action.mutate({ id, verb })} onRebind={(id, workSpecId) => rebind.mutate({ id, workSpecId })} />
     </>}
   </div>;
 }
 
-function RadarDetail({ workflow, schedules, runs, artifacts, editingScheduleId, pending, error, onEdit, onUpdate, onAction }: { workflow: WorkSpec; schedules: Schedule[]; runs: Run[]; artifacts: Artifact[]; editingScheduleId: string | null; pending: boolean; error: unknown; onEdit(id: string | null): void; onUpdate(id: string, input: unknown): void; onAction(id: string, verb: string): void }) {
-  return <div className="radar-workspace"><section className="skill-lock panel"><div><LockKeyIcon weight="duotone" /><span><small>{workflow.skill ? `${workflow.skill.name}@${workflow.skill.version}` : workflow.kind === "workflow" ? "未绑定仓库 Skill" : "一次性 WorkSpec"}</small><strong>{workflow.skill?.contentHash ?? workflow.id}</strong></span></div><Status value={workflow.lifecycleStatus} /><p>{workflow.skill ? `固定来源 ${workflow.skill.path}；内容 SHA-256 与 WorkSpec 一同保存，Schedule 只绑定这个精确快照。` : "这是迁移前定义；新建 Agent Workflow 时应选择仓库 Skill。"}</p></section>
-    <div className="radar-detail-grid"><section className="panel definition-panel"><div className="section-heading"><div><h2>执行快照</h2><p>这是 Runtime 每次运行都会接收的固定方法。</p></div></div><dl><div><dt><TerminalWindowIcon /> Runtime</dt><dd>{workflow.executorType}</dd></div><div><dt><FingerprintIcon /> 类型</dt><dd>{workflow.kind === "workflow" ? "可复用 Workflow" : "一次性工作"}</dd></div><div><dt>超时</dt><dd>{workflow.timeoutSeconds} 秒</dd></div><div><dt>最大尝试</dt><dd>{workflow.maxAttempts} 次</dd></div></dl><h3>执行要求</h3><pre>{workflow.instructions}</pre><h3>固定输入</h3><pre>{JSON.stringify(workflow.input, null, 2)}</pre></section>
-      <section className="panel"><div className="section-heading"><div><h2>最近运行</h2><p>每次尝试都有独立状态、日志和验收。</p></div><Link href="/runs">打开运行中心</Link></div><div className="entity-stack">{runs.slice(0, 8).map((run) => <Link href={`/runs/${run.id}`} key={run.id}><span><strong>尝试 {run.attempt}</strong><small>{formatDate(run.createdAt)} · {run.executorType}</small></span><Status value={run.status} /></Link>)}{runs.length === 0 && <p className="quiet">这个版本还没有运行记录。</p>}</div></section>
-      <section className="panel"><div className="section-heading"><div><h2>成果</h2><p>报告、代码和外部文件均可反向追踪。</p></div></div><div className="entity-stack">{artifacts.slice(0, 8).map((artifact) => <Link href={`/assets/artifacts/${artifact.id}`} key={artifact.id}><span><strong>{artifact.name}</strong><small>{artifact.uri}</small></span><ArchiveBoxIcon /></Link>)}{artifacts.length === 0 && <p className="quiet">这个版本还没有登记成果。</p>}</div></section>
+function OperationsPanel({ values }: { values: WorkflowOperationsSummary[] }) {
+  const healthy = values.filter((item) => item.health === "healthy").length;
+  const attention = values.filter((item) => item.health === "attention" || item.health === "degraded").length;
+  const scheduled = values.filter((item) => item.enabledScheduleCount > 0).length;
+  return <section className="operations-band panel"><div><small>工作流</small><strong>{values.length}</strong></div><div><small>运行正常</small><strong>{healthy}</strong></div><div><small>需要处理</small><strong>{attention}</strong></div><div><small>定时已启用</small><strong>{scheduled}</strong></div></section>;
+}
+
+function PreflightPanel({ value }: { value: WorkSpecPreflight }) {
+  return <section className={`preflight-panel panel ${value.ready ? "ready" : "blocked"}`}><div className="section-heading"><div><h2>{value.ready ? "可以运行" : "暂时不能运行"}</h2><p>检查时间 {formatDate(value.checkedAt)}。警告不会阻止运行，失败项会阻止换绑或执行。</p></div>{value.ready ? <CheckCircleIcon size={28} weight="fill" /> : <WarningCircleIcon size={28} weight="fill" />}</div><div className="preflight-checks">{value.checks.map((check) => <div key={check.code}><Status value={check.status} /><span><strong>{check.label}</strong><small>{check.detail}</small></span></div>)}</div></section>;
+}
+
+function RadarDetail({ workflow, workflows, schedules, runs, artifacts, editingScheduleId, pending, error, onEdit, onUpdate, onAction, onRebind }: { workflow: WorkSpec; workflows: WorkSpec[]; schedules: Schedule[]; runs: Run[]; artifacts: Artifact[]; editingScheduleId: string | null; pending: boolean; error: unknown; onEdit(id: string | null): void; onUpdate(id: string, input: unknown): void; onAction(id: string, verb: string): void; onRebind(id: string, workSpecId: string): void }) {
+  return <div className="radar-workspace"><section className="skill-lock panel"><div><LockKeyIcon weight="duotone" /><span><small>{workflow.skill ? `${workflow.skill.name}@${workflow.skill.version}` : "未绑定仓库 Skill"} · 版本 {workflow.revisionNumber}</small><strong>{workflow.skill?.contentHash ?? workflow.id}</strong></span></div><Status value={workflow.lifecycleStatus} /><p>{workflow.revisionOfWorkSpecId ? `由 ${workflow.revisionOfWorkSpecId.slice(0, 8)} 创建的新版本。` : "这是版本链的起点。"} Schedule 只绑定当前 ID，不会跟随仓库文件静默变化。</p></section>
+    <div className="radar-detail-grid"><section className="panel definition-panel"><div className="section-heading"><div><h2>执行快照</h2><p>Runtime 每次都会收到这份固定内容。</p></div></div><dl><div><dt><TerminalWindowIcon /> Runtime</dt><dd>{workflow.executorType}</dd></div><div><dt><FingerprintIcon /> 版本</dt><dd>v{workflow.revisionNumber}</dd></div><div><dt>超时</dt><dd>{workflow.timeoutSeconds} 秒</dd></div><div><dt>最大尝试</dt><dd>{workflow.maxAttempts} 次</dd></div></dl><h3>执行要求</h3><pre>{workflow.instructions}</pre><h3>固定输入</h3><pre>{JSON.stringify(workflow.input, null, 2)}</pre></section>
+      <section className="panel"><div className="section-heading"><div><h2>最近运行</h2><p>自动重试也会生成新的尝试记录。</p></div><Link href="/runs">打开运行中心</Link></div><div className="entity-stack">{runs.slice(0, 8).map((run) => <Link href={`/runs/${run.id}`} key={run.id}><span><strong>尝试 {run.attempt}</strong><small>{formatDate(run.createdAt)} · {run.executorType}</small></span><Status value={run.status} /></Link>)}{runs.length === 0 && <p className="quiet">这个版本还没有运行记录。</p>}</div></section>
+      <section className="panel"><div className="section-heading"><div><h2>成果</h2><p>报告、代码和文件都能追溯到运行。</p></div></div><div className="entity-stack">{artifacts.slice(0, 8).map((artifact) => <Link href={`/assets/artifacts/${artifact.id}`} key={artifact.id}><span><strong>{artifact.name}</strong><small>{artifact.uri}</small></span><ArchiveBoxIcon /></Link>)}{artifacts.length === 0 && <p className="quiet">这个版本还没有登记成果。</p>}</div></section>
     </div>
-    {workflow.kind === "workflow" && <ScheduleSection schedules={schedules} editingId={editingScheduleId} pending={pending} error={error} onEdit={onEdit} onUpdate={onUpdate} onAction={onAction} />}
+    {workflow.kind === "workflow" && <ScheduleSection schedules={schedules} workflows={workflows} editingId={editingScheduleId} pending={pending} error={error} onEdit={onEdit} onUpdate={onUpdate} onAction={onAction} onRebind={onRebind} />}
   </div>;
 }
 
-function ScheduleSection({ schedules, editingId, pending, error, onEdit, onUpdate, onAction }: { schedules: Schedule[]; editingId: string | null; pending: boolean; error: unknown; onEdit(id: string | null): void; onUpdate(id: string, input: unknown): void; onAction(id: string, verb: string): void }) {
-  return <section className="panel"><div className="section-heading"><div><h2>定时执行</h2><p>Scheduler 到期只创建 Run；修改规则不会改变绑定的 Skill 版本。</p></div></div>
-    <div className="schedule-table">{schedules.map((schedule) => editingId === schedule.id ? <ScheduleEditForm key={schedule.id} schedule={schedule} pending={pending} error={error} onCancel={() => onEdit(null)} onSubmit={(input) => onUpdate(schedule.id, input)} /> : <div className="schedule-row" key={schedule.id}><div><strong>{schedule.name}</strong><small>{schedule.cronExpression} · {schedule.timezone}{schedule.catchUp ? " · 补跑一次" : " · 不补跑"}</small></div><div><span>下次 {formatDate(schedule.nextRunAt)}</span><Status value={schedule.enabled ? "active" : "paused"} /></div><div className="row-actions"><button className="icon-button" title="修改定时" aria-label={`修改 ${schedule.name}`} onClick={() => onEdit(schedule.id)}><SlidersHorizontalIcon /></button><button className="icon-button" title={schedule.enabled ? "暂停" : "恢复"} aria-label={`${schedule.enabled ? "暂停" : "恢复"} ${schedule.name}`} onClick={() => onAction(schedule.id, schedule.enabled ? "pause" : "resume")}>{schedule.enabled ? <PauseIcon /> : <PlayIcon />}</button><button className="button secondary small" onClick={() => onAction(schedule.id, "run-now")}>立即运行</button></div></div>)}{schedules.length === 0 && <p className="quiet">还没有定时规则。</p>}</div>{Boolean(error) && !editingId && <p className="form-error">{errorMessage(error, "定时操作失败")}</p>}
+function ScheduleSection({ schedules, workflows, editingId, pending, error, onEdit, onUpdate, onAction, onRebind }: { schedules: Schedule[]; workflows: WorkSpec[]; editingId: string | null; pending: boolean; error: unknown; onEdit(id: string | null): void; onUpdate(id: string, input: unknown): void; onAction(id: string, verb: string): void; onRebind(id: string, workSpecId: string): void }) {
+  return <section className="panel"><div className="section-heading"><div><h2>定时执行</h2><p>改时间不会改版本；换版本必须明确点击“确认换绑”。</p></div></div>
+    <div className="schedule-table">{schedules.map((schedule) => editingId === schedule.id ? <ScheduleEditForm key={schedule.id} schedule={schedule} pending={pending} error={error} onCancel={() => onEdit(null)} onSubmit={(input) => onUpdate(schedule.id, input)} /> : <ScheduleRow key={schedule.id} schedule={schedule} workflows={workflows} pending={pending} onEdit={() => onEdit(schedule.id)} onAction={(verb) => onAction(schedule.id, verb)} onRebind={(workSpecId) => onRebind(schedule.id, workSpecId)} />)}{schedules.length === 0 && <p className="quiet">还没有定时规则。</p>}</div>{Boolean(error) && !editingId && <p className="form-error">{errorMessage(error, "定时操作失败")}</p>}
   </section>;
+}
+
+function ScheduleRow({ schedule, workflows, pending, onEdit, onAction, onRebind }: { schedule: Schedule; workflows: WorkSpec[]; pending: boolean; onEdit(): void; onAction(verb: string): void; onRebind(workSpecId: string): void }) {
+  const [target, setTarget] = useState(schedule.workSpecId);
+  const current = workflows.find((item) => item.id === schedule.workSpecId);
+  return <div className="schedule-row"><div><strong>{schedule.name}</strong><small>{schedule.cronExpression} · {schedule.timezone}{schedule.catchUp ? " · 补跑一次" : " · 不补跑"}</small><small>当前：{current?.title ?? schedule.workSpecId.slice(0, 8)} · v{current?.revisionNumber ?? "?"}</small></div><div><span>下次 {formatDate(schedule.nextRunAt)}</span><Status value={schedule.enabled ? "active" : "paused"} /></div><div className="schedule-actions"><div className="rebind-control"><select aria-label={`换绑 ${schedule.name}`} value={target} onChange={(event) => setTarget(event.target.value)}>{workflows.map((item) => <option key={item.id} value={item.id}>{item.title} · v{item.revisionNumber}</option>)}</select><button className="button secondary small" disabled={pending || target === schedule.workSpecId} onClick={() => onRebind(target)}>确认换绑</button></div><div className="row-actions"><button className="icon-button" title="修改定时" aria-label={`修改 ${schedule.name}`} onClick={onEdit}><SlidersHorizontalIcon /></button><button className="icon-button" title={schedule.enabled ? "暂停" : "恢复"} aria-label={`${schedule.enabled ? "暂停" : "恢复"} ${schedule.name}`} onClick={() => onAction(schedule.enabled ? "pause" : "resume")}>{schedule.enabled ? <PauseIcon /> : <PlayIcon />}</button><button className="button secondary small" onClick={() => onAction("run-now")}>立即运行</button></div></div></div>;
 }
 
 function ScheduleEditForm({ schedule, pending, error, onCancel, onSubmit }: { schedule: Schedule; pending: boolean; error: unknown; onCancel(): void; onSubmit(input: unknown): void }) {
@@ -63,11 +155,29 @@ function ScheduleEditForm({ schedule, pending, error, onCancel, onSubmit }: { sc
   return <form className="schedule-edit" onSubmit={submit}><div className="form-grid"><Field label="名称"><input name="name" defaultValue={schedule.name} required /></Field><Field label="Cron"><input name="cronExpression" defaultValue={schedule.cronExpression} required /></Field><Field label="时区"><input name="timezone" defaultValue={schedule.timezone} required /></Field><Field label="运行策略"><label className="check-field"><input type="checkbox" name="catchUp" defaultChecked={schedule.catchUp} /> 错过后补跑一次</label><label className="check-field"><input type="checkbox" name="enabled" defaultChecked={schedule.enabled} /> 启用定时</label></Field></div>{Boolean(error) && <p className="form-error">{errorMessage(error, "保存定时失败")}</p>}<div className="row-actions"><button className="button primary small" disabled={pending}>{pending ? "正在保存" : "保存修改"}</button><button className="button secondary small" type="button" onClick={onCancel}>取消</button></div></form>;
 }
 
-function WorkflowForm({ projects, skills, pending, error, onSubmit }: { projects: Project[]; skills: SkillSnapshot[]; pending: boolean; error: unknown; onSubmit(input: unknown): void }) {
-  const [runtime, setRuntime] = useState("internal");
-  const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const data = new FormData(event.currentTarget); const input = workflowRuntimeInput(runtime, data); const skill = skills.find((item) => item.name === data.get("skillName")) ?? null; onSubmit({ kind: "workflow", title: data.get("title"), instructions: data.get("instructions"), executorType: runtime, input, timeoutSeconds: 1800, maxAttempts: 3, lifecycleStatus: "active", projectId: data.get("projectId") || null, skill }); };
+function WorkflowForm({ projects, skills, initial, revision = false, pending, error, onSubmit }: { projects: Project[]; skills: SkillSnapshot[]; initial?: WorkSpec; revision?: boolean; pending: boolean; error: unknown; onSubmit(input: unknown): void }) {
+  const [runtime, setRuntime] = useState<string>(initial?.executorType ?? "internal");
+  const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const data = new FormData(event.currentTarget); const input = workflowRuntimeInput(runtime, data); const skill = skills.find((item) => item.name === data.get("skillName")) ?? null; onSubmit({ kind: "workflow", title: data.get("title"), instructions: data.get("instructions"), executorType: runtime, input, timeoutSeconds: Number(data.get("timeoutSeconds")), maxAttempts: Number(data.get("maxAttempts")), lifecycleStatus: "active", projectId: data.get("projectId") || null, skill }); };
   const choices = runtime === "codex" ? projects.filter((item) => item.repositoryPath) : projects;
-  return <form className="editor-panel" onSubmit={submit}><div className="form-grid"><Field label="名称"><input name="title" required autoFocus /></Field><Field label="Runtime"><select value={runtime} onChange={(event) => setRuntime(event.target.value)}><option value="internal">Internal</option><option value="process">本地 Python / Node</option><option value="codex">Codex</option><option value="openworker">OpenWorker</option></select></Field><Field label="固定 Skill" hint="保存时会把版本、内容与 SHA-256 一并固化。"><select name="skillName" required={runtime === "codex" || runtime === "openworker"}><option value="">{runtime === "codex" || runtime === "openworker" ? "请选择 Skill" : "不绑定 Skill"}</option>{skills.map((item) => <option value={item.name} key={item.name}>{item.name}@{item.version} · {item.contentHash.slice(0, 10)}</option>)}</select></Field><Field label="所属项目" hint={runtime === "codex" ? "Codex 必须绑定一个已有 Git 仓库的项目。" : "可选；绑定后运行、成果和经营事实会进入项目聚合。"}><select name="projectId" required={runtime === "codex"}><option value="">{runtime === "codex" ? "请选择 Git 项目" : "不绑定项目"}</option>{choices.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field><Field label="执行要求"><textarea name="instructions" required rows={4} /></Field>{runtime === "internal" ? <Field label="输出消息"><input name="message" defaultValue="执行完成" /></Field> : runtime === "process" ? <><Field label="命令"><select name="command"><option value="python3">python3</option><option value="node">node</option></select></Field><Field label="参数" hint="按空格分隔，不经过 Shell 插值。"><input name="args" /></Field><Field label="工作目录"><input name="cwd" required /></Field></> : runtime === "codex" ? <><Field label="文件权限"><select name="sandboxMode" defaultValue="read-only"><option value="read-only">只读</option><option value="workspace-write">允许修改项目</option></select></Field><Field label="联网能力"><label className="check-field"><input type="checkbox" name="networkAccess" /> 允许网络与网页搜索</label></Field></> : <Field label="OpenWorker Agent"><select name="agent" defaultValue="cowork"><option value="cowork">Cowork</option><option value="code">Code</option></select></Field>}</div><p className="form-note"><LockKeyIcon /> 保存后形成一个不可变 Skill 版本；需要改方法时创建新版本并重新绑定 Schedule。</p>{runtime === "codex" && choices.length === 0 && <p className="form-error">请先创建并绑定一个本地 Git 项目。</p>}{(runtime === "codex" || runtime === "openworker") && skills.length === 0 && <p className="form-error">仓库中没有可用 Skill。</p>}{Boolean(error) && <p className="form-error">{errorMessage(error, "保存失败")}</p>}<button className="button primary" disabled={pending || (runtime === "codex" && choices.length === 0) || ((runtime === "codex" || runtime === "openworker") && skills.length === 0)}>{pending ? "正在保存" : "保存固定版本"}</button></form>;
+  const initialInput = objectRecord(initial?.input);
+  const initialRuntime = objectRecord(initialInput.runtime);
+  return <form className="editor-panel" onSubmit={submit}><div className="section-heading"><div><h2>{revision ? "创建工作流新版" : "新建工作流"}</h2><p>{revision ? "会生成新的 WorkSpec ID；旧版本和历史运行保持不变。" : "保存后形成不可变版本。"}</p></div></div><div className="form-grid"><Field label="名称"><input name="title" defaultValue={initial?.title} required autoFocus /></Field><Field label="Runtime"><select value={runtime} onChange={(event) => setRuntime(event.target.value)}><option value="internal">Internal</option><option value="process">本地 Python / Node</option><option value="codex">Codex</option><option value="openworker">OpenWorker</option></select></Field><Field label="固定 Skill" hint="会把版本、全文与 SHA-256 一并保存。"><select name="skillName" defaultValue={initial?.skill?.name ?? ""} required={runtime === "codex" || runtime === "openworker"}><option value="">{runtime === "codex" || runtime === "openworker" ? "请选择 Skill" : "不绑定 Skill"}</option>{skills.map((item) => <option value={item.name} key={item.name}>{item.name}@{item.version} · {item.contentHash.slice(0, 10)}</option>)}</select></Field><Field label="所属项目"><select name="projectId" defaultValue={initial?.projectId ?? ""} required={runtime === "codex"}><option value="">{runtime === "codex" ? "请选择 Git 项目" : "不绑定项目"}</option>{choices.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field><Field label="执行要求"><textarea name="instructions" defaultValue={initial?.instructions} required rows={4} /></Field><Field label="单次超时（秒）"><input name="timeoutSeconds" type="number" min="1" max="86400" defaultValue={initial?.timeoutSeconds ?? 1800} required /></Field><Field label="最大尝试"><input name="maxAttempts" type="number" min="1" max="10" defaultValue={initial?.maxAttempts ?? 3} required /></Field>{runtime === "internal" ? <Field label="输出消息"><input name="message" defaultValue={String(initialInput.message ?? "执行完成")} /></Field> : runtime === "process" ? <><Field label="命令"><select name="command" defaultValue={String(initialInput.command ?? "python3")}><option value="python3">python3</option><option value="node">node</option></select></Field><Field label="参数"><input name="args" defaultValue={Array.isArray(initialInput.args) ? initialInput.args.join(" ") : ""} /></Field><Field label="工作目录"><input name="cwd" defaultValue={String(initialInput.cwd ?? "")} required /></Field></> : runtime === "codex" ? <><Field label="文件权限"><select name="sandboxMode" defaultValue={String(initialRuntime.sandboxMode ?? "read-only")}><option value="read-only">只读</option><option value="workspace-write">允许修改项目</option></select></Field><Field label="联网能力"><label className="check-field"><input type="checkbox" name="networkAccess" defaultChecked={initialRuntime.networkAccess === true} /> 允许网络与网页搜索</label></Field></> : <Field label="OpenWorker Agent"><select name="agent" defaultValue={String(initialRuntime.agent ?? "cowork")}><option value="cowork">Cowork</option><option value="code">Code</option></select></Field>}</div><p className="form-note"><LockKeyIcon /> 新版保存后，请在定时规则中明确选择并确认换绑。</p>{Boolean(error) && <p className="form-error">{errorMessage(error, "保存失败")}</p>}<button className="button primary" disabled={pending || (runtime === "codex" && choices.length === 0) || ((runtime === "codex" || runtime === "openworker") && skills.length === 0)}>{pending ? "正在保存" : revision ? "保存为新版本" : "保存固定版本"}</button></form>;
+}
+
+function SkillStudio({ skills, onClose }: { skills: SkillSnapshot[]; onClose(): void }) {
+  const [selectedName, setSelectedName] = useState("");
+  const selected = skills.find((item) => item.name === selectedName) ?? null;
+  return <section className="skill-studio panel"><div className="section-heading"><div><h2>Skill 工作台</h2><p>先检查，再发布。发布只写入当前仓库的 .agents/skills。</p></div><button className="button secondary small" onClick={onClose}>收起</button></div><Field label="选择已有 Skill"><select value={selectedName} onChange={(event) => setSelectedName(event.target.value)}><option value="">新建 Skill</option>{skills.map((skill) => <option value={skill.name} key={skill.name}>{skill.name}@{skill.version}</option>)}</select></Field><SkillDraftEditor key={selected?.contentHash ?? "new"} current={selected} /></section>;
+}
+
+function SkillDraftEditor({ current }: { current: SkillSnapshot | null }) {
+  const client = useQueryClient();
+  const [draft, setDraft] = useState<SkillDraftInput>(() => skillDraft(current));
+  const [validation, setValidation] = useState<SkillDraftValidation | null>(null);
+  const validate = useMutation({ mutationFn: (input: SkillDraftInput) => post<SkillDraftValidation>("/skills/validate", input), onSuccess: setValidation });
+  const publish = useMutation({ mutationFn: () => post<SkillSnapshot>("/skills/publish", { ...draft, validatedContentHash: validation!.candidate.contentHash }), onSuccess: () => { void client.invalidateQueries({ queryKey: ["skills"] }); setValidation(null); } });
+  const update = <K extends keyof SkillDraftInput>(key: K, value: SkillDraftInput[K]) => { setDraft((valueBefore) => ({ ...valueBefore, [key]: value })); setValidation(null); validate.reset(); publish.reset(); };
+  return <div className="skill-draft"><div className="form-grid"><Field label="机器名称" hint="只能用小写字母、数字和短横线。"><input aria-label="Skill 机器名称" value={draft.name} disabled={Boolean(current)} onChange={(event) => update("name", event.target.value)} /></Field><Field label="新版本"><input aria-label="Skill 新版本" value={draft.version} onChange={(event) => update("version", event.target.value)} /></Field><Field label="显示名称"><input aria-label="Skill 显示名称" value={draft.displayName} onChange={(event) => update("displayName", event.target.value)} /></Field><Field label="用途说明"><input aria-label="Skill 用途说明" value={draft.description} onChange={(event) => update("description", event.target.value)} /></Field></div><Field label="执行方法" hint="写清步骤、输入、输出、门禁和完成标准。"><textarea aria-label="Skill 执行方法" rows={12} value={draft.instructions} onChange={(event) => update("instructions", event.target.value)} /></Field>{validation && <div className={`skill-validation ${validation.valid ? "ready" : "blocked"}`}><strong>{validation.valid ? "检查通过，可以发布" : "检查未通过"}</strong><code>{validation.candidate.contentHash}</code>{validation.issues.map((issue) => <p key={issue.code}>{issue.level === "error" ? "错误" : "提醒"}：{issue.message}</p>)}</div>}{publish.data && <p className="success-note">已发布 {publish.data.name}@{publish.data.version}。现在可以用它创建工作流。</p>}{Boolean(validate.error ?? publish.error) && <p className="form-error">{errorMessage(validate.error ?? publish.error, "Skill 操作失败")}</p>}<div className="row-actions"><button className="button secondary" disabled={validate.isPending || publish.isPending} onClick={() => validate.mutate(draft)}>{validate.isPending ? "正在检查" : "检查 Skill"}</button><button className="button primary" disabled={!validation?.valid || publish.isPending} onClick={() => publish.mutate()}>{publish.isPending ? "正在发布" : "发布这个版本"}</button></div></div>;
 }
 
 function workflowRuntimeInput(runtime: string, data: FormData): unknown {
@@ -79,5 +189,27 @@ function workflowRuntimeInput(runtime: string, data: FormData): unknown {
 
 function ScheduleForm({ workflows, selectedWorkSpecId, pending, error, onSubmit }: { workflows: WorkSpec[]; selectedWorkSpecId?: string; pending: boolean; error: unknown; onSubmit(input: unknown): void }) {
   const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const data = new FormData(event.currentTarget); onSubmit({ workSpecId: data.get("workSpecId"), name: data.get("name"), cronExpression: data.get("cronExpression"), timezone: data.get("timezone"), enabled: true, catchUp: data.get("catchUp") === "on" }); };
-  return <form className="editor-panel" onSubmit={submit}><div className="form-grid"><Field label="固定 Skill 版本"><select name="workSpecId" defaultValue={selectedWorkSpecId} required>{workflows.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.id.slice(0, 8)}</option>)}</select></Field><Field label="定时名称"><input name="name" required /></Field><Field label="Cron 表达式"><input name="cronExpression" defaultValue="0 8 * * *" required /></Field><Field label="时区"><input name="timezone" defaultValue="Asia/Tokyo" required /></Field><Field label="错过触发"><label className="check-field"><input type="checkbox" name="catchUp" /> 恢复后最多补跑一次</label></Field></div>{workflows.length === 0 && <p className="form-error">请先建立一个雷达固定版本。</p>}{Boolean(error) && <p className="form-error">{errorMessage(error, "保存失败")}</p>}<button className="button primary" disabled={pending || workflows.length === 0}>{pending ? "正在保存" : "保存定时"}</button></form>;
+  return <form className="editor-panel" onSubmit={submit}><div className="form-grid"><Field label="固定工作流版本"><select name="workSpecId" defaultValue={selectedWorkSpecId} required>{workflows.map((item) => <option key={item.id} value={item.id}>{item.title} · v{item.revisionNumber}</option>)}</select></Field><Field label="定时名称"><input name="name" required /></Field><Field label="Cron 表达式"><input name="cronExpression" defaultValue="0 8 * * *" required /></Field><Field label="时区"><input name="timezone" defaultValue="Asia/Tokyo" required /></Field><Field label="错过触发"><label className="check-field"><input type="checkbox" name="catchUp" /> 恢复后最多补跑一次</label></Field></div>{Boolean(error) && <p className="form-error">{errorMessage(error, "保存失败")}</p>}<button className="button primary" disabled={pending || workflows.length === 0}>{pending ? "正在保存" : "保存定时"}</button></form>;
 }
+
+function HealthBadge({ value }: { value: WorkflowOperationsSummary["health"] }) {
+  const labels = { healthy: "正常", degraded: "连续失败", attention: "处理中", never_run: "未运行", paused: "已暂停" };
+  return <span className={`health-badge ${value}`}>{labels[value]}</span>;
+}
+
+function skillDraft(current: SkillSnapshot | null): SkillDraftInput {
+  if (!current) return { name: "", version: "1.0.0", displayName: "", description: "", instructions: "# 工作方法\n\n## 步骤\n\n1. 读取本次运行上下文。\n2. 完成任务并验证结果。\n3. 提交结构化结果。", expectedCurrentHash: null };
+  const rawDescription = /^description:\s*(.+)$/m.exec(current.content)?.[1]?.trim() ?? current.name;
+  const description = rawDescription.startsWith('"') ? parseJsonString(rawDescription) : rawDescription;
+  const instructions = current.content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim();
+  const displayName = /^#\s+(.+)$/m.exec(instructions)?.[1]?.trim() ?? current.name;
+  return { name: current.name, version: bumpPatch(current.version), displayName, description, instructions, expectedCurrentHash: current.contentHash };
+}
+
+function bumpPatch(version: string): string {
+  const [major = 1, minor = 0, patch = 0] = version.split(".").map(Number);
+  return `${major}.${minor}.${patch + 1}`;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+function parseJsonString(value: string): string { try { const parsed: unknown = JSON.parse(value); return typeof parsed === "string" ? parsed : value; } catch { return value; } }

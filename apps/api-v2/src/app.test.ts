@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { FinanceService, KnowledgeService, PersonalOsService, ScheduleService, type ExecutionContext, type ExecutionResult, type ExecutorAdapter } from "@personal-os/vnext-application";
+import { FinanceService, KnowledgeService, PersonalOsService, RepositorySkillRegistry, ScheduleService, type ExecutionContext, type ExecutionResult, type ExecutorAdapter } from "@personal-os/vnext-application";
 import { SqliteVNextStore } from "@personal-os/vnext-infrastructure";
 import { FakeExecutor, InternalExecutor } from "@personal-os/vnext-runtime";
 import { createVNextApp } from "./app.js";
@@ -75,6 +75,36 @@ describe("vNext API", () => {
     expect(accountResponse.status).toBe(201);
     const audit = await app.request("/api/v2/audit");
     expect((await body<{ data: unknown[] }>(audit)).data.length).toBeGreaterThanOrEqual(3);
+    store.close();
+  });
+
+  it("exposes Phase 10 Skill, preflight, revision, operations and rebind APIs", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-phase10-api-")); directories.push(root);
+    const skillRoot = join(root, "skills");
+    const registry = new RepositorySkillRegistry(skillRoot);
+    const store = new SqliteVNextStore();
+    const execution = new PersonalOsService(store, [new InternalExecutor()], undefined, undefined, registry);
+    const schedules = new ScheduleService(store, execution);
+    const app = createVNextApp({ store, execution, schedules, knowledge: new KnowledgeService(store), finance: new FinanceService(store), skills: registry });
+    const draft = { name: "phase-ten", version: "1.0.0", displayName: "阶段十", description: "验证阶段十工作流。", instructions: "# 阶段十\n\n1. 读取上下文。\n2. 执行并验证。\n3. 提交结果。", expectedCurrentHash: null };
+    const checkedResponse = await app.request("/api/v2/skills/validate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
+    expect(checkedResponse.status).toBe(200);
+    const checked = (await body<{ data: { valid: boolean; candidate: { contentHash: string } } }>(checkedResponse)).data;
+    expect(checked.valid).toBe(true);
+    const publishResponse = await app.request("/api/v2/skills/publish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, validatedContentHash: checked.candidate.contentHash }) });
+    expect(publishResponse.status).toBe(201);
+    const skill = (await body<{ data: unknown }>(publishResponse)).data;
+    const firstResponse = await app.request("/api/v2/work-specs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "阶段十工作流", instructions: "执行", executorType: "internal", input: { operation: "echo", message: "ok", delayMs: 0 }, kind: "workflow", skill }) });
+    const first = (await body<{ data: { id: string } }>(firstResponse)).data;
+    const revisionResponse = await app.request(`/api/v2/work-specs/${first.id}/revisions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "阶段十新版", instructions: "执行并核验", executorType: "internal", input: { operation: "echo", message: "new", delayMs: 0 }, skill }) });
+    const revision = (await body<{ data: { id: string; revisionNumber: number; revisionOfWorkSpecId: string } }>(revisionResponse)).data;
+    expect(revision).toMatchObject({ revisionNumber: 2, revisionOfWorkSpecId: first.id });
+    const scheduleResponse = await app.request("/api/v2/schedules", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workSpecId: first.id, name: "阶段十定时", cronExpression: "0 8 * * *", timezone: "Asia/Tokyo" }) });
+    const schedule = (await body<{ data: { id: string } }>(scheduleResponse)).data;
+    const rebindResponse = await app.request(`/api/v2/schedules/${schedule.id}/rebind`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workSpecId: revision.id }) });
+    expect(await body(rebindResponse)).toMatchObject({ data: { workSpecId: revision.id } });
+    expect(await body(await app.request(`/api/v2/work-specs/${revision.id}/preflight`))).toMatchObject({ data: { ready: true, checks: expect.any(Array) } });
+    expect(await body(await app.request("/api/v2/operations/workflows"))).toMatchObject({ data: expect.arrayContaining([expect.objectContaining({ workSpec: expect.objectContaining({ id: revision.id }), enabledScheduleCount: 1 })]) });
     store.close();
   });
 

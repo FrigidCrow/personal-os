@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { basename, relative, resolve, sep } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import {
@@ -26,10 +26,14 @@ import {
   projectInputSchema,
   runInputResponseSchema,
   runReviewInputSchema,
+  skillDraftInputSchema,
+  skillPublishInputSchema,
   scheduleInputSchema,
+  scheduleRebindInputSchema,
   scheduleUpdateInputSchema,
   vaultInputSchema,
   workSpecInputSchema,
+  workSpecRevisionInputSchema,
   type ActualRunCostInput,
   type Approval,
   type ApprovalDecisionInput,
@@ -78,12 +82,20 @@ import {
   type RunStatus,
   type Schedule,
   type ScheduleInput,
+  type ScheduleRebindInput,
   type ScheduleUpdateInput,
   type RuntimeCapabilityScope,
+  type SkillDraftInput,
+  type SkillDraftValidation,
+  type SkillPublishInput,
   type SkillSnapshot,
   type VaultInput,
   type WorkSpec,
-  type WorkSpecInput
+  type WorkSpecInput,
+  type WorkSpecPreflight,
+  type WorkSpecPreflightCheck,
+  type WorkSpecRevisionInput,
+  type WorkflowOperationsSummary
 } from "@personal-os/vnext-contracts";
 import { assertRunTransition, calculateBudgetVariance, calculateCashflowForecast, canRetryRun, convertMinorUnits, isTerminalRunStatus, redactSensitiveText, redactSensitiveValue, safeAdd, scheduleFiringKey, transactionFacts } from "@personal-os/vnext-domain";
 
@@ -222,6 +234,8 @@ export interface VNextStore {
 export interface SkillRegistry {
   list(): SkillSnapshot[];
   get(name: string): SkillSnapshot | null;
+  validateDraft(input: SkillDraftInput): SkillDraftValidation;
+  publish(input: SkillPublishInput): SkillSnapshot;
 }
 
 export class RepositorySkillRegistry implements SkillRegistry {
@@ -241,9 +255,63 @@ export class RepositorySkillRegistry implements SkillRegistry {
     return this.read(name);
   }
 
+  validateDraft(input: SkillDraftInput): SkillDraftValidation {
+    const parsed = skillDraftInputSchema.parse(input);
+    const content = skillMarkdown(parsed);
+    const absolute = resolve(this.root, parsed.name, "SKILL.md");
+    const candidate: SkillSnapshot = {
+      name: parsed.name,
+      version: parsed.version,
+      contentHash: createHash("sha256").update(content).digest("hex"),
+      path: relative(process.cwd(), absolute).split(sep).join("/"),
+      content
+    };
+    const current = this.get(parsed.name);
+    const issues: SkillDraftValidation["issues"] = [];
+    if (current && parsed.expectedCurrentHash !== current.contentHash) issues.push({ level: "error", code: "SKILL_CONCURRENT_UPDATE", message: "这个 Skill 已被其他操作更新，请重新载入后再发布。" });
+    if (!current && parsed.expectedCurrentHash !== null) issues.push({ level: "error", code: "SKILL_CURRENT_VERSION_MISSING", message: "仓库中还没有这个 Skill，不能按旧 Hash 更新。" });
+    if (current && compareSemver(parsed.version, current.version) <= 0) issues.push({ level: "error", code: "SKILL_VERSION_MUST_INCREASE", message: `新版本必须高于当前 ${current.version}。` });
+    if (containsLikelySecret(`${parsed.description}\n${parsed.instructions}`)) issues.push({ level: "error", code: "SKILL_SECRET_DETECTED", message: "内容中像是包含 Token、密码或私钥，请改成 Secret 引用或删除真实值。" });
+    if (!/^#\s+.+/m.test(parsed.instructions)) issues.push({ level: "warning", code: "SKILL_HEADING_RECOMMENDED", message: "建议用一个一级标题说明 Skill 的用途。" });
+    return { valid: !issues.some((issue) => issue.level === "error"), candidate, current, issues };
+  }
+
+  publish(input: SkillPublishInput): SkillSnapshot {
+    const parsed = skillPublishInputSchema.parse(input);
+    const validation = this.validateDraft(parsed);
+    if (!validation.valid) throw new Error(validation.issues.find((issue) => issue.level === "error")?.code ?? "SKILL_DRAFT_INVALID");
+    if (validation.candidate.contentHash !== parsed.validatedContentHash) throw new Error("SKILL_DRAFT_CHANGED_AFTER_VALIDATION");
+    const root = resolve(this.root);
+    const directory = resolve(root, parsed.name);
+    const agentsDirectory = resolve(directory, "agents");
+    if (!isPathInside(root, directory)) throw new Error("SKILL_PATH_NOT_ALLOWED");
+    if (existsSync(directory) && lstatSync(directory).isSymbolicLink()) throw new Error("SKILL_SYMLINK_NOT_ALLOWED");
+    mkdirSync(agentsDirectory, { recursive: true });
+    if (lstatSync(directory).isSymbolicLink() || lstatSync(agentsDirectory).isSymbolicLink()) throw new Error("SKILL_SYMLINK_NOT_ALLOWED");
+    const marker = randomUUID();
+    const skillTemp = resolve(directory, `.SKILL.md.${marker}.tmp`);
+    const agentTemp = resolve(agentsDirectory, `.openai.yaml.${marker}.tmp`);
+    const skillTarget = resolve(directory, "SKILL.md");
+    const agentTarget = resolve(agentsDirectory, "openai.yaml");
+    try {
+      writeFileSync(skillTemp, validation.candidate.content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      writeFileSync(agentTemp, skillAgentYaml(parsed), { encoding: "utf8", mode: 0o600, flag: "wx" });
+      renameSync(agentTemp, agentTarget);
+      renameSync(skillTemp, skillTarget);
+    } finally {
+      rmSync(skillTemp, { force: true });
+      rmSync(agentTemp, { force: true });
+    }
+    const published = this.get(parsed.name);
+    if (!published || published.contentHash !== validation.candidate.contentHash) throw new Error("SKILL_PUBLISH_VERIFY_FAILED");
+    return published;
+  }
+
   private read(name: string): SkillSnapshot | null {
-    const absolute = resolve(this.root, name, "SKILL.md");
-    if (!isPathInside(resolve(this.root), absolute) || !existsSync(absolute) || !statSync(absolute).isFile()) return null;
+    const root = resolve(this.root);
+    const directory = resolve(root, name);
+    const absolute = resolve(directory, "SKILL.md");
+    if (!isPathInside(root, absolute) || !existsSync(directory) || lstatSync(directory).isSymbolicLink() || !existsSync(absolute) || lstatSync(absolute).isSymbolicLink() || !statSync(absolute).isFile()) return null;
     const content = readFileSync(absolute, "utf8");
     if (content.length > 200_000) throw new Error(`SKILL_CONTENT_TOO_LARGE:${name}`);
     const frontmatter = /^---\n([\s\S]*?)\n---/.exec(content)?.[1] ?? "";
@@ -258,6 +326,29 @@ export class RepositorySkillRegistry implements SkillRegistry {
       content
     };
   }
+}
+
+function skillMarkdown(input: SkillDraftInput): string {
+  return `---\nname: ${input.name}\ndescription: ${JSON.stringify(input.description)}\nmetadata:\n  version: "${input.version}"\n---\n\n${input.instructions.trim()}\n`;
+}
+
+function skillAgentYaml(input: SkillDraftInput): string {
+  const quote = (value: string) => JSON.stringify(value.replace(/[\r\n]+/g, " "));
+  return `interface:\n  display_name: ${quote(input.displayName)}\n  short_description: ${quote(input.description.slice(0, 120))}\n  default_prompt: ${quote(`Use $${input.name} to complete this governed Personal OS run.`)}\n`;
+}
+
+function compareSemver(left: string, right: string): number {
+  const a = left.split(".").map(Number);
+  const b = right.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const delta = (a[index] ?? 0) - (b[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+function containsLikelySecret(value: string): boolean {
+  return /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{16,}\b|\bBearer\s+[A-Za-z0-9._~-]{16,}|(?:api[_ -]?key|token|secret|password|密码|密钥)\s*[:=：]\s*["']?[A-Za-z0-9+/_=-]{12,}/iu.test(value);
 }
 
 export interface RuntimeCapabilityGrant {
@@ -382,6 +473,99 @@ export class PersonalOsService {
 
   createWorkSpec(input: WorkSpecInput, requestId?: string): WorkSpec {
     const parsed = workSpecInputSchema.parse(input);
+    return this.persistWorkSpec(parsed, null, 1, requestId);
+  }
+
+  createWorkSpecRevision(sourceId: string, input: WorkSpecRevisionInput, requestId?: string): WorkSpec {
+    const source = this.requireWorkSpec(sourceId);
+    if (source.kind !== "workflow") throw new Error("WORK_SPEC_REVISION_REQUIRES_WORKFLOW");
+    if (source.lifecycleStatus === "retired") throw new Error("WORK_SPEC_RETIRED");
+    const parsed = workSpecRevisionInputSchema.parse(input);
+    const rootId = this.revisionRootId(source);
+    const nextRevision = Math.max(...this.store.listWorkSpecs({ kind: "workflow" }).filter((item) => this.revisionRootId(item) === rootId).map((item) => item.revisionNumber), source.revisionNumber) + 1;
+    const revision = this.persistWorkSpec({ ...parsed, kind: "workflow" }, source.id, nextRevision, requestId);
+    this.audit("work_spec.revised", "work_spec", revision.id, { sourceWorkSpecId: source.id, revision }, requestId, undefined, source);
+    return revision;
+  }
+
+  validateSkillDraft(input: SkillDraftInput): SkillDraftValidation {
+    if (!this.skills) throw new Error("SKILL_REGISTRY_UNAVAILABLE");
+    return this.skills.validateDraft(skillDraftInputSchema.parse(input));
+  }
+
+  publishSkill(input: SkillPublishInput, requestId?: string): SkillSnapshot {
+    if (!this.skills) throw new Error("SKILL_REGISTRY_UNAVAILABLE");
+    const parsed = skillPublishInputSchema.parse(input);
+    const before = this.skills.get(parsed.name);
+    const published = this.skills.publish(parsed);
+    const safeSnapshot = (snapshot: SkillSnapshot | null) => snapshot ? { name: snapshot.name, version: snapshot.version, contentHash: snapshot.contentHash, path: snapshot.path } : null;
+    this.audit("skill.published", "skill", published.name, safeSnapshot(published), requestId, undefined, safeSnapshot(before));
+    return published;
+  }
+
+  async preflightWorkSpec(id: string): Promise<WorkSpecPreflight> {
+    const workSpec = this.requireWorkSpec(id);
+    const checks: WorkSpecPreflightCheck[] = [];
+    checks.push({ code: "lifecycle", label: "启用状态", status: workSpec.lifecycleStatus === "active" ? "pass" : "fail", detail: workSpec.lifecycleStatus === "active" ? "工作流可以创建新运行。" : `当前状态是 ${workSpec.lifecycleStatus}。` });
+    const adapter = this.executors.get(workSpec.executorType);
+    if (!adapter) checks.push({ code: "executor", label: "Runtime", status: "fail", detail: `执行器 ${workSpec.executorType} 没有配置。` });
+    else {
+      const health = await adapter.health();
+      checks.push({ code: "executor", label: "Runtime", status: health.available ? "pass" : "fail", detail: health.detail });
+    }
+    const project = workSpec.projectId ? this.store.getProject(workSpec.projectId) : null;
+    if (workSpec.executorType === "codex") {
+      const repository = project?.repositoryPath ? resolve(project.repositoryPath) : null;
+      const validRepository = Boolean(repository && existsSync(repository) && statSync(repository).isDirectory() && existsSync(resolve(repository!, ".git")));
+      checks.push({ code: "codex-repository", label: "Git 项目", status: validRepository ? "pass" : "fail", detail: validRepository ? repository! : "Codex 必须绑定一个存在的本地 Git 仓库。" });
+    } else {
+      checks.push({ code: "project", label: "所属项目", status: project ? "pass" : "warning", detail: project ? project.name : "未绑定项目；运行仍可执行，但成果不会进入项目聚合。" });
+    }
+    const agentRuntime = workSpec.executorType === "codex" || workSpec.executorType === "openworker";
+    if (!workSpec.skill) checks.push({ code: "skill", label: "固定 Skill", status: agentRuntime ? "fail" : "warning", detail: agentRuntime ? "Agent 工作流必须绑定固定 Skill。" : "这个 Runtime 没有绑定 Skill。" });
+    else {
+      const validHash = createHash("sha256").update(workSpec.skill.content).digest("hex") === workSpec.skill.contentHash;
+      checks.push({ code: "skill", label: "固定 Skill", status: validHash ? "pass" : "fail", detail: validHash ? `${workSpec.skill.name}@${workSpec.skill.version} 快照完整。` : "Skill 内容与保存的 Hash 不一致。" });
+      const current = this.skills?.get(workSpec.skill.name) ?? null;
+      if (current && current.contentHash !== workSpec.skill.contentHash) checks.push({ code: "skill-version", label: "Skill 新版本", status: "warning", detail: `仓库已有 ${current.version}；当前工作流仍固定使用 ${workSpec.skill.version}。` });
+    }
+    const bound = this.store.listSchedules().filter((schedule) => schedule.workSpecId === workSpec.id);
+    checks.push({ code: "schedule", label: "定时规则", status: bound.some((schedule) => schedule.enabled) ? "pass" : "warning", detail: bound.length ? `${bound.filter((schedule) => schedule.enabled).length}/${bound.length} 条已启用。` : "尚未设置定时；仍可手动运行。" });
+    checks.push({ code: "retry", label: "失败恢复", status: workSpec.maxAttempts > 1 ? "pass" : "warning", detail: `最多尝试 ${workSpec.maxAttempts} 次，单次超时 ${workSpec.timeoutSeconds} 秒。` });
+    return { workSpecId: workSpec.id, ready: !checks.some((check) => check.status === "fail"), checkedAt: this.clock.now().toISOString(), checks };
+  }
+
+  listWorkflowOperations(): WorkflowOperationsSummary[] {
+    const schedules = this.store.listSchedules();
+    const runs = this.store.listRuns(10_000);
+    return this.store.listWorkSpecs({ kind: "workflow" }).filter((workSpec) => workSpec.lifecycleStatus !== "retired").map((workSpec) => {
+      const ownSchedules = schedules.filter((schedule) => schedule.workSpecId === workSpec.id);
+      const enabledSchedules = ownSchedules.filter((schedule) => schedule.enabled);
+      const ownRuns = runs.filter((run) => run.workSpecId === workSpec.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      const latestRun = ownRuns[0] ?? null;
+      let consecutiveFailures = 0;
+      for (const run of ownRuns) {
+        if (run.status !== "failed") break;
+        consecutiveFailures += 1;
+      }
+      let health: WorkflowOperationsSummary["health"] = "never_run";
+      if (workSpec.lifecycleStatus === "paused" || (ownSchedules.length > 0 && enabledSchedules.length === 0)) health = "paused";
+      else if (latestRun && ["running", "queued", "waiting_input", "waiting_approval"].includes(latestRun.status)) health = "attention";
+      else if (consecutiveFailures > 0) health = "degraded";
+      else if (latestRun?.status === "succeeded" || latestRun?.status === "partially_succeeded") health = "healthy";
+      return {
+        workSpec,
+        health,
+        scheduleCount: ownSchedules.length,
+        enabledScheduleCount: enabledSchedules.length,
+        nextRunAt: enabledSchedules.map((schedule) => schedule.nextRunAt).sort()[0] ?? null,
+        latestRun,
+        consecutiveFailures
+      };
+    });
+  }
+
+  private persistWorkSpec(parsed: ReturnType<typeof workSpecInputSchema.parse>, revisionOfWorkSpecId: string | null, revisionNumber: number, requestId?: string): WorkSpec {
     if (parsed.projectId && !this.store.getProject(parsed.projectId)) throw new Error("PROJECT_NOT_FOUND");
     let skill = parsed.skill;
     if (skill) {
@@ -398,11 +582,25 @@ export class PersonalOsService {
       instructions: redactSensitiveText(parsed.instructions),
       input: redactSensitiveValue(parsed.input),
       skill,
+      revisionOfWorkSpecId,
+      revisionNumber,
       createdAt: now,
       updatedAt: now
     });
     this.audit("work_spec.created", "work_spec", workSpec.id, workSpec, requestId);
     return workSpec;
+  }
+
+  private revisionRootId(workSpec: WorkSpec): string {
+    let current = workSpec;
+    const visited = new Set<string>();
+    while (current.revisionOfWorkSpecId && !visited.has(current.id)) {
+      visited.add(current.id);
+      const parent = this.store.getWorkSpec(current.revisionOfWorkSpecId);
+      if (!parent) break;
+      current = parent;
+    }
+    return current.id;
   }
 
   retireWorkSpec(id: string, requestId?: string): WorkSpec {
@@ -462,7 +660,11 @@ export class PersonalOsService {
   async startRun(runId: string, requestId?: string): Promise<Run> {
     let run = this.requireRun(runId);
     if (run.status !== "queued") throw new Error(`RUN_NOT_QUEUED:${run.status}`);
-    if (!this.executors.has(run.executorType)) return this.failRun(run, "EXECUTOR_UNAVAILABLE", `执行器 ${run.executorType} 尚未配置。`, requestId);
+    if (!this.executors.has(run.executorType)) {
+      const failed = this.failRun(run, "EXECUTOR_UNAVAILABLE", `执行器 ${run.executorType} 尚未配置。`, requestId);
+      this.maybeAutoRetryScheduled(failed, "EXECUTOR_UNAVAILABLE", failed.errorMessage ?? "", requestId);
+      return failed;
+    }
     run = this.transition(run, "running", { startedAt: this.clock.now().toISOString() }, requestId);
     return await this.executeRunningRun(run, null, requestId);
   }
@@ -712,7 +914,10 @@ export class PersonalOsService {
       if (latest.status === "cancelled") return latest;
       const timedOut = controller.signal.aborted && controller.signal.reason instanceof Error && controller.signal.reason.message === "EXECUTION_TIMEOUT";
       const message = error instanceof Error ? error.message : "Execution failed";
-      return this.failRun(latest, timedOut ? "EXECUTION_TIMEOUT" : "EXECUTION_FAILED", message, requestId);
+      const code = timedOut ? "EXECUTION_TIMEOUT" : "EXECUTION_FAILED";
+      const failed = this.failRun(latest, code, message, requestId);
+      this.maybeAutoRetryScheduled(failed, code, message, requestId);
+      return failed;
     } finally {
       clearTimeout(timeout);
       this.controllers.delete(runId);
@@ -722,6 +927,31 @@ export class PersonalOsService {
 
   private failRun(run: Run, code: string, message: string, requestId?: string): Run {
     return this.transition(run, "failed", { errorCode: code, errorMessage: redactSensitiveText(message), reviewStatus: "not_required", finishedAt: this.clock.now().toISOString() }, requestId);
+  }
+
+  private maybeAutoRetryScheduled(failed: Run, code: string, message: string, requestId?: string): void {
+    if (!this.isScheduledRunChain(failed) || !isRetryableExecutionFailure(code, message)) return;
+    const workSpec = this.requireWorkSpec(failed.workSpecId);
+    if (failed.attempt >= workSpec.maxAttempts) {
+      this.publish(failed.id, { eventType: "run.retry_exhausted", level: "error", source: "scheduler", message: `已达到最大尝试次数 ${workSpec.maxAttempts}，等待人工处理。`, structuredData: { attempt: failed.attempt, maxAttempts: workSpec.maxAttempts }, requestId });
+      return;
+    }
+    const retry = this.retryRun(failed.id, requestId);
+    this.publish(failed.id, { eventType: "run.retry_scheduled", level: "warning", source: "scheduler", message: `定时运行失败，已创建第 ${retry.attempt} 次尝试。`, structuredData: { retryRunId: retry.id, attempt: retry.attempt }, requestId });
+    queueMicrotask(() => { void this.startRun(retry.id, requestId); });
+  }
+
+  private isScheduledRunChain(run: Run): boolean {
+    let current = run;
+    const visited = new Set<string>();
+    while (current.retryOfRunId && !visited.has(current.id)) {
+      visited.add(current.id);
+      const previous = this.store.getRun(current.retryOfRunId);
+      if (!previous) break;
+      current = previous;
+    }
+    const key = current.idempotencyKey;
+    return Boolean(key && this.store.listSchedules().some((schedule) => key.startsWith(`${schedule.id}:`)));
   }
 
   private transition(run: Run, status: RunStatus, patch: Partial<Run>, requestId?: string): Run {
@@ -886,6 +1116,20 @@ export class ScheduleService {
     return updated;
   }
 
+  rebind(id: string, input: ScheduleRebindInput, requestId?: string): Schedule {
+    const parsed = scheduleRebindInputSchema.parse(input);
+    const current = this.store.getSchedule(id);
+    if (!current) throw new Error("SCHEDULE_NOT_FOUND");
+    const target = this.store.getWorkSpec(parsed.workSpecId);
+    if (!target) throw new Error("WORK_SPEC_NOT_FOUND");
+    if (target.kind !== "workflow" || target.lifecycleStatus !== "active") throw new Error("SCHEDULE_REBIND_TARGET_NOT_ACTIVE_WORKFLOW");
+    if (target.id === current.workSpecId) return current;
+    const now = this.clock.now().toISOString();
+    const updated = this.store.updateSchedule({ ...current, workSpecId: target.id, updatedAt: now });
+    this.store.insertAudit({ actorType: "user", actorId: "local-user", action: "schedule.rebound", resourceType: "schedule", resourceId: id, beforeSnapshot: current, afterSnapshot: updated, requestId }, now);
+    return updated;
+  }
+
   setEnabled(id: string, enabled: boolean, requestId?: string): Schedule {
     const current = this.store.getSchedule(id);
     if (!current) throw new Error("SCHEDULE_NOT_FOUND");
@@ -937,6 +1181,12 @@ export class ScheduleService {
 
 export function nextOccurrence(expression: string, timezone: string, after: Date): Date {
   return CronExpressionParser.parse(expression, { currentDate: after, tz: timezone }).next().toDate();
+}
+
+function isRetryableExecutionFailure(code: string, message: string): boolean {
+  if (code === "EXECUTION_TIMEOUT" || code === "EXECUTOR_UNAVAILABLE") return true;
+  if (code !== "EXECUTION_FAILED") return false;
+  return !/^(?:PROJECT_NOT_FOUND|SKILL_|WORK_SPEC_|CODEX_PROJECT_REPOSITORY_REQUIRED|CODEX_GIT_REPOSITORY_REQUIRED|WORKING_DIRECTORY_NOT_ALLOWED|EXECUTABLE_NOT_ALLOWED|RUNTIME_CAPABILITY_|APPROVAL_)/.test(message);
 }
 
 export class KnowledgeService {

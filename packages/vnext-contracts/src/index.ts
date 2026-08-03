@@ -25,6 +25,26 @@ export const skillSnapshotSchema = z.object({
   content: z.string().min(1).max(200_000)
 });
 export type SkillSnapshot = z.infer<typeof skillSnapshotSchema>;
+export const skillDraftInputSchema = z.object({
+  name: z.string().trim().min(1).max(64).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  version: z.string().trim().regex(/^\d+\.\d+\.\d+$/),
+  displayName: z.string().trim().min(1).max(80),
+  description: z.string().trim().min(1).max(500).refine((value) => !/[\r\n]/.test(value), "SKILL_DESCRIPTION_SINGLE_LINE"),
+  instructions: z.string().trim().min(20).max(100_000),
+  expectedCurrentHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null)
+});
+export type SkillDraftInput = z.infer<typeof skillDraftInputSchema>;
+export interface SkillDraftIssue { level: "error" | "warning"; code: string; message: string }
+export interface SkillDraftValidation {
+  valid: boolean;
+  candidate: SkillSnapshot;
+  current: SkillSnapshot | null;
+  issues: SkillDraftIssue[];
+}
+export const skillPublishInputSchema = skillDraftInputSchema.extend({
+  validatedContentHash: z.string().regex(/^[a-f0-9]{64}$/)
+});
+export type SkillPublishInput = z.infer<typeof skillPublishInputSchema>;
 export const workSpecInputSchema = z.object({
   projectId: idSchema.nullable().default(null),
   kind: workSpecKindSchema.default("one_off"),
@@ -38,7 +58,39 @@ export const workSpecInputSchema = z.object({
   skill: skillSnapshotSchema.nullable().default(null)
 });
 export type WorkSpecInput = z.input<typeof workSpecInputSchema>;
-export interface WorkSpec extends z.output<typeof workSpecInputSchema> { id: string; createdAt: string; updatedAt: string }
+export interface WorkSpec extends z.output<typeof workSpecInputSchema> {
+  id: string;
+  revisionOfWorkSpecId: string | null;
+  revisionNumber: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export const workSpecRevisionInputSchema = workSpecInputSchema.omit({ kind: true, lifecycleStatus: true }).extend({
+  lifecycleStatus: z.literal("active").default("active")
+});
+export type WorkSpecRevisionInput = z.input<typeof workSpecRevisionInputSchema>;
+export interface WorkSpecPreflightCheck {
+  code: string;
+  label: string;
+  status: "pass" | "warning" | "fail";
+  detail: string;
+}
+export interface WorkSpecPreflight {
+  workSpecId: string;
+  ready: boolean;
+  checkedAt: string;
+  checks: WorkSpecPreflightCheck[];
+}
+export type WorkflowHealthStatus = "healthy" | "degraded" | "attention" | "never_run" | "paused";
+export interface WorkflowOperationsSummary {
+  workSpec: WorkSpec;
+  health: WorkflowHealthStatus;
+  scheduleCount: number;
+  enabledScheduleCount: number;
+  nextRunAt: string | null;
+  latestRun: Run | null;
+  consecutiveFailures: number;
+}
 
 export const controlPlaneEntityTypeSchema = z.enum(["project", "work_spec", "run", "artifact", "knowledge"]);
 export type ControlPlaneEntityType = z.infer<typeof controlPlaneEntityTypeSchema>;
@@ -226,6 +278,8 @@ export const scheduleUpdateInputSchema = z.object({
   "SCHEDULE_UPDATE_EMPTY"
 );
 export type ScheduleUpdateInput = z.infer<typeof scheduleUpdateInputSchema>;
+export const scheduleRebindInputSchema = z.object({ workSpecId: idSchema });
+export type ScheduleRebindInput = z.infer<typeof scheduleRebindInputSchema>;
 export interface Schedule extends ScheduleInput {
   id: string;
   nextRunAt: string;

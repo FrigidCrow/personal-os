@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 
 const root = resolve(import.meta.dirname);
 const databasePath = resolve(root, "review-artifacts", "e2e-current.db");
+const skillsPath = resolve(root, "review-artifacts", "e2e-current-skills");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -29,7 +30,7 @@ export default defineConfig({
       timeout: 60_000,
       stdout: "pipe",
       stderr: "pipe",
-      env: { PORT: "18887", PERSONAL_OS_V2_DATABASE_PATH: databasePath, PERSONAL_OS_ALLOWED_ROOTS: root },
+      env: { PORT: "18887", PERSONAL_OS_V2_DATABASE_PATH: databasePath, PERSONAL_OS_ALLOWED_ROOTS: root, PERSONAL_OS_SKILLS_ROOT: skillsPath },
       gracefulShutdown: { signal: "SIGTERM", timeout: 1_000 }
     },
     {

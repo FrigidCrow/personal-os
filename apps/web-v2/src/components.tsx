@@ -18,12 +18,12 @@ export function EmptyBlock({ title, description, action }: { title: string; desc
 }
 
 export function Status({ value }: { value: string }) {
-  const tone = ["succeeded", "active", "healthy"].includes(value) ? "positive" : ["failed", "critical"].includes(value) ? "negative" : ["running", "queued"].includes(value) ? "accent" : "neutral";
+  const tone = ["succeeded", "active", "healthy", "pass"].includes(value) ? "positive" : ["failed", "critical", "fail"].includes(value) ? "negative" : ["running", "queued", "warning"].includes(value) ? "accent" : "neutral";
   return <span className={`status status-${tone}`}>{statusLabel(value)}</span>;
 }
 
 export function statusLabel(value: string): string {
-  const labels: Record<string, string> = { queued: "排队中", running: "运行中", waiting_input: "等待输入", waiting_approval: "等待审批", succeeded: "成功", partially_succeeded: "部分成功", failed: "失败", cancelled: "已取消", active: "已启用", paused: "已暂停", archived: "已归档", draft: "草稿", retired: "已停用", healthy: "正常" };
+  const labels: Record<string, string> = { queued: "排队中", running: "运行中", waiting_input: "等待输入", waiting_approval: "等待审批", succeeded: "成功", partially_succeeded: "部分成功", failed: "失败", cancelled: "已取消", active: "已启用", paused: "已暂停", archived: "已归档", draft: "草稿", retired: "已停用", healthy: "正常", pass: "通过", warning: "提醒", fail: "失败" };
   return labels[value] ?? value;
 }
 

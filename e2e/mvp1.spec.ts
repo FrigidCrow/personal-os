@@ -63,6 +63,47 @@ test("项目、雷达和定时执行形成闭环", async ({ page }) => {
   await expect(page.locator(".run-detail")).toContainText("成功");
 });
 
+test("Skill 检查发布、工作流体检、创建新版和定时换绑", async ({ page }) => {
+  await page.goto("/radar");
+  await page.getByRole("button", { name: "Skill 工作台" }).click();
+  await page.getByLabel("Skill 机器名称").fill("phase-ten-browser");
+  await page.getByLabel("Skill 显示名称").fill("阶段十浏览器验证");
+  await page.getByLabel("Skill 用途说明").fill("验证可视化工作流运营闭环。");
+  await page.getByLabel("Skill 执行方法").fill("# 阶段十浏览器验证\n\n1. 读取运行上下文。\n2. 完成任务并核验。\n3. 提交结构化结果。");
+  await page.getByRole("button", { name: "检查 Skill" }).click();
+  await expect(page.getByText("检查通过，可以发布", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "发布这个版本" }).click();
+  await expect(page.getByLabel("选择已有 Skill").locator("option[value='phase-ten-browser']")).toHaveCount(1);
+  await page.getByRole("button", { name: "收起" }).click();
+
+  await page.getByRole("button", { name: "新建雷达" }).click();
+  await page.getByLabel("名称").fill("阶段十浏览器工作流");
+  await page.getByLabel("固定 Skill").selectOption("phase-ten-browser");
+  await page.getByLabel("执行要求").fill("执行阶段十浏览器验证并输出证据");
+  await page.getByRole("button", { name: "保存固定版本" }).click();
+  await page.getByRole("heading", { name: "阶段十浏览器工作流" }).click();
+  await page.getByRole("button", { name: "添加定时" }).click();
+  await page.getByLabel("定时名称").fill("阶段十换绑");
+  await page.getByRole("button", { name: "保存定时" }).click();
+  await page.getByRole("button", { name: "运行体检" }).click();
+  await expect(page.getByRole("heading", { name: "可以运行" })).toBeVisible();
+  await page.screenshot({ path: "review-artifacts/phase10/workflow-preflight-desktop-dark.png", fullPage: true });
+
+  await page.getByRole("button", { name: "创建新版" }).click();
+  await page.getByLabel("名称").fill("阶段十浏览器工作流新版");
+  await page.getByRole("button", { name: "保存为新版本" }).click();
+  await expect(page).toHaveURL(/\/radar\/[a-z0-9-]+$/);
+  await expect(page.locator(".skill-lock")).toContainText("版本 2");
+  await page.getByRole("link", { name: "全部雷达" }).click();
+  const row = page.locator(".schedule-row").filter({ hasText: "阶段十换绑" });
+  await row.getByLabel("换绑 阶段十换绑").selectOption({ label: "阶段十浏览器工作流新版 · v2" });
+  await row.getByRole("button", { name: "确认换绑" }).click();
+  await expect(row).toContainText("当前：阶段十浏览器工作流新版 · v2");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  await page.screenshot({ path: "review-artifacts/phase10/radar-operations-mobile-dark.png", fullPage: true });
+});
+
 test("统一搜索、稳定详情与旧链接兼容", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "打开统一搜索" }).click();

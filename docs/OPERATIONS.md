@@ -17,6 +17,7 @@
 |---|---|
 | 业务数据库 | `~/.local/share/personal-os-v2/data/personal-os-v2.db` |
 | 生产运行时 | `~/.local/share/personal-os-v2/runtime/current` |
+| Skill 原文 | 仓库 `.agents/skills` |
 | 日志 | `~/.local/share/personal-os-v2/logs` |
 | 备份 | `~/.local/share/personal-os-v2/backups` |
 | 启动状态 | `~/.local/share/personal-os-v2/control/active-runtime.json` |
@@ -39,6 +40,7 @@ npm run healthcheck
 ```
 
 安装命令只会生成当前 API 和 Web 两个 LaunchAgent。若传入已废弃的 `--generation` 参数会直接拒绝执行。
+`healthcheck` 会在服务刚重启时短暂重试，避免 LaunchAgent 还没监听端口就误报失败。
 
 ## 检查
 
@@ -58,6 +60,8 @@ npm run typecheck
 npm run lint
 npm run build
 ```
+
+当前数据库 Schema 为 10。正式更新时由 API 启动过程自动执行 migration 10，为 WorkSpec 增加不可变版本链字段。
 
 执行器级验证：
 

@@ -171,6 +171,38 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .schedule-row > div { display: grid; gap: 5px; }
 .schedule-row > div:nth-child(2) { font-size: 12px; color: var(--muted); }
 .schedule-row .row-actions { display: flex; }
+.schedule-actions { min-width: 310px; }
+.rebind-control { display: grid; grid-template-columns: minmax(150px, 1fr) auto; gap: 7px; }
+.rebind-control select { min-width: 0; height: 32px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface); padding: 0 8px; font-size: 11px; }
+
+.operations-band { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 0 !important; overflow: hidden; }
+.operations-band > div { min-height: 96px; padding: 18px; border-right: 1px solid var(--border); display: grid; align-content: center; gap: 8px; }
+.operations-band > div:last-child { border-right: 0; }
+.operations-band small { color: var(--muted); font-size: 10px; }
+.operations-band strong { font-size: 24px; letter-spacing: -.04em; }
+.health-badge { flex: none; width: max-content; padding: 4px 8px; border-radius: 999px; color: var(--muted); background: var(--surface); font-size: 10px; font-weight: 700; }
+.health-badge.healthy { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.health-badge.degraded { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.health-badge.attention { color: var(--accent-strong); background: var(--accent-soft); }
+.preflight-panel.ready { border-color: color-mix(in srgb, var(--good) 45%, var(--border)); }
+.preflight-panel.blocked { border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); }
+.preflight-panel.ready .section-heading > svg { color: var(--good); }
+.preflight-panel.blocked .section-heading > svg { color: var(--bad); }
+.preflight-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--border); }
+.preflight-checks > div { min-width: 0; min-height: 72px; padding: 12px; background: var(--surface-2); display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; }
+.preflight-checks span { min-width: 0; display: grid; gap: 5px; }
+.preflight-checks strong { font-size: 12px; }
+.preflight-checks small { color: var(--muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+
+.skill-studio { display: grid; gap: 18px; border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); animation: enter .28s cubic-bezier(.16,1,.3,1); }
+.skill-studio > .field { max-width: 420px; }
+.skill-draft { display: grid; gap: 16px; padding-top: 18px; border-top: 1px solid var(--border); }
+.skill-validation { padding: 13px; border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 7px; }
+.skill-validation.ready { border-color: color-mix(in srgb, var(--good) 38%, var(--border)); background: color-mix(in srgb, var(--good) 7%, var(--surface)); }
+.skill-validation.blocked { border-color: color-mix(in srgb, var(--bad) 38%, var(--border)); background: color-mix(in srgb, var(--bad) 7%, var(--surface)); }
+.skill-validation strong { font-size: 12px; }
+.skill-validation code { color: var(--muted); font-size: 9px; overflow-wrap: anywhere; }
+.skill-validation p { margin: 0; color: var(--muted); font-size: 11px; }
 
 .run-workbench { display: grid; grid-template-columns: minmax(250px, .55fr) minmax(0, 1.45fr); gap: 18px; min-height: 620px; }
 .run-index { display: grid; gap: 6px; align-content: start; }
@@ -486,6 +518,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .project-item-0 { grid-row: auto; min-height: 300px; }
   .schedule-row { grid-template-columns: 1fr; padding: 15px 0; gap: 10px; }
   .schedule-row .row-actions { justify-content: flex-start; }
+  .schedule-actions { min-width: 0; }
+  .operations-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .operations-band > div:nth-child(2) { border-right: 0; }
+  .operations-band > div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
   .finance-grid, .operations-layout { grid-template-columns: 1fr; }
   .finance-commandbar { align-items: stretch; flex-direction: column; }
   .finance-commandbar > .button { width: 100%; }
@@ -510,6 +546,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .metric:nth-child(3) { border-bottom: 1px solid var(--border); }
   .metric:last-child { border-bottom: 0; }
   .form-grid { grid-template-columns: 1fr; }
+  .preflight-checks { grid-template-columns: 1fr; }
+  .rebind-control { grid-template-columns: minmax(0, 1fr); }
   .finance-summary { grid-template-columns: 1fr; }
   .finance-commandbar { width: 100%; max-width: 100%; min-width: 0; overflow: hidden; }
   .finance-commandbar nav { width: 100%; max-width: 100%; min-width: 0; flex: 0 1 auto; contain: inline-size; }

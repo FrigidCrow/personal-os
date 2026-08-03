@@ -1,30 +1,40 @@
 # Personal OS
 
-Personal OS 是一个本地优先的个人业务控制面。Web 负责观察与下达意图，Core API 统一保存任务、运行、审批、资产、财务、知识索引和定时计划；Codex 与 OpenWorker 是可替换的执行器。
+Personal OS 是 Codex 和 OpenWorker 上面的一层本地控制台。你可以在一个 Web 页面里管理项目、自动工作流、运行记录、成果、Obsidian 知识和投入产出。
 
-当前仓库只有一套可运行系统：
+当前只有这一套系统：
 
-- Web：`apps/web-v2`，正式端口 `5273`
-- API：`apps/api-v2`，正式端口 `8787`
-- 领域与应用层：`packages/vnext-domain`、`packages/vnext-application`
-- 基础设施：`packages/vnext-infrastructure`
-- 数据库：`~/.local/share/personal-os-v2/data/personal-os-v2.db`
-- 生产运行时：`~/.local/share/personal-os-v2/runtime/current`
-- Agent Gateway：`apps/mcp-v2`，由 Codex/OpenWorker 通过每 Run 短期 Capability 调用
-- 版本化 Skills：`.agents/skills`，WorkSpec 固定版本、内容和 SHA-256
+| 服务 | 地址 |
+|---|---|
+| Personal OS Web | `http://127.0.0.1:5273` |
+| Personal OS API | `http://127.0.0.1:8787` |
+| OpenWorker Web | `http://127.0.0.1:5274` |
 
-旧 API、旧 Web、旧数据库、旧 MCP、旧切换/回滚工具和 OpenWorker v1 拉取任务已退出运行链路。历史 Markdown 文档仅用于审计，不能作为启动说明。
+## 现在能做什么
+
+- 为项目绑定本地 Git 仓库和 Obsidian 路径；
+- 在 Skill 工作台里检查并发布新的执行方法；
+- 用 Codex、OpenWorker、本地命令或内置 Runtime 创建工作流；
+- 运行前检查 Runtime、项目、Skill、定时和重试设置；
+- 为工作流设置 Cron 定时；
+- 创建工作流新版，并把定时规则明确换绑到新版；
+- 实时查看运行、日志、审批、结果、成本和成果；
+- 定时运行遇到临时错误时有限重试，到达上限后停下等待处理；
+- 搜索 Obsidian，受控创建笔记；
+- 记录收入、支出、预算、预测和项目投入产出。
+
+日常操作请直接看 [Personal OS 使用说明书](docs/USER-GUIDE.md)。部署、备份和故障处理见 [运维手册](docs/OPERATIONS.md)。
 
 ## 开发
 
-要求 Node.js 22.12 或更高版本。
+需要 Node.js 22.12 或更高版本。
 
 ```bash
 npm install
 npm run dev
 ```
 
-浏览器打开 `http://127.0.0.1:5273`。开发服务器代理到本地 API。
+打开 `http://127.0.0.1:5273`。开发环境会自动把 Web 请求转发到本地 API。
 
 ## 验证
 
@@ -45,28 +55,22 @@ npm run launchagent:install -- --apply
 npm run healthcheck
 ```
 
-双击桌面启动器时，`scripts/start-personal-os.command` 会同时检查并启动 Personal OS 与 OpenWorker。运维细节见 [`docs/OPERATIONS.md`](docs/OPERATIONS.md)。
+也可以双击桌面的 `启动 Personal OS.command`。它会检查 Personal OS 和 OpenWorker，并打开 Web 页面。
 
-## Agent Gateway 与 Skills
+## 数据放在哪里
 
-Personal OS 向执行中的 Codex/OpenWorker 提供七个受控 MCP 工具：读取本次运行上下文、上报进度、搜索知识、登记仓库内产物、请求审批、读取审批状态和提交结构化结果。MCP 只连接 Loopback Core API，不直接访问 SQLite，也不提供付款、外联、发布、删除或生产部署工具。
+- 结构化业务数据：`~/.local/share/personal-os-v2/data/personal-os-v2.db`
+- 正式运行文件：`~/.local/share/personal-os-v2/runtime/current`
+- Skill 原文：仓库 `.agents/skills`
+- 长文知识：你的 Obsidian Vault
+- 代码与交付物：各项目 Git 仓库
 
-每个 Agent Run 都会获得绑定 Run、执行器、Scope 和 TTL 的短期 Capability；进入等待态、终态或取消后即失效。Skill-bound Codex/OpenWorker Run 没有提交结构化 MCP 结果时不能标记成功。
+SQLite 是业务状态的唯一事实源。Obsidian 保存 Markdown 原文，Git 保存代码和 Skill 历史。不要把数据库、密钥、运行日志或下载的音频提交到 Git。
 
-仓库当前包含：
+## Codex 和 OpenWorker 怎么接入
 
-- `personal-os-agent-run`：受控 Agent Run 通用协议；
-- `discover-china-opportunities`：中国市场赚钱机会深度调研；
-- `prepare-ai-briefing`：每日 AI 新闻与新技术晨报。
+工作流启动后，Personal OS 会为本次 Run 发一个短期权限。Codex 或 OpenWorker 只能通过 7 个受控 MCP 工具读取上下文、上报进度、搜索知识、登记仓库成果、请求审批、读取审批状态和提交结构化结果。
 
-协议与生产验收见 [`docs/PERSONAL-OS-PHASE9-AGENT-GATEWAY-ACCEPTANCE.md`](docs/PERSONAL-OS-PHASE9-AGENT-GATEWAY-ACCEPTANCE.md)。
+Agent 不能通过这套 MCP 直接付款、联系客户、发布内容、删除文件或部署生产环境。高风险动作仍需人工决定。
 
-## 权威边界
-
-- SQLite 是结构化业务状态的唯一事实源。
-- Obsidian 保存 Markdown 原文，数据库只保存索引与引用。
-- Agent 通过 Adapter 执行，不直接拥有或静默修改业务事实。
-- 高风险动作必须进入审批。
-- Codex/OpenWorker 只能通过原生 v2 MCP 的短期 Capability 回写当前 Run；不能直接访问数据库。
-
-阶段计划和验收证据见 [`docs/PLAN.md`](docs/PLAN.md)、[`WORKLOG.md`](WORKLOG.md) 和 [`REVIEW.md`](REVIEW.md)。
+阶段 10 的设计和验收见 [计划](docs/PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-SPEC.md) 与 [验收记录](docs/PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-ACCEPTANCE.md)。

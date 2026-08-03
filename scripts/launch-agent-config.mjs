@@ -20,6 +20,7 @@ export function buildPersonalOsServices({
         PORT: "8787",
         PERSONAL_OS_V2_DATABASE_PATH: v2DatabasePath,
         PERSONAL_OS_V2_SCHEDULER_ENABLED: "true",
+        PERSONAL_OS_SKILLS_ROOT: join(projectRoot, ".agents", "skills"),
         PERSONAL_OS_ALLOWED_ROOTS: allowedRoots.join(delimiter),
         PERSONAL_OS_TIMEZONE: timezone,
         OBSIDIAN_VAULT_PATH: obsidianVaultPath

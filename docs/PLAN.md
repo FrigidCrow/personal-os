@@ -1,8 +1,12 @@
 # Personal OS MVP1 Execution Plan
 
-Status: Approved for implementation  
+Status: Phase 10 passed
 Date: 2026-07-28  
 Method: Plan -> Work -> Review
+
+## Current stage: Phase 10 workflow operations complete
+
+Phase 10 turned the governed Agent Gateway into an operable daily workflow system: a human-controlled Skill workbench, immutable workflow revisions, preflight checks, explicit Schedule rebinding, bounded scheduled-run retry, and one health view for workflows. The design and risk boundary are in [`PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-SPEC.md`](PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-SPEC.md); the completed evidence is in [`PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-ACCEPTANCE.md`](PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-ACCEPTANCE.md).
 
 ## 1. Outcome
 
