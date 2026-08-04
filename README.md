@@ -17,6 +17,7 @@ Personal OS 是 Codex 和 OpenWorker 上面的一层本地控制台。你可以�
 - 用 Codex、OpenWorker、本地命令或内置 Runtime 创建工作流；
 - 运行前检查 Runtime、项目、Skill、定时和重试设置；
 - 为工作流设置 Cron 定时；
+- 在雷达首页查看准点触发、睡眠后补跑、按策略跳过和启动失败，以及当前步骤、最后成功、下一次触发、Obsidian 路径、耗时与真实成本；
 - 创建工作流新版，并把定时规则明确换绑到新版；
 - 让复杂雷达先预执行两次并通过失败演练，再由你审查并发布为专属 Skill；
 - 由 Core 在 Agent 运行前后启动和清理专用本地资源，例如汽水音乐 Android 模拟器；
@@ -79,4 +80,4 @@ Agent 不能通过这套 MCP 直接付款、联系客户、发布内容、删除
 
 当前汽水音乐雷达已绑定 `qishui-daily-sync@1.0.1`，每天 `09:00`（`Asia/Tokyo`）由 Core 启动专用模拟器，Codex 视觉采集热歌榜和新歌榜各 Top10，生成差分、曲库、Obsidian 日报与中文原创实验，再自动关闭模拟器。音频仍按真实能力单独验收；应用私有或受保护文件不会被伪装为可分析音频。
 
-当前恢复、自动沉淀和晋级门禁见 [阶段 11](docs/PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-SPEC.md)、[阶段 11.1](docs/PERSONAL-OS-PHASE11-1-AUTOMATIC-DEPOSITION-SPEC.md) 与 [阶段 12](docs/PERSONAL-OS-PHASE12-REHEARSAL-TO-SKILL-SPEC.md)。
+当前恢复、自动沉淀、晋级门禁和生产运营见 [阶段 11](docs/PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-SPEC.md)、[阶段 11.1](docs/PERSONAL-OS-PHASE11-1-AUTOMATIC-DEPOSITION-SPEC.md)、[阶段 12](docs/PERSONAL-OS-PHASE12-REHEARSAL-TO-SKILL-SPEC.md) 与 [阶段 13](docs/PERSONAL-OS-PHASE13-PRODUCTION-OPERATIONS-SPEC.md)。

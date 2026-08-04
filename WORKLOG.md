@@ -1038,3 +1038,20 @@ Phase E verification so far:
 - Qishui: 17/17 unit tests, Skill quick validation and patch hygiene passed.
 - Live rehearsal roots `a318a63b-e3a4-4983-ab01-0c2a600aebcf` and `335073ff-0578-4b33-8291-da533170d97b` passed; failure drill `91fb86a8-4fb8-4d6f-8b1b-8f7ee4b0d354` passed.
 - Production health is green with three enabled schedules; plain LaunchAgent reinstall preserves the Qishui script, Python path and three narrow allowed roots.
+## 2026-08-04 - Personal OS Phase 13 production automation operations
+
+### Plan
+
+- Froze a Scheduler-owned occurrence ledger with four outcomes: on-time fire, bounded catch-up, policy skip and Run start failure.
+- Kept the five-zone information architecture and chose the Radar landing page as the operational surface instead of restoring a task queue or adding a sixth navigation area.
+- Defined direct tests for migration backfill, restart windows, de-duplication, failure classification, current checkpoints, deposition visibility, duration, trusted cost, Today alerts and responsive themes.
+- Limited recovery to the existing WorkSpec timeout and maximum-attempt policy; no external notification, automatic schedule mutation or high-risk Agent authority was added.
+
+### Work
+
+- Added migration 14 and upgraded `schedule_firings` into a queryable occurrence ledger with outcome, lateness, Run linkage and redacted failure details.
+- Updated Scheduler Tick to persist skips, catch-ups and start failures, advance stale schedules exactly once and repair an occurrence left incomplete by a process crash.
+- Extended restart recovery so a Scheduler-created Run left queued before execution becomes an explicit failed attempt and enters the existing finite retry chain.
+- Expanded workflow operations with active Run, current checkpoint, latest success, terminal duration, actual cost, deposition, occurrence history, failure category and operator guidance.
+- Rebuilt the Radar operations band into a dense production view and added unresolved schedule failures to Today while preserving the original workflow and schedule editors.
+- Added Phase 13 unit, migration and browser journeys, including desktop dark and 390px light visual evidence.

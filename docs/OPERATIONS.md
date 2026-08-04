@@ -72,7 +72,7 @@ npm run lint
 npm run build
 ```
 
-当前数据库 Schema 为 13。正式更新时由 API 启动过程按顺序执行迁移；migration 12 增加自动日报沉淀，migration 13 增加预执行评估与候选 Skill 状态。
+当前数据库 Schema 为 14。正式更新时由 API 启动过程按顺序执行迁移；migration 12 增加自动日报沉淀，migration 13 增加预执行评估与候选 Skill 状态，migration 14 把 Schedule firing 升级为可追踪的调度发生账本。
 
 执行器级验证：
 
@@ -102,5 +102,14 @@ npm run backup
 3. 用 `launchctl print gui/$(id -u)/com.frigidcrow.personal-os.api` 检查 API。
 4. 用 `launchctl print gui/$(id -u)/com.frigidcrow.personal-os.web` 检查 Web。
 5. 若运行时不完整，重新执行构建、部署和 LaunchAgent 安装。
+
+定时异常先打开 Web 的“雷达”，查看“生产自动化运营”：
+
+- `按时触发`：调度器在允许窗口内创建了 Run；
+- `恢复后补跑`：服务恢复后按 `catchUp` 策略补跑一次；
+- `已按策略跳过`：计划时间已错过，规则不允许补跑；
+- `启动 Run 失败`：调度器领取了计划时间，但 WorkSpec 状态或 Core 前置条件阻止创建 Run。
+
+手动“立即运行”不会写成定时发生，也不会改变下一次计划时间。不要直接修改 `schedule_firings`；它是 Scheduler 的审计事实。
 
 不要恢复旧 v1 MCP、旧数据库或旧 OpenWorker 拉取任务。Codex/OpenWorker 现在通过原生 v2 MCP、每 Run 短期 Capability 和受版本管理的 Skills 接入当前 Core API。

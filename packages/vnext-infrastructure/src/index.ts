@@ -37,6 +37,7 @@ import type {
   RunEvaluation,
   RunEvent,
   Schedule,
+  ScheduleOccurrence,
   WorkSpec,
   SkillCandidate,
   SkillSnapshot
@@ -235,9 +236,24 @@ export class SqliteVNextStore implements VNextStore {
     if (result.changes !== 1) throw new Error("SCHEDULE_NOT_FOUND");
     return schedule;
   }
-  claimScheduleFiring(scheduleId: string, scheduledFor: string, key: string, createdAt: string): boolean {
-    const result = this.connection.prepare("INSERT OR IGNORE INTO schedule_firings(idempotency_key,schedule_id,scheduled_for,created_at) VALUES (?,?,?,?)").run(key, scheduleId, scheduledFor, createdAt);
+  listScheduleFirings(limit = 1_000): ScheduleOccurrence[] {
+    return (this.connection.prepare("SELECT * FROM schedule_firings ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(scheduleOccurrenceFromRow);
+  }
+  getScheduleFiring(idempotencyKey: string): ScheduleOccurrence | null {
+    return mapOne(this.connection.prepare("SELECT * FROM schedule_firings WHERE idempotency_key=?").get(idempotencyKey), scheduleOccurrenceFromRow);
+  }
+  claimScheduleFiring(occurrence: ScheduleOccurrence): boolean {
+    const result = this.connection.prepare(`INSERT OR IGNORE INTO schedule_firings(
+      idempotency_key,schedule_id,work_spec_id,scheduled_for,created_at,outcome,lateness_ms,run_id,error_code,error_message
+    ) VALUES (@idempotencyKey,@scheduleId,@workSpecId,@scheduledFor,@observedAt,@outcome,@latenessMs,@runId,@errorCode,@errorMessage)`).run(occurrence);
     return result.changes === 1;
+  }
+  updateScheduleFiring(occurrence: ScheduleOccurrence): ScheduleOccurrence {
+    const result = this.connection.prepare(`UPDATE schedule_firings SET
+      outcome=@outcome,lateness_ms=@latenessMs,run_id=@runId,error_code=@errorCode,error_message=@errorMessage
+      WHERE idempotency_key=@idempotencyKey`).run(occurrence);
+    if (result.changes !== 1) throw new Error("SCHEDULE_OCCURRENCE_NOT_FOUND");
+    return occurrence;
   }
 
   insertAudit(input: AuditInput, createdAt: string): AuditLog {
@@ -549,6 +565,7 @@ function depositionFromRow(row: Row): RunDeposition { return { id:string(row,"id
 function runEvaluationFromRow(row: Row): RunEvaluation { return { id:string(row,"id"),runId:string(row,"run_id"),workSpecId:string(row,"work_spec_id"),runMode:string(row,"run_mode") as RunEvaluation["runMode"],rehearsalRootRunId:string(row,"rehearsal_root_run_id"),evaluatorVersion:string(row,"evaluator_version"),passed:Boolean(number(row,"passed")),checks:(json(row,"checks_json") ?? []) as RunEvaluation["checks"],note:string(row,"note"),createdAt:string(row,"created_at") }; }
 function skillCandidateFromRow(row: Row): SkillCandidate { return { id:string(row,"id"),workSpecId:string(row,"work_spec_id"),draft:json(row,"draft_json") as SkillCandidate["draft"],content:string(row,"content"),contentHash:string(row,"content_hash"),evidenceRunIds:(json(row,"evidence_run_ids_json") ?? []) as string[],status:string(row,"status") as SkillCandidate["status"],publishedSkill:json(row,"published_skill_json") as SkillSnapshot | null,publishedWorkSpecId:nullableString(row,"published_work_spec_id"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at"),publishedAt:nullableString(row,"published_at") }; }
 function scheduleFromRow(row: Row): Schedule { return { id:string(row,"id"),workSpecId:string(row,"work_spec_id"),name:string(row,"name"),cronExpression:string(row,"cron_expression"),timezone:string(row,"timezone"),enabled:Boolean(number(row,"enabled")),catchUp:Boolean(number(row,"catch_up")),nextRunAt:string(row,"next_run_at"),lastRunAt:nullableString(row,"last_run_at"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
+function scheduleOccurrenceFromRow(row: Row): ScheduleOccurrence { return { idempotencyKey:string(row,"idempotency_key"),scheduleId:string(row,"schedule_id"),workSpecId:string(row,"work_spec_id"),scheduledFor:string(row,"scheduled_for"),observedAt:string(row,"created_at"),outcome:string(row,"outcome") as ScheduleOccurrence["outcome"],latenessMs:number(row,"lateness_ms"),runId:nullableString(row,"run_id"),errorCode:nullableString(row,"error_code"),errorMessage:nullableString(row,"error_message") }; }
 function auditFromRow(row: Row): AuditLog { return { id:string(row,"id"),actorType:string(row,"actor_type") as AuditLog["actorType"],actorId:string(row,"actor_id"),action:string(row,"action"),resourceType:string(row,"resource_type"),resourceId:string(row,"resource_id"),beforeSnapshot:json(row,"before_snapshot_json"),afterSnapshot:json(row,"after_snapshot_json"),requestId:nullableString(row,"request_id"),runId:nullableString(row,"run_id"),createdAt:string(row,"created_at") }; }
 function approvalFromRow(row: Row): Approval { return { id:string(row,"id"),runId:string(row,"run_id"),requestType:string(row,"request_type") as Approval["requestType"],riskLevel:string(row,"risk_level") as Approval["riskLevel"],summary:string(row,"summary"),payload:json(row,"payload_json"),status:string(row,"status") as Approval["status"],expiresAt:nullableString(row,"expires_at"),requestedAt:string(row,"requested_at"),resolvedAt:nullableString(row,"resolved_at"),resolutionComment:nullableString(row,"resolution_comment") }; }
 function artifactFromRow(row: Row): Artifact { return { id:string(row,"id"),runId:nullableString(row,"run_id"),workSpecId:nullableString(row,"work_spec_id"),projectId:nullableString(row,"project_id"),storageKind:string(row,"storage_kind") as Artifact["storageKind"],name:string(row,"name"),uri:string(row,"uri"),mimeType:nullableString(row,"mime_type"),sizeBytes:row.size_bytes === null || row.size_bytes === undefined ? null : number(row,"size_bytes"),checksum:nullableString(row,"checksum"),createdAt:string(row,"created_at") }; }
