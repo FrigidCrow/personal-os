@@ -7,6 +7,7 @@ import { z } from "zod";
 export const PERSONAL_OS_MCP_TOOLS = [
   "get_run_context",
   "append_run_event",
+  "save_checkpoint",
   "search_knowledge",
   "save_artifact",
   "request_approval",
@@ -71,6 +72,20 @@ export function createPersonalOsMcpServer(options: PersonalOsMcpOptions = {}): M
     }),
     annotations: { readOnlyHint: false, destructiveHint: false }
   }, ({ capabilityToken, ...body }) => guarded(() => call("/events", "POST", capabilityToken, body)));
+
+  server.registerTool("save_checkpoint", {
+    title: "Save a recoverable workflow checkpoint",
+    description: "Save truthful progress for one stable workflow step. Mark completed only when its output can be reused after a retry.",
+    inputSchema: z.object({
+      capabilityToken: capability,
+      stepKey: z.string().trim().min(1).max(80).regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/),
+      label: z.string().trim().min(1).max(160),
+      status: z.enum(["running", "completed", "failed"]),
+      summary: z.string().trim().min(1).max(4_000),
+      data: z.unknown().default({})
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false }
+  }, ({ capabilityToken, ...input }) => guarded(() => call("/checkpoints", "POST", capabilityToken, input)));
 
   server.registerTool("search_knowledge", {
     title: "Search Personal OS knowledge",

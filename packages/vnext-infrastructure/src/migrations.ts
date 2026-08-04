@@ -469,6 +469,48 @@ export const migrations: Migration[] = [
         CREATE INDEX work_specs_revision_idx ON work_specs(revision_of_work_spec_id, revision_number);
       `);
     }
+  },
+  {
+    version: 11,
+    name: "recoverable_workflows",
+    up(database) {
+      database.exec(`
+        ALTER TABLE work_specs ADD COLUMN result_deposition_json TEXT;
+
+        CREATE TABLE run_checkpoints (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+          step_key TEXT NOT NULL,
+          label TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('running','completed','failed','reused')),
+          summary TEXT NOT NULL,
+          data_json TEXT NOT NULL,
+          source_checkpoint_id TEXT REFERENCES run_checkpoints(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(run_id, step_key)
+        );
+        CREATE INDEX run_checkpoints_run_idx ON run_checkpoints(run_id, created_at);
+
+        CREATE TABLE run_depositions (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL UNIQUE REFERENCES runs(id) ON DELETE CASCADE,
+          vault_id TEXT NOT NULL REFERENCES knowledge_vaults(id),
+          directory TEXT NOT NULL CHECK(directory IN ('Generated','Reports')),
+          title TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pending','succeeded','failed')),
+          document_id TEXT REFERENCES knowledge_documents(id) ON DELETE SET NULL,
+          artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+          relative_path TEXT,
+          error_code TEXT,
+          error_message TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX run_depositions_status_idx ON run_depositions(status, updated_at DESC);
+      `);
+    }
   }
 ];
 

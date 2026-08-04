@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SqliteVNextStore } from "@personal-os/vnext-infrastructure";
 import { FakeExecutor, InternalExecutor } from "@personal-os/vnext-runtime";
-import { PersonalOsService, RepositorySkillRegistry, RuntimeCapabilityAuthority, ScheduleService, type Clock, type ExecutionContext, type ExecutionResult, type ExecutorAdapter } from "./index.js";
+import { KnowledgeService, PersonalOsService, RepositorySkillRegistry, ResultDepositionService, RuntimeCapabilityAuthority, ScheduleService, type Clock, type ExecutionContext, type ExecutionResult, type ExecutorAdapter } from "./index.js";
 
 class MutableClock implements Clock {
   constructor(public value: Date) {}
@@ -346,6 +346,81 @@ describe("PersonalOsService execution lifecycle", () => {
     for (const secret of ["instruction-secret", "spec-secret", "run-secret", "event-secret", "event-structured-secret", "approval-secret", "approval-authorization-secret", "result-secret"]) expect(evidence).not.toContain(secret);
     expect(evidence).toContain("[REDACTED]");
     store.close();
+  });
+
+  it("persists immutable checkpoints and makes resume versus restart explicit", () => {
+    const clock = new MutableClock(new Date("2026-08-03T00:00:00.000Z"));
+    const store = new SqliteVNextStore();
+    const authority = new RuntimeCapabilityAuthority(clock);
+    const service = new PersonalOsService(store, [new InternalExecutor()], clock, authority);
+    const spec = internalWorkSpec(service, { operation: "echo", message: "checkpoint" }, 3);
+    const first = service.createRun(spec.id);
+    store.updateRun({ ...first, status: "running", startedAt: clock.now().toISOString() });
+    const issued = authority.issue(first.id, "internal", ["checkpoint:write"], 60);
+    const grant = authority.authorize(issued.token, "checkpoint:write");
+
+    service.saveRuntimeCheckpoint(grant, { stepKey: "collect", label: "采集", status: "running", summary: "正在采集", data: { apiKey: "checkpoint-secret" } });
+    const completed = service.saveRuntimeCheckpoint(grant, { stepKey: "collect", label: "采集", status: "completed", summary: "已保存榜单", data: { apiKey: "checkpoint-secret", rows: 20 } });
+    expect(completed).toMatchObject({ stepKey: "collect", status: "completed", data: { apiKey: "[REDACTED]", rows: 20 } });
+    expect(service.saveRuntimeCheckpoint(grant, { stepKey: "collect", label: "采集", status: "completed", summary: "已保存榜单", data: { apiKey: "checkpoint-secret", rows: 20 } }).id).toBe(completed.id);
+    expect(() => service.saveRuntimeCheckpoint(grant, { stepKey: "collect", label: "采集", status: "completed", summary: "篡改完成结果", data: {} })).toThrow("RUN_CHECKPOINT_IMMUTABLE");
+
+    store.updateRun({ ...store.getRun(first.id)!, status: "failed", finishedAt: clock.now().toISOString(), errorCode: "EXECUTION_FAILED", errorMessage: "temporary" });
+    const resumed = service.retryRun(first.id, "phase11-resume", "resume");
+    expect(store.listRunCheckpoints(resumed.id)).toEqual([expect.objectContaining({ stepKey: "collect", status: "reused", sourceCheckpointId: completed.id })]);
+    store.updateRun({ ...resumed, status: "failed", finishedAt: clock.now().toISOString(), errorCode: "EXECUTION_FAILED", errorMessage: "temporary" });
+    const restarted = service.retryRun(resumed.id, "phase11-restart", "restart");
+    expect(store.listRunCheckpoints(restarted.id)).toHaveLength(0);
+    expect(store.listRunEvents(resumed.id)).toEqual(expect.arrayContaining([expect.objectContaining({ eventType: "run.recovery_mode", structuredData: expect.objectContaining({ mode: "resume" }) })]));
+    expect(JSON.stringify({ checkpoints: store.listRunCheckpoints(first.id), audit: store.listAudit(100) })).not.toContain("checkpoint-secret");
+    store.close();
+  });
+
+  it("deposits only accepted results into a controlled Obsidian directory and keeps failures retryable", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-phase11-deposition-"));
+    const outside = mkdtempSync(join(tmpdir(), "personal-os-phase11-outside-"));
+    const vaultRoot = join(root, "vault");
+    mkdirSync(vaultRoot, { recursive: true });
+    const store = new SqliteVNextStore();
+    const knowledge = new KnowledgeService(store);
+    const vault = knowledge.addVault({ name: "业务知识库", rootPath: vaultRoot });
+    const execution = new PersonalOsService(store, [new InternalExecutor()]);
+    const deposition = new ResultDepositionService(store, knowledge);
+    const spec = execution.createWorkSpec({
+      title: "每日经营报告",
+      instructions: "生成经营报告",
+      executorType: "internal",
+      input: { operation: "echo", message: "今日完成", delayMs: 0 },
+      resultDeposition: { vaultId: vault.id, directory: "Reports", titleTemplate: "{date}-{title}" }
+    });
+    expect(await execution.preflightWorkSpec(spec.id)).toMatchObject({ ready: true, checks: expect.arrayContaining([expect.objectContaining({ code: "deposition", status: "pass" })]) });
+    rmSync(vaultRoot, { recursive: true, force: true });
+    symlinkSync(outside, vaultRoot);
+    expect(await execution.preflightWorkSpec(spec.id)).toMatchObject({ ready: false, checks: expect.arrayContaining([expect.objectContaining({ code: "deposition", status: "fail" })]) });
+    rmSync(vaultRoot, { force: true });
+    mkdirSync(vaultRoot, { recursive: true });
+    const run = execution.createRun(spec.id);
+    await execution.startRun(run.id);
+    expect(() => deposition.depositAcceptedRun(run.id)).toThrow("RUN_DEPOSITION_REQUIRES_ACCEPTED_RUN");
+    execution.acceptRun(run.id, { comment: "验收通过" });
+    const saved = deposition.depositAcceptedRun(run.id)!;
+    expect(saved).toMatchObject({ runId: run.id, status: "succeeded", directory: "Reports", attempts: 1, relativePath: expect.stringMatching(/^Reports\//) });
+    expect(readFileSync(join(vaultRoot, saved.relativePath!), "utf8")).toContain("今日完成");
+    expect(store.listArtifactsForRun(run.id)).toEqual(expect.arrayContaining([expect.objectContaining({ storageKind: "obsidian", uri: expect.stringContaining(saved.relativePath!) })]));
+    expect(deposition.depositAcceptedRun(run.id)?.id).toBe(saved.id);
+
+    const failedRun = execution.createRun(spec.id);
+    await execution.startRun(failedRun.id);
+    execution.acceptRun(failedRun.id, { comment: "验收通过，但模拟磁盘故障" });
+    rmSync(vaultRoot, { recursive: true, force: true });
+    writeFileSync(vaultRoot, "not-a-directory");
+    const failed = deposition.depositAcceptedRun(failedRun.id)!;
+    expect(failed).toMatchObject({ status: "failed", attempts: 1, errorCode: expect.any(String), errorMessage: expect.any(String) });
+    expect(deposition.list("failed")).toEqual([expect.objectContaining({ runId: failedRun.id })]);
+    expect(store.getRun(failedRun.id)).toMatchObject({ reviewStatus: "accepted" });
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   });
 });
 

@@ -79,6 +79,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .button.primary:hover { background: var(--accent-strong); }
 .button.secondary { color: var(--text); background: var(--surface); border-color: var(--border); }
 .button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.button.ghost { color: var(--muted); background: transparent; border-color: transparent; }
+.button.ghost:hover { color: var(--text); background: var(--surface-2); }
 .button.danger { color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, var(--surface)); border-color: color-mix(in srgb, var(--bad) 30%, var(--border)); }
 .button.small { min-height: 32px; padding: 0 11px; font-size: 12px; }
 .button:disabled { opacity: .48; cursor: not-allowed; }
@@ -218,6 +220,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .run-detail header p { margin: 0; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
 .runtime-label { color: var(--accent); display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 650; }
 .inline-error { margin: 18px 24px 0; padding: 13px; border-radius: 10px; color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); display: grid; gap: 4px; font-size: 12px; }
+.checkpoint-panel { margin: 18px 24px 0; padding: 15px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); display: grid; gap: 12px; }
+.checkpoint-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.checkpoint-heading > span { display: flex; align-items: center; gap: 8px; }
+.checkpoint-heading svg { color: var(--accent); width: 18px; height: 18px; }
+.checkpoint-heading strong { font-size: 13px; }
+.checkpoint-heading small, .checkpoint-item small { color: var(--muted); font-size: 10px; }
+.checkpoint-panel > .quiet { margin: 0; }
+.checkpoint-list { display: grid; gap: 8px; }
+.checkpoint-item { min-width: 0; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: start; gap: 10px; }
+.checkpoint-marker { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: var(--muted); }
+.checkpoint-completed .checkpoint-marker { background: var(--good); }
+.checkpoint-running .checkpoint-marker { background: var(--accent); }
+.checkpoint-failed .checkpoint-marker { background: var(--bad); }
+.checkpoint-reused .checkpoint-marker { background: var(--muted); box-shadow: inset 0 0 0 2px var(--surface); outline: 1px solid var(--muted); }
+.checkpoint-item > div { min-width: 0; display: grid; gap: 4px; }
+.checkpoint-item strong { font-size: 12px; }
+.checkpoint-item p { margin: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .terminal { min-height: 330px; max-height: 460px; overflow: auto; margin: 24px; padding: 17px; border-radius: 12px; background: #222526; color: #deded8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .terminal-line { display: grid; grid-template-columns: 70px 80px minmax(0, 1fr); gap: 10px; padding: 6px 0; line-height: 1.45; }
 .terminal-line time, .terminal-line > span { color: #8e9592; }
@@ -243,6 +262,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .governance-facts strong { font-size: 13px; }
 .governance-facts small { display: flex; align-items: center; gap: 4px; overflow-wrap: anywhere; }
 .governance-facts pre { max-height: 80px; overflow: auto; margin: 0; font-size: 9px; white-space: pre-wrap; }
+.deposition-state { padding: 13px 14px; border: 1px solid var(--border); border-radius: 12px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 11px; }
+.deposition-state > svg { width: 21px; height: 21px; color: var(--accent); }
+.deposition-state > div { min-width: 0; display: grid; gap: 4px; }
+.deposition-state span, .deposition-state small { color: var(--muted); font-size: 10px; }
+.deposition-state strong, .deposition-state small { overflow-wrap: anywhere; }
+.deposition-failed { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); background: color-mix(in srgb, var(--bad) 6%, var(--surface)); }
 .governance-actions { padding: 14px; border-radius: 12px; background: var(--surface-2); display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 14px; align-items: end; }
 .cost-form { padding: 13px 14px; border: 1px dashed var(--border); border-radius: 12px; display: grid; grid-template-columns: auto minmax(150px, 1fr) 100px auto; gap: 12px; align-items: end; }
 .cost-form > svg { color: var(--accent); align-self: center; width: 22px; height: 22px; }
@@ -569,12 +594,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .terminal-line { grid-template-columns: 62px 1fr; }
   .terminal-line p { grid-column: 1 / -1; padding-left: 0; }
   .run-detail > header { flex-direction: column; }
+  .checkpoint-panel { margin-inline: 14px; }
   .governance-panel { margin-inline: 14px; }
   .governance-facts { grid-template-columns: 1fr; }
   .governance-facts > div { border-right: 0; border-bottom: 1px solid var(--border); }
   .governance-facts > div:nth-child(2) { border-right: 0; }
   .governance-facts > div:last-child { border-bottom: 0; }
   .governance-actions, .cost-form { grid-template-columns: 1fr; }
+  .deposition-state { grid-template-columns: auto minmax(0, 1fr); }
+  .deposition-state > .status, .deposition-state > .button { grid-column: 2; justify-self: start; }
   .approval-inbox > div:last-child a { align-items: flex-start; flex-direction: column; }
   .knowledge-actions { align-items: stretch; flex-direction: column; }
   .knowledge-actions .button { width: 100%; }

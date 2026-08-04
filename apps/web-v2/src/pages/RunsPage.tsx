@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowClockwiseIcon, CheckCircleIcon, CoinsIcon, FileIcon, PaperPlaneTiltIcon, PlusIcon, StopIcon, TerminalWindowIcon, WarningCircleIcon } from "@phosphor-icons/react";
-import type { Approval, Artifact, Project, Run, RunEvent, WorkSpec } from "@personal-os/vnext-contracts";
+import { ArrowClockwiseIcon, BookOpenTextIcon, CheckCircleIcon, CoinsIcon, FileIcon, ListChecksIcon, PaperPlaneTiltIcon, PlusIcon, StopIcon, TerminalWindowIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import type { Approval, Artifact, Project, Run, RunCheckpoint, RunDeposition, RunEvent, WorkSpec } from "@personal-os/vnext-contracts";
 import { useLocation } from "wouter";
 import { api, post } from "../api";
 import { EmptyBlock, ErrorBlock, Field, LoadingBlock, PageHeader, Status, errorMessage, formatDate } from "../components";
@@ -11,7 +11,7 @@ const streamEvents = [
   "executor.started", "executor.output", "executor.stdout", "executor.stderr", "executor.error",
   "runtime.session", "runtime.output", "runtime.usage", "runtime.command", "runtime.file_change", "runtime.warning",
   "runtime.tool_proposed", "runtime.tool_started", "runtime.tool_finished", "runtime.waiting_input", "runtime.waiting_approval",
-  "approval.requested", "artifact.created", "run.cost_recorded", "run.review_accepted", "run.review_rejected"
+  "approval.requested", "artifact.created", "checkpoint.running", "checkpoint.completed", "checkpoint.failed", "checkpoint.reused", "deposition.succeeded", "deposition.failed", "run.cost_recorded", "run.review_accepted", "run.review_rejected"
 ];
 
 export function RunsPage({ selectedId }: { selectedId?: string } = {}) {
@@ -28,6 +28,8 @@ export function RunsPage({ selectedId }: { selectedId?: string } = {}) {
   const events = useQuery({ queryKey: ["run-events", currentId], queryFn: () => api<RunEvent[]>(`/runs/${currentId}/events`), enabled: Boolean(currentId) });
   const approvals = useQuery({ queryKey: ["approvals"], queryFn: () => api<Approval[]>("/approvals"), refetchInterval: 4_000 });
   const artifacts = useQuery({ queryKey: ["run-artifacts", currentId], queryFn: () => api<Artifact[]>(`/runs/${currentId}/artifacts`), enabled: Boolean(currentId) });
+  const checkpoints = useQuery({ queryKey: ["run-checkpoints", currentId], queryFn: () => api<RunCheckpoint[]>(`/runs/${currentId}/checkpoints`), enabled: Boolean(currentId) });
+  const deposition = useQuery({ queryKey: ["run-deposition", currentId], queryFn: () => api<RunDeposition | null>(`/runs/${currentId}/deposition`), enabled: Boolean(currentId) });
   useRunStream(currentId, client);
   useEffect(() => { if (selectedId) setSelected(selectedId); }, [selectedId]);
   const createSpec = useMutation({ mutationFn: async (input: unknown) => {
@@ -42,14 +44,17 @@ export function RunsPage({ selectedId }: { selectedId?: string } = {}) {
     setComposer(false);
     void Promise.all([client.invalidateQueries({ queryKey: ["runs"] }), client.invalidateQueries({ queryKey: ["work-specs"] })]);
   } });
-  const action = useMutation({ mutationFn: ({ id, verb }: { id: string; verb: string }) => post<Run>(`/runs/${id}/${verb}`), onSuccess: (run) => { setSelected(run.id); navigate(`/runs/${run.id}`); void client.invalidateQueries({ queryKey: ["runs"] }); } });
+  const action = useMutation({ mutationFn: ({ id, verb, body }: { id: string; verb: string; body?: unknown }) => post<Run>(`/runs/${id}/${verb}`, body), onSuccess: (run) => { setSelected(run.id); navigate(`/runs/${run.id}`); void Promise.all([client.invalidateQueries({ queryKey: ["runs"] }), client.invalidateQueries({ queryKey: ["run-checkpoints", run.id] }), client.invalidateQueries({ queryKey: ["run-deposition", run.id] })]); } });
   const governance = useMutation({ mutationFn: ({ path, body }: { path: string; body?: unknown }) => post<unknown>(path, body), onSuccess: async (result) => {
     if (isRun(result)) client.setQueryData<Run[]>(["runs"], (current = []) => current.map((run) => run.id === result.id ? result : run));
     await Promise.all([
       client.invalidateQueries({ queryKey: ["runs"] }),
       client.invalidateQueries({ queryKey: ["approvals"] }),
       client.invalidateQueries({ queryKey: ["run-events", currentId] }),
-      client.invalidateQueries({ queryKey: ["run-artifacts", currentId] })
+      client.invalidateQueries({ queryKey: ["run-artifacts", currentId] }),
+      client.invalidateQueries({ queryKey: ["run-checkpoints", currentId] }),
+      client.invalidateQueries({ queryKey: ["run-deposition", currentId] }),
+      client.invalidateQueries({ queryKey: ["depositions"] })
     ]);
   } });
   if (runs.isLoading || specs.isLoading || projects.isLoading) return <LoadingBlock />;
@@ -59,9 +64,10 @@ export function RunsPage({ selectedId }: { selectedId?: string } = {}) {
     {composer && <RunComposer projects={projects.data ?? []} pending={createSpec.isPending} error={createSpec.error} onSubmit={(input) => createSpec.mutate(input)} />}
     {(runs.data ?? []).length === 0 ? <EmptyBlock title="还没有运行" description="发起一项工作后，日志、状态、错误和重试都会留在这里。" /> : <div className="run-workbench">
       <aside className="run-index">{runs.data?.map((run) => <button className={run.id === currentId ? "selected" : ""} key={run.id} onClick={() => { setSelected(run.id); navigate(`/runs/${run.id}`); }}><div><strong>{specs.data?.find((item) => item.id === run.workSpecId)?.title ?? run.id.slice(0, 8)}</strong><small>{formatDate(run.createdAt)}，尝试 {run.attempt}</small></div><Status value={run.status} /></button>)}</aside>
-      <section className="run-detail">{current && <><header><div><span className="runtime-label"><TerminalWindowIcon /> {current.executorType}</span><h2>{specs.data?.find((item) => item.id === current.workSpecId)?.title ?? "运行详情"}</h2><p>{current.id}</p></div><div className="row-actions"><Status value={current.status} />{["queued", "running", "waiting_input", "waiting_approval"].includes(current.status) && <button className="button danger small" onClick={() => action.mutate({ id: current.id, verb: "cancel" })}><StopIcon /> 取消</button>}{["failed", "cancelled", "partially_succeeded"].includes(current.status) && <button className="button secondary small" onClick={() => action.mutate({ id: current.id, verb: "retry" })}><ArrowClockwiseIcon /> 重试</button>}</div></header>
+      <section className="run-detail">{current && <><header><div><span className="runtime-label"><TerminalWindowIcon /> {current.executorType}</span><h2>{specs.data?.find((item) => item.id === current.workSpecId)?.title ?? "运行详情"}</h2><p>{current.id}</p></div><div className="row-actions"><Status value={current.status} />{["queued", "running", "waiting_input", "waiting_approval"].includes(current.status) && <button className="button danger small" onClick={() => action.mutate({ id: current.id, verb: "cancel" })}><StopIcon /> 取消</button>}{["failed", "cancelled", "partially_succeeded"].includes(current.status) && <><button className="button secondary small" onClick={() => action.mutate({ id: current.id, verb: "retry", body: { mode: "resume" } })}><ArrowClockwiseIcon /> 继续已完成步骤</button><button className="button ghost small" onClick={() => action.mutate({ id: current.id, verb: "retry", body: { mode: "restart" } })}>全部重做</button></>}</div></header>
         {current.errorMessage && <div className="inline-error"><strong>{current.errorCode}</strong><span>{current.errorMessage}</span></div>}
-        <GovernancePanel run={current} approval={approvals.data?.find((item) => item.runId === current.id && item.status === "pending") ?? null} artifacts={artifacts.data ?? []} pending={governance.isPending || createSpec.isPending || action.isPending} error={governance.error} onAction={(path, body) => governance.mutate({ path, body })} />
+        <CheckpointPanel values={checkpoints.data ?? []} loading={checkpoints.isLoading} />
+        <GovernancePanel run={current} approval={approvals.data?.find((item) => item.runId === current.id && item.status === "pending") ?? null} artifacts={artifacts.data ?? []} deposition={deposition.data ?? null} pending={governance.isPending || createSpec.isPending || action.isPending} error={governance.error} onAction={(path, body) => governance.mutate({ path, body })} />
         <div className="terminal" role="log" aria-live="polite">{events.isLoading ? <span className="terminal-muted">正在连接日志...</span> : events.data?.map((event) => <div className={`terminal-line terminal-${event.level}`} key={event.id}><time>{new Date(event.createdAt).toLocaleTimeString("zh-CN", { hour12: false })}</time><span>{event.source}</span><p>{event.message}</p></div>)}</div>
         <div className="run-result"><h3>执行结果</h3>{current.result ? <pre>{JSON.stringify(current.result, null, 2)}</pre> : <p className="quiet">运行结束后，结构化结果会显示在这里。</p>}</div>
       </>}</section>
@@ -69,7 +75,11 @@ export function RunsPage({ selectedId }: { selectedId?: string } = {}) {
   </div>;
 }
 
-function GovernancePanel({ run, approval, artifacts, pending, error, onAction }: { run: Run; approval: Approval | null; artifacts: Artifact[]; pending: boolean; error: unknown; onAction(path: string, body?: unknown): void }) {
+function CheckpointPanel({ values, loading }: { values: RunCheckpoint[]; loading: boolean }) {
+  return <section className="checkpoint-panel" aria-label="执行步骤"><div className="checkpoint-heading"><span><ListChecksIcon /><strong>执行步骤</strong></span><small>{values.filter((item) => item.status === "completed" || item.status === "reused").length}/{values.length} 可复用</small></div>{loading ? <p className="quiet">正在读取步骤...</p> : values.length === 0 ? <p className="quiet">Runtime 保存检查点后，这里会显示可恢复步骤。</p> : <div className="checkpoint-list">{values.map((item) => <div className={`checkpoint-item checkpoint-${item.status}`} key={item.id}><span className="checkpoint-marker" /><div><strong>{item.label}</strong><p>{item.summary}</p><small>{item.stepKey}{item.sourceCheckpointId ? "，来自上一次运行" : ""}</small></div><Status value={item.status} /></div>)}</div>}</section>;
+}
+
+function GovernancePanel({ run, approval, artifacts, deposition, pending, error, onAction }: { run: Run; approval: Approval | null; artifacts: Artifact[]; deposition: RunDeposition | null; pending: boolean; error: unknown; onAction(path: string, body?: unknown): void }) {
   const [answer, setAnswer] = useState("");
   const [comment, setComment] = useState("");
   const [cost, setCost] = useState("");
@@ -86,6 +96,7 @@ function GovernancePanel({ run, approval, artifacts, pending, error, onAction }:
       <div><span>实际成本</span><strong>{run.actualCostMinor === null ? "待录入" : `${run.actualCostCurrency} ${(run.actualCostMinor / 100).toFixed(2)}`}</strong><small>{run.costSource === "provider_bill" ? "供应商账单" : run.costSource === "manual_receipt" ? "人工凭证" : "不根据 Token 猜测金额"}</small></div>
       <div><span>生成物</span><strong>{artifacts.length} 项</strong>{artifacts.slice(0, 3).map((item) => <small key={item.id}><FileIcon /> {item.uri}</small>)}</div>
     </div>
+    {deposition && <div className={`deposition-state deposition-${deposition.status}`}><BookOpenTextIcon /><div><span>Obsidian 沉淀</span><strong>{deposition.status === "succeeded" ? deposition.relativePath : deposition.status === "failed" ? "写入失败" : "正在写入"}</strong><small>{deposition.status === "failed" ? deposition.errorMessage : `已尝试 ${deposition.attempts} 次`}</small></div><Status value={deposition.status} />{deposition.status === "failed" && <button className="button secondary small" disabled={pending} onClick={() => onAction(`/runs/${run.id}/deposition/retry`)}>重新沉淀</button>}</div>}
     {run.reviewStatus === "pending" && <div className="governance-actions"><Field label="验收备注"><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="结果是否达到目标" /></Field><div className="row-actions"><button className="button primary small" disabled={pending} onClick={() => onAction(`/runs/${run.id}/accept`, { comment })}><CheckCircleIcon /> 验收通过</button><button className="button danger small" disabled={pending} onClick={() => onAction(`/runs/${run.id}/reject`, { comment })}><WarningCircleIcon /> 驳回结果</button></div></div>}
     {terminal && run.actualCostMinor === null && <form className="cost-form" onSubmit={(event) => { event.preventDefault(); if (costMinor !== null) onAction(`/runs/${run.id}/cost`, { amountMinor: costMinor, currency, source: "manual_receipt" }); }}><CoinsIcon /><Field label="实际成本" hint="仅录入账单或凭证确认的金额。"><input inputMode="decimal" pattern="\d+(\.\d{1,2})?" value={cost} onChange={(event) => setCost(event.target.value)} placeholder="0.00" required /></Field><Field label="币种"><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option>CNY</option><option>JPY</option><option>USD</option></select></Field><button className="button secondary small" disabled={pending || costMinor === null}>记录成本</button></form>}
     {Boolean(error) && <p className="form-error">{errorMessage(error, "治理操作失败")}</p>}
@@ -154,6 +165,8 @@ function useRunStream(runId: string | null, client: ReturnType<typeof useQueryCl
       const event = JSON.parse((raw as MessageEvent<string>).data) as RunEvent;
       client.setQueryData<RunEvent[]>(["run-events", runId], (current = []) => current.some((item) => item.id === event.id) ? current : [...current, event]);
       if (event.eventType.startsWith("run.")) void client.invalidateQueries({ queryKey: ["runs"] });
+      if (event.eventType.startsWith("checkpoint.")) void client.invalidateQueries({ queryKey: ["run-checkpoints", runId] });
+      if (event.eventType.startsWith("deposition.")) void client.invalidateQueries({ queryKey: ["run-deposition", runId] });
     };
     for (const event of stableEvents) source.addEventListener(event, receive);
     return () => { for (const event of stableEvents) source.removeEventListener(event, receive); source.close(); };

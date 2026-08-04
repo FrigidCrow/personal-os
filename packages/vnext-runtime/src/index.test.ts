@@ -8,7 +8,7 @@ import { CodexExecutor, InternalExecutor, OpenWorkerExecutor, ProcessExecutor, b
 function context(input: unknown): ExecutionContext {
   return {
     run: { id: "r", workSpecId: "w", projectId: null, executorType: "internal", status: "running", input, attempt: 1, idempotencyKey: null, retryOfRunId: null, externalRunId: null, errorCode: null, errorMessage: null, result: null, usage: null, actualCostMinor: null, actualCostCurrency: null, costSource: null, reviewStatus: "not_required", reviewedAt: null, reviewComment: null, createdAt: "", startedAt: "", finishedAt: null },
-    workSpec: { id: "w", projectId: null, kind: "one_off", title: "test", instructions: "test", executorType: "internal", input, timeoutSeconds: 10, maxAttempts: 2, lifecycleStatus: "active", skill: null, revisionOfWorkSpecId: null, revisionNumber: 1, createdAt: "", updatedAt: "" },
+    workSpec: { id: "w", projectId: null, kind: "one_off", title: "test", instructions: "test", executorType: "internal", input, timeoutSeconds: 10, maxAttempts: 2, lifecycleStatus: "active", skill: null, resultDeposition: null, revisionOfWorkSpecId: null, revisionNumber: 1, createdAt: "", updatedAt: "" },
     project: null,
     resume: null,
     signal: new AbortController().signal,
@@ -63,6 +63,18 @@ describe("runtime adapters", () => {
     ctx.run.executorType = "process";
     const result = await adapter.execute(ctx);
     expect(result.result).toEqual({ exitCode: 0 });
+  });
+
+  it("instructs governed agents to recover from stable checkpoints", () => {
+    const ctx = context({ operation: "echo", message: "ok" });
+    ctx.run.executorType = "codex";
+    ctx.workSpec.executorType = "codex";
+    ctx.capability = { runId: ctx.run.id, executorType: "codex", scopes: ["context:read", "checkpoint:write"], issuedAt: "2026-08-03T00:00:00.000Z", expiresAt: "2026-08-03T01:00:00.000Z", token: "x".repeat(40) };
+    const prompt = buildRuntimePrompt(ctx);
+    expect(prompt).toContain("Call get_run_context first");
+    expect(prompt).toContain("Reused checkpoints");
+    expect(prompt).toContain("Call save_checkpoint");
+    expect(prompt).not.toContain("x".repeat(40));
   });
 
   it("rejects executable and working-directory escapes", () => {

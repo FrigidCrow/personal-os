@@ -7,7 +7,7 @@ const runtimeRoot = resolve(process.env.PERSONAL_OS_RUNTIME_ROOT ?? join(homedir
 const mcpServerPath = join(runtimeRoot, "personal-os-mcp.mjs");
 const apiBaseUrl = (process.env.PERSONAL_OS_API_BASE_URL ?? "http://127.0.0.1:8787").replace(/\/$/, "");
 const apply = process.argv.includes("--apply");
-const tools = ["get_run_context", "append_run_event", "search_knowledge", "save_artifact", "request_approval", "get_approval_status", "submit_run_result"];
+const tools = ["get_run_context", "append_run_event", "save_checkpoint", "search_knowledge", "save_artifact", "request_approval", "get_approval_status", "submit_run_result"];
 
 if (!existsSync(mcpServerPath)) throw new Error(`Personal OS MCP build is missing: ${mcpServerPath}`);
 const current = readJson(configPath);

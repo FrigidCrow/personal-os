@@ -8,6 +8,7 @@ mkdirSync(artifacts, { recursive: true });
 mkdirSync(resolve(artifacts, "phase5"), { recursive: true });
 mkdirSync(resolve(artifacts, "phase6"), { recursive: true });
 mkdirSync(resolve(artifacts, "phase10"), { recursive: true });
+mkdirSync(resolve(artifacts, "phase11"), { recursive: true });
 for (const name of ["e2e-current.db", "e2e-current.db-shm", "e2e-current.db-wal"]) rmSync(resolve(artifacts, name), { force: true });
 rmSync(vault, { recursive: true, force: true });
 rmSync(skills, { recursive: true, force: true });

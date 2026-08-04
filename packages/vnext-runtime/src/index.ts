@@ -124,6 +124,7 @@ export interface CodexExecutorOptions {
 const PERSONAL_OS_MCP_TOOL_NAMES = [
   "get_run_context",
   "append_run_event",
+  "save_checkpoint",
   "search_knowledge",
   "save_artifact",
   "request_approval",
@@ -469,8 +470,10 @@ export function buildRuntimePrompt(context: ExecutionContext, additionalInstruct
     "- Stop and request explicit human approval or input when required.",
     "- Finish with the complete result and a concise verification summary.",
     context.capability ? [
-      "Personal OS MCP is available for governed progress, knowledge, artifacts, approvals and structured results.",
-      "Call get_run_context first, append_run_event at meaningful milestones, and submit_run_result before finishing.",
+      "Personal OS MCP is available for governed progress, recoverable checkpoints, knowledge, artifacts, approvals and structured results.",
+      "Call get_run_context first. Reused checkpoints in that context are completed work: verify their referenced output still exists, then do not repeat them.",
+      "Call save_checkpoint when a meaningful step starts, completes or fails. Use a stable stepKey so a later retry can resume safely.",
+      "Call append_run_event for milestones and submit_run_result before finishing.",
       context.run.executorType === "openworker" ? `If a tool asks for capabilityToken, pass this value exactly and never print or save it: ${context.capability.token}` : "The MCP process already holds the capability; omit capabilityToken."
     ].join("\n") : "",
     additionalInstructions ? `Additional instructions:\n${redactFreeText(additionalInstructions)}` : ""

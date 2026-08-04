@@ -1,12 +1,14 @@
 # Personal OS MVP1 Execution Plan
 
-Status: Phase 10 passed
+Status: Phase 11 passed and deployed
 Date: 2026-07-28  
 Method: Plan -> Work -> Review
 
-## Current stage: Phase 10 workflow operations complete
+## Current stage: Phase 11 recoverable workflows — passed
 
-Phase 10 turned the governed Agent Gateway into an operable daily workflow system: a human-controlled Skill workbench, immutable workflow revisions, preflight checks, explicit Schedule rebinding, bounded scheduled-run retry, and one health view for workflows. The design and risk boundary are in [`PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-SPEC.md`](PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-SPEC.md); the completed evidence is in [`PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-ACCEPTANCE.md`](PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-ACCEPTANCE.md).
+Phase 11 adds recoverable step checkpoints and controlled post-acceptance Obsidian deposition. It must preserve immutable Run history, make resume-versus-restart explicit, keep all file writes inside registered Vault directories and surface deposition failures in Today. The frozen scope and gates are in [`PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-SPEC.md`](PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-SPEC.md).
+
+Status: **Passed and deployed on 2026-08-03.** Production Web `5273`, API `8787`, Scheduler and migration 11 are healthy. Direct evidence is recorded in [`PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-ACCEPTANCE.md`](PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-ACCEPTANCE.md).
 
 ## 1. Outcome
 
@@ -644,3 +646,9 @@ Status: **Passed on 2026-08-02.** v2 business facts, Qishui/Obsidian assets and 
 Phase 9 adds a native v2 stdio MCP gateway above the current Core API, short-lived per-Run capabilities, immutable repository Skill snapshots, audited progress/artifact/result callbacks and approval checkpoints shared by Codex and OpenWorker. The design and direct gates are recorded in [PERSONAL-OS-PHASE9-AGENT-GATEWAY-SPEC.md](PERSONAL-OS-PHASE9-AGENT-GATEWAY-SPEC.md) and [PERSONAL-OS-PHASE9-AGENT-GATEWAY-ACCEPTANCE.md](PERSONAL-OS-PHASE9-AGENT-GATEWAY-ACCEPTANCE.md).
 
 Status: **Passed and deployed on 2026-08-03.** Both Runtimes completed real MCP result loops, the two production schedules are pinned to versioned Skills, and no old pull worker or direct database MCP authority was restored.
+
+### 2026-08-03 Phase 11 recoverable workflows and Obsidian deposition
+
+Phase 11 adds immutable per-step checkpoints to the native Agent Gateway, explicit resume-versus-restart retries, and controlled result deposition after human acceptance. SQLite remains the authority for recovery state; Obsidian remains the Markdown authority. Deposition failures do not falsify Run success and are surfaced in Today for manual retry.
+
+Status: **Passed and deployed on 2026-08-03.** Migration 11, the eighth MCP tool, desktop/mobile recovery UI, controlled `Reports`/`Generated` writes and production health gates all passed. Evidence is recorded in [PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-ACCEPTANCE.md](PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-ACCEPTANCE.md).

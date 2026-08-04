@@ -32,6 +32,8 @@ import type {
   OperatingUnit,
   Project,
   Run,
+  RunCheckpoint,
+  RunDeposition,
   RunEvent,
   Schedule,
   WorkSpec,
@@ -80,7 +82,7 @@ export class SqliteVNextStore implements VNextStore {
     return mapOne(this.connection.prepare("SELECT * FROM work_specs WHERE id = ?").get(id), workSpecFromRow);
   }
   insertWorkSpec(workSpec: WorkSpec): WorkSpec {
-    this.connection.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,revision_of_work_spec_id,revision_number,created_at,updated_at) VALUES (@id,@projectId,@kind,@title,@instructions,@executorType,@inputJson,@timeoutSeconds,@maxAttempts,@lifecycleStatus,@skillJson,@revisionOfWorkSpecId,@revisionNumber,@createdAt,@updatedAt)`).run({ ...workSpec, inputJson: stringify(workSpec.input), skillJson: stringifyNullable(workSpec.skill) });
+    this.connection.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,result_deposition_json,revision_of_work_spec_id,revision_number,created_at,updated_at) VALUES (@id,@projectId,@kind,@title,@instructions,@executorType,@inputJson,@timeoutSeconds,@maxAttempts,@lifecycleStatus,@skillJson,@resultDepositionJson,@revisionOfWorkSpecId,@revisionNumber,@createdAt,@updatedAt)`).run({ ...workSpec, inputJson: stringify(workSpec.input), skillJson: stringifyNullable(workSpec.skill), resultDepositionJson: stringifyNullable(workSpec.resultDeposition) });
     return workSpec;
   }
   updateWorkSpec(workSpec: WorkSpec): WorkSpec {
@@ -145,6 +147,39 @@ export class SqliteVNextStore implements VNextStore {
   }
   listRunEvents(runId: string, afterSequence = 0): RunEvent[] {
     return (this.connection.prepare("SELECT * FROM run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence").all(runId, afterSequence) as Row[]).map(runEventFromRow);
+  }
+  listRunCheckpoints(runId: string): RunCheckpoint[] {
+    return (this.connection.prepare("SELECT * FROM run_checkpoints WHERE run_id=? ORDER BY created_at,step_key").all(runId) as Row[]).map(checkpointFromRow);
+  }
+  getRunCheckpoint(runId: string, stepKey: string): RunCheckpoint | null {
+    return mapOne(this.connection.prepare("SELECT * FROM run_checkpoints WHERE run_id=? AND step_key=?").get(runId, stepKey), checkpointFromRow);
+  }
+  insertRunCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
+    this.connection.prepare(`INSERT INTO run_checkpoints(id,run_id,step_key,label,status,summary,data_json,source_checkpoint_id,created_at,updated_at) VALUES (@id,@runId,@stepKey,@label,@status,@summary,@dataJson,@sourceCheckpointId,@createdAt,@updatedAt)`).run({ ...checkpoint, dataJson: stringify(checkpoint.data) });
+    return checkpoint;
+  }
+  updateRunCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
+    const result = this.connection.prepare("UPDATE run_checkpoints SET label=@label,status=@status,summary=@summary,data_json=@dataJson,updated_at=@updatedAt WHERE id=@id").run({ ...checkpoint, dataJson: stringify(checkpoint.data) });
+    if (result.changes !== 1) throw new Error("RUN_CHECKPOINT_NOT_FOUND");
+    return checkpoint;
+  }
+  listRunDepositions(status?: RunDeposition["status"]): RunDeposition[] {
+    const rows = status
+      ? this.connection.prepare("SELECT * FROM run_depositions WHERE status=? ORDER BY updated_at DESC").all(status)
+      : this.connection.prepare("SELECT * FROM run_depositions ORDER BY updated_at DESC").all();
+    return (rows as Row[]).map(depositionFromRow);
+  }
+  getRunDeposition(runId: string): RunDeposition | null {
+    return mapOne(this.connection.prepare("SELECT * FROM run_depositions WHERE run_id=?").get(runId), depositionFromRow);
+  }
+  insertRunDeposition(deposition: RunDeposition): RunDeposition {
+    this.connection.prepare(`INSERT INTO run_depositions(id,run_id,vault_id,directory,title,status,document_id,artifact_id,relative_path,error_code,error_message,attempts,created_at,updated_at) VALUES (@id,@runId,@vaultId,@directory,@title,@status,@documentId,@artifactId,@relativePath,@errorCode,@errorMessage,@attempts,@createdAt,@updatedAt)`).run(deposition);
+    return deposition;
+  }
+  updateRunDeposition(deposition: RunDeposition): RunDeposition {
+    const result = this.connection.prepare(`UPDATE run_depositions SET status=@status,document_id=@documentId,artifact_id=@artifactId,relative_path=@relativePath,error_code=@errorCode,error_message=@errorMessage,attempts=@attempts,updated_at=@updatedAt WHERE id=@id`).run(deposition);
+    if (result.changes !== 1) throw new Error("RUN_DEPOSITION_NOT_FOUND");
+    return deposition;
   }
 
   listSchedules(): Schedule[] {
@@ -468,9 +503,11 @@ function excerpt(value: string): string { const compact = value.replace(/\s+/g, 
 function stripSearchMarkup(value: string): string { return value.replace(/<\/?mark>/g, ""); }
 
 function projectFromRow(row: Row): Project { return { id: string(row,"id"), name: string(row,"name"), description: string(row,"description"), repositoryPath: nullableString(row,"repository_path"), obsidianPath: nullableString(row,"obsidian_path"), status: string(row,"status") as Project["status"], createdAt: string(row,"created_at"), updatedAt: string(row,"updated_at") }; }
-function workSpecFromRow(row: Row): WorkSpec { return { id:string(row,"id"),projectId:nullableString(row,"project_id"),kind:string(row,"kind") as WorkSpec["kind"],title:string(row,"title"),instructions:string(row,"instructions"),executorType:string(row,"executor_type") as WorkSpec["executorType"],input:json(row,"input_json"),timeoutSeconds:number(row,"timeout_seconds"),maxAttempts:number(row,"max_attempts"),lifecycleStatus:string(row,"lifecycle_status") as WorkSpec["lifecycleStatus"],skill:json(row,"skill_json") as SkillSnapshot | null,revisionOfWorkSpecId:nullableString(row,"revision_of_work_spec_id"),revisionNumber:number(row,"revision_number"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
+function workSpecFromRow(row: Row): WorkSpec { return { id:string(row,"id"),projectId:nullableString(row,"project_id"),kind:string(row,"kind") as WorkSpec["kind"],title:string(row,"title"),instructions:string(row,"instructions"),executorType:string(row,"executor_type") as WorkSpec["executorType"],input:json(row,"input_json"),timeoutSeconds:number(row,"timeout_seconds"),maxAttempts:number(row,"max_attempts"),lifecycleStatus:string(row,"lifecycle_status") as WorkSpec["lifecycleStatus"],skill:json(row,"skill_json") as SkillSnapshot | null,resultDeposition:json(row,"result_deposition_json") as WorkSpec["resultDeposition"],revisionOfWorkSpecId:nullableString(row,"revision_of_work_spec_id"),revisionNumber:number(row,"revision_number"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
 function runFromRow(row: Row): Run { return { id:string(row,"id"),workSpecId:string(row,"work_spec_id"),projectId:nullableString(row,"project_id"),executorType:string(row,"executor_type") as Run["executorType"],status:string(row,"status") as Run["status"],input:json(row,"input_json"),attempt:number(row,"attempt"),idempotencyKey:nullableString(row,"idempotency_key"),retryOfRunId:nullableString(row,"retry_of_run_id"),externalRunId:nullableString(row,"external_run_id"),errorCode:nullableString(row,"error_code"),errorMessage:nullableString(row,"error_message"),result:json(row,"result_json"),usage:json(row,"usage_json"),actualCostMinor:row.actual_cost_minor===null||row.actual_cost_minor===undefined?null:number(row,"actual_cost_minor"),actualCostCurrency:nullableString(row,"actual_cost_currency"),costSource:nullableString(row,"cost_source") as Run["costSource"],reviewStatus:string(row,"review_status") as Run["reviewStatus"],reviewedAt:nullableString(row,"reviewed_at"),reviewComment:nullableString(row,"review_comment"),createdAt:string(row,"created_at"),startedAt:nullableString(row,"started_at"),finishedAt:nullableString(row,"finished_at") }; }
 function runEventFromRow(row: Row): RunEvent { return { id:string(row,"id"),runId:string(row,"run_id"),eventType:string(row,"event_type"),level:string(row,"level") as RunEvent["level"],source:string(row,"source"),message:string(row,"message"),structuredData:json(row,"structured_data_json"),sequence:number(row,"sequence"),requestId:nullableString(row,"request_id"),createdAt:string(row,"created_at") }; }
+function checkpointFromRow(row: Row): RunCheckpoint { return { id:string(row,"id"),runId:string(row,"run_id"),stepKey:string(row,"step_key"),label:string(row,"label"),status:string(row,"status") as RunCheckpoint["status"],summary:string(row,"summary"),data:json(row,"data_json"),sourceCheckpointId:nullableString(row,"source_checkpoint_id"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
+function depositionFromRow(row: Row): RunDeposition { return { id:string(row,"id"),runId:string(row,"run_id"),vaultId:string(row,"vault_id"),directory:string(row,"directory") as RunDeposition["directory"],title:string(row,"title"),status:string(row,"status") as RunDeposition["status"],documentId:nullableString(row,"document_id"),artifactId:nullableString(row,"artifact_id"),relativePath:nullableString(row,"relative_path"),errorCode:nullableString(row,"error_code"),errorMessage:nullableString(row,"error_message"),attempts:number(row,"attempts"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
 function scheduleFromRow(row: Row): Schedule { return { id:string(row,"id"),workSpecId:string(row,"work_spec_id"),name:string(row,"name"),cronExpression:string(row,"cron_expression"),timezone:string(row,"timezone"),enabled:Boolean(number(row,"enabled")),catchUp:Boolean(number(row,"catch_up")),nextRunAt:string(row,"next_run_at"),lastRunAt:nullableString(row,"last_run_at"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
 function auditFromRow(row: Row): AuditLog { return { id:string(row,"id"),actorType:string(row,"actor_type") as AuditLog["actorType"],actorId:string(row,"actor_id"),action:string(row,"action"),resourceType:string(row,"resource_type"),resourceId:string(row,"resource_id"),beforeSnapshot:json(row,"before_snapshot_json"),afterSnapshot:json(row,"after_snapshot_json"),requestId:nullableString(row,"request_id"),runId:nullableString(row,"run_id"),createdAt:string(row,"created_at") }; }
 function approvalFromRow(row: Row): Approval { return { id:string(row,"id"),runId:string(row,"run_id"),requestType:string(row,"request_type") as Approval["requestType"],riskLevel:string(row,"risk_level") as Approval["riskLevel"],summary:string(row,"summary"),payload:json(row,"payload_json"),status:string(row,"status") as Approval["status"],expiresAt:nullableString(row,"expires_at"),requestedAt:string(row,"requested_at"),resolvedAt:nullableString(row,"resolved_at"),resolutionComment:nullableString(row,"resolution_comment") }; }

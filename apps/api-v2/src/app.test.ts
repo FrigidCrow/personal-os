@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -252,6 +252,14 @@ describe("vNext API", () => {
     expect(progress.status).toBe(201);
     expect(JSON.stringify(store.listRunEvents(queued.id))).not.toContain(token);
 
+    const checkpoint = await app.request("/api/v2/runtime/mcp/checkpoints", { method: "POST", headers, body: JSON.stringify({ stepKey: "verify", label: "核验", status: "completed", summary: "已核验报告", data: { apiKey: "checkpoint-secret", rows: 1 } }) });
+    expect(checkpoint.status).toBe(201);
+    expect(await body(await app.request(`/api/v2/runs/${queued.id}/checkpoints`))).toMatchObject({ data: [{ stepKey: "verify", status: "completed", data: { apiKey: "[REDACTED]", rows: 1 } }] });
+    const contextWithCheckpoint = JSON.stringify(await body(await app.request("/api/v2/runtime/mcp/context", { headers })));
+    expect(contextWithCheckpoint).toContain("verify");
+    expect(contextWithCheckpoint).not.toContain("checkpoint-secret");
+    expect((await app.request("/api/v2/runtime/mcp/checkpoints", { method: "POST", headers, body: JSON.stringify({ stepKey: "verify", label: "核验", status: "completed", summary: "尝试覆盖", data: {} }) })).status).toBe(409);
+
     const artifact = await app.request("/api/v2/runtime/mcp/artifacts", { method: "POST", headers, body: JSON.stringify({ storageKind: "git", name: "report.md", uri: "report.md", mimeType: "text/markdown" }) });
     const artifactId = (await body<{ data: { id: string } }>(artifact)).data.id;
     const duplicate = await app.request("/api/v2/runtime/mcp/artifacts", { method: "POST", headers, body: JSON.stringify({ storageKind: "git", name: "report.md", uri: "report.md", mimeType: "text/markdown" }) });
@@ -275,6 +283,31 @@ describe("vNext API", () => {
     expect(calls[1]?.capability?.token).not.toBe(token);
     expect(store.getRun(queued.id)).toMatchObject({ reviewStatus: "pending", result: { finalResponse: "resumed", runtimeSubmission: { summary: "完成前等待审批" } } });
     expect(store.listAudit().some((entry) => entry.actorType === "runtime" && entry.action === "runtime.result_submitted")).toBe(true);
+    store.close();
+  });
+
+  it("deposits an accepted run through the API and exposes the resulting Obsidian artifact", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-api-phase11-")); directories.push(root);
+    const { app, store, execution, knowledge } = fixture();
+    const vault = knowledge.addVault({ name: "Phase 11 Vault", rootPath: root });
+    const workSpec = execution.createWorkSpec({
+      title: "阶段十一日报",
+      instructions: "生成日报并等待验收",
+      executorType: "internal",
+      input: { operation: "echo", message: "阶段十一结果", delayMs: 0 },
+      resultDeposition: { vaultId: vault.id, directory: "Reports", titleTemplate: "{date}-{title}" }
+    });
+    const run = execution.createRun(workSpec.id);
+    await execution.startRun(run.id);
+    expect((await app.request(`/api/v2/runs/${run.id}/deposition/retry`, { method: "POST" })).status).toBe(409);
+    const accepted = await app.request(`/api/v2/runs/${run.id}/accept`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ comment: "结果可信" }) });
+    expect(accepted.status).toBe(200);
+    const depositionResponse = await app.request(`/api/v2/runs/${run.id}/deposition`);
+    const saved = (await body<{ data: { status: string; relativePath: string; attempts: number } }>(depositionResponse)).data;
+    expect(saved).toMatchObject({ status: "succeeded", attempts: 1, relativePath: expect.stringMatching(/^Reports\//) });
+    expect(readFileSync(join(root, saved.relativePath), "utf8")).toContain("阶段十一结果");
+    expect(await body(await app.request(`/api/v2/runs/${run.id}/artifacts`))).toMatchObject({ data: [expect.objectContaining({ storageKind: "obsidian", uri: expect.stringContaining(saved.relativePath) })] });
+    expect(await body(await app.request("/api/v2/depositions?status=succeeded"))).toMatchObject({ data: [expect.objectContaining({ runId: run.id })] });
     store.close();
   });
 });

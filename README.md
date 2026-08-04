@@ -18,7 +18,9 @@ Personal OS 是 Codex 和 OpenWorker 上面的一层本地控制台。你可以�
 - 运行前检查 Runtime、项目、Skill、定时和重试设置；
 - 为工作流设置 Cron 定时；
 - 创建工作流新版，并把定时规则明确换绑到新版；
+- 让 Codex/OpenWorker 分步骤保存检查点，失败后选择继续完成的步骤或全部重做；
 - 实时查看运行、日志、审批、结果、成本和成果；
+- 人工验收后，把结果自动写入指定 Obsidian Vault 的 `Reports` 或 `Generated`；
 - 定时运行遇到临时错误时有限重试，到达上限后停下等待处理；
 - 搜索 Obsidian，受控创建笔记；
 - 记录收入、支出、预算、预测和项目投入产出。
@@ -69,8 +71,8 @@ SQLite 是业务状态的唯一事实源。Obsidian 保存 Markdown 原文，Git
 
 ## Codex 和 OpenWorker 怎么接入
 
-工作流启动后，Personal OS 会为本次 Run 发一个短期权限。Codex 或 OpenWorker 只能通过 7 个受控 MCP 工具读取上下文、上报进度、搜索知识、登记仓库成果、请求审批、读取审批状态和提交结构化结果。
+工作流启动后，Personal OS 会为本次 Run 发一个短期权限。Codex 或 OpenWorker 只能通过 8 个受控 MCP 工具读取上下文、保存可恢复步骤、上报进度、搜索知识、登记仓库成果、请求审批、读取审批状态和提交结构化结果。
 
 Agent 不能通过这套 MCP 直接付款、联系客户、发布内容、删除文件或部署生产环境。高风险动作仍需人工决定。
 
-阶段 10 的设计和验收见 [计划](docs/PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-SPEC.md) 与 [验收记录](docs/PERSONAL-OS-PHASE10-WORKFLOW-OPERATIONS-ACCEPTANCE.md)。
+阶段 11 的设计和验收见 [计划](docs/PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-SPEC.md) 与 [验收记录](docs/PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-ACCEPTANCE.md)。

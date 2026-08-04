@@ -45,6 +45,12 @@ export const skillPublishInputSchema = skillDraftInputSchema.extend({
   validatedContentHash: z.string().regex(/^[a-f0-9]{64}$/)
 });
 export type SkillPublishInput = z.infer<typeof skillPublishInputSchema>;
+export const resultDepositionPolicySchema = z.object({
+  vaultId: idSchema,
+  directory: z.enum(["Generated", "Reports"]).default("Reports"),
+  titleTemplate: z.string().trim().min(1).max(200).default("{title} {date}")
+});
+export type ResultDepositionPolicy = z.infer<typeof resultDepositionPolicySchema>;
 export const workSpecInputSchema = z.object({
   projectId: idSchema.nullable().default(null),
   kind: workSpecKindSchema.default("one_off"),
@@ -55,7 +61,8 @@ export const workSpecInputSchema = z.object({
   timeoutSeconds: z.number().int().min(1).max(86_400).default(1_800),
   maxAttempts: z.number().int().min(1).max(10).default(2),
   lifecycleStatus: workSpecStatusSchema.default("active"),
-  skill: skillSnapshotSchema.nullable().default(null)
+  skill: skillSnapshotSchema.nullable().default(null),
+  resultDeposition: resultDepositionPolicySchema.nullable().default(null)
 });
 export type WorkSpecInput = z.input<typeof workSpecInputSchema>;
 export interface WorkSpec extends z.output<typeof workSpecInputSchema> {
@@ -151,6 +158,11 @@ export const runCreateInputSchema = z.object({
 });
 export type RunCreateInput = z.infer<typeof runCreateInputSchema>;
 
+export const runRetryInputSchema = z.object({
+  mode: z.enum(["resume", "restart"]).default("resume")
+});
+export type RunRetryInput = z.infer<typeof runRetryInputSchema>;
+
 export const runInputResponseSchema = z.object({
   answer: z.string().trim().min(1).max(20_000)
 });
@@ -182,6 +194,47 @@ export interface RunEvent {
   createdAt: string;
 }
 
+export const checkpointStatusSchema = z.enum(["running", "completed", "failed", "reused"]);
+export type CheckpointStatus = z.infer<typeof checkpointStatusSchema>;
+export const runtimeCheckpointInputSchema = z.object({
+  stepKey: z.string().trim().min(1).max(80).regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/),
+  label: z.string().trim().min(1).max(160),
+  status: z.enum(["running", "completed", "failed"]),
+  summary: z.string().trim().min(1).max(4_000),
+  data: z.unknown().default({})
+});
+export type RuntimeCheckpointInput = z.infer<typeof runtimeCheckpointInputSchema>;
+export interface RunCheckpoint {
+  id: string;
+  runId: string;
+  stepKey: string;
+  label: string;
+  status: CheckpointStatus;
+  summary: string;
+  data: unknown;
+  sourceCheckpointId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RunDepositionStatus = "pending" | "succeeded" | "failed";
+export interface RunDeposition {
+  id: string;
+  runId: string;
+  vaultId: string;
+  directory: "Generated" | "Reports";
+  title: string;
+  status: RunDepositionStatus;
+  documentId: string | null;
+  artifactId: string | null;
+  relativePath: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  attempts: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const approvalRequestTypeSchema = z.enum(["permission_required", "directory_requested", "plan_proposed"]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "rejected", "expired"]);
 export const riskLevelSchema = z.enum(["low", "medium", "high", "critical"]);
@@ -207,6 +260,7 @@ export type ApprovalDecisionInput = z.infer<typeof approvalDecisionInputSchema>;
 export const runtimeCapabilityScopeSchema = z.enum([
   "context:read",
   "event:append",
+  "checkpoint:write",
   "knowledge:search",
   "artifact:create",
   "approval:request",

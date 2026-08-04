@@ -6,6 +6,18 @@ Reviewed: 2026-07-28
 
 Scope: `docs/PLAN.md` and `docs/MVP1-ACCEPTANCE.md`
 
+## 2026-08-03 Phase 11 recoverable workflows addendum
+
+Status: Passed and deployed.
+
+- Completed checkpoints are immutable and redacted. Resume creates new `reused` records linked to the earlier checkpoint; restart copies none.
+- Runtime capabilities gained only one bounded write action, `save_checkpoint`. The MCP still exposes no payment, outreach, publishing, deletion or production-deployment tool.
+- Result deposition runs only after human acceptance, writes only to a registered Vault's `Reports` or `Generated` directory, creates a Run-linked KnowledgeDocument and Artifact, and never overwrites an existing note.
+- Deposition failure remains separate from Run success, is audited, appears in Today and can be retried without duplicate notes.
+- Review fixed writable-Vault detection, the premature-deposition HTTP error mapping, bounded Today rendering and future-safe checkpoint foreign keys.
+- No blocker, critical or high finding remains. The existing Vite bundle-size warning is a later performance optimization and does not affect correctness or the local one-user deployment.
+- Final evidence: 8 Vitest files / 105 tests, 12 Playwright journeys, TypeScript, ESLint, production build, MCP smoke, Runtime health, migration 11, SQLite `quick_check=ok`, healthy Web/API/Scheduler and four healthy executors.
+
 ## 2026-07-30 Asset investment and return ledger addendum
 
 Status: Passed and deployed.
