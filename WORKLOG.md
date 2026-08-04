@@ -1055,3 +1055,16 @@ Phase E verification so far:
 - Expanded workflow operations with active Run, current checkpoint, latest success, terminal duration, actual cost, deposition, occurrence history, failure category and operator guidance.
 - Rebuilt the Radar operations band into a dense production view and added unresolved schedule failures to Today while preserving the original workflow and schedule editors.
 - Added Phase 13 unit, migration and browser journeys, including desktop dark and 390px light visual evidence.
+
+### Review
+
+- Fixed a High lineage defect where a successful rehearsal could hide an unresolved production failure; the operations view now considers production Runs only.
+- Fixed a High attribution defect where rebinding a Schedule could move historical occurrences to the new WorkSpec; every occurrence now persists its original WorkSpec, and migration backfill prefers the linked Run.
+- Verified error redaction, bounded retry, immutable occurrence identity, controlled Obsidian visibility and actual-cost-only display. No unresolved Blocker, Critical or High remains.
+
+### Test
+
+- Vitest 125/125, Playwright 15/15, TypeScript, ESLint, production build and `git diff --check` passed.
+- Desktop dark and 390px light operations screenshots were reviewed without horizontal overflow.
+- Backed up the production database to `personal-os-v2-2026-08-04T01-27-36-277Z.db`, deployed Runtime commit `57926c0` and reinstalled the two current LaunchAgents.
+- Production migration 14, SQLite `quick_check=ok`, zero foreign-key violations, Web 5273, API 8787, Scheduler and all four executors passed. Three production schedules remain enabled.

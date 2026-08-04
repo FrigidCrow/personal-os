@@ -860,3 +860,39 @@ Personal OS now exposes the safe daily maintenance loop above Codex/OpenWorker: 
 - Agent-created Obsidian prose still requires the existing controlled note flow; arbitrary Vault writes remain intentionally unavailable.
 
 Verdict: **Phase 10 passed. Workflow maintenance and scheduled recovery are usable without giving Codex or OpenWorker uncontrolled authority.**
+
+## 2026-08-04 Personal OS Phase 13 production automation operations review
+
+Status: **Passed and deployed.**
+
+### Outcome
+
+The Scheduler now owns an auditable occurrence ledger, and Radar exposes the real production state above Codex and OpenWorker: current step, last success, next trigger, Obsidian deposition, duration, actual cost and an actionable failure category. Today surfaces unresolved schedule misses without restoring the retired task queue.
+
+### Findings resolved before verdict
+
+| Severity | Finding | Resolution |
+|---|---|---|
+| High | A successful rehearsal Run could make a production workflow look recovered | Exclude rehearsal and failure-drill Runs from production operations health, with a direct regression test |
+| High | Rebinding a Schedule could attribute its historical occurrences to the newly bound WorkSpec | Persist `work_spec_id` on each occurrence, backfill from its linked Run first and test post-occurrence rebinding |
+| Medium | A process restart could leave a scheduled queued Run permanently unstarted | Convert it to an explicit failed attempt and enter the existing bounded retry policy |
+| Medium | The crash window between occurrence claim and Run creation was invisible | Detect the incomplete occurrence on the next Tick, record `start_failed` and write Audit |
+| Low | The old Radar summary could not distinguish policy skip, catch-up and start failure | Expose the four occurrence outcomes and a compact operator-facing reason |
+
+### Direct evidence
+
+| Gate | Result |
+|---|---|
+| Automated regression | Vitest 125/125; Playwright 15/15; TypeScript, ESLint, Build and diff check passed |
+| Scheduler correctness | On-time, catch-up, skip, start failure, restart de-duplication and bounded recovery tests passed |
+| Lineage | Production-only Run selection and WorkSpec-stable occurrence history tests passed |
+| Visual | Desktop dark and 390px light Radar operations screenshots reviewed without overflow |
+| Production | Web 5273, API 8787, Scheduler, Codex and OpenWorker healthy; three schedules enabled |
+| Database | Migration 14, `quick_check=ok`, zero foreign-key violations and six migrated/fired occurrences |
+| Recovery | Pre-deploy backup `personal-os-v2-2026-08-04T01-27-36-277Z.db` retained |
+
+### Remaining non-blocking limitation
+
+- The existing Vite production bundle still exceeds its 500 kB advisory threshold. This is a later performance/code-splitting task and does not affect the local control plane's correctness.
+
+Verdict: **Phase 13 passed. Production automation is now visible, attributable and recoverable without expanding Agent authority.**
