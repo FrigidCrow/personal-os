@@ -25,7 +25,9 @@ import {
   operatingUnitInputSchema,
   projectInputSchema,
   runInputResponseSchema,
+  runEvaluationInputSchema,
   runReviewInputSchema,
+  runtimeResultInputSchema,
   runtimeCheckpointInputSchema,
   skillDraftInputSchema,
   skillPublishInputSchema,
@@ -81,7 +83,10 @@ import {
   type Run,
   type RunCheckpoint,
   type RunDeposition,
+  type RunEvaluation,
+  type RunEvaluationCheck,
   type RunEvent,
+  type RunMode,
   type RunStatus,
   type Schedule,
   type ScheduleInput,
@@ -91,6 +96,7 @@ import {
   type RuntimeCheckpointInput,
   type SkillDraftInput,
   type SkillDraftValidation,
+  type SkillCandidate,
   type SkillPublishInput,
   type SkillSnapshot,
   type VaultInput,
@@ -99,12 +105,14 @@ import {
   type WorkSpecPreflight,
   type WorkSpecPreflightCheck,
   type WorkSpecRevisionInput,
+  type RehearsalPromotionGate,
   type WorkflowOperationsSummary
 } from "@personal-os/vnext-contracts";
 import { assertRunTransition, calculateBudgetVariance, calculateCashflowForecast, canRetryRun, convertMinorUnits, isTerminalRunStatus, redactSensitiveText, redactSensitiveValue, safeAdd, scheduleFiringKey, transactionFacts } from "@personal-os/vnext-domain";
 
 export interface Clock { now(): Date }
 export const systemClock: Clock = { now: () => new Date() };
+const REHEARSAL_EVALUATOR_VERSION = "rehearsal-gate-v1";
 const ALL_RUNTIME_SCOPES: RuntimeCapabilityScope[] = [
   "context:read",
   "event:append",
@@ -182,8 +190,16 @@ export interface VNextStore {
   updateRunCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint;
   listRunDepositions(status?: RunDeposition["status"]): RunDeposition[];
   getRunDeposition(runId: string): RunDeposition | null;
+  findSucceededRunDepositionByDeduplicationKey(key: string): RunDeposition | null;
   insertRunDeposition(deposition: RunDeposition): RunDeposition;
   updateRunDeposition(deposition: RunDeposition): RunDeposition;
+  listRunEvaluations(workSpecId?: string): RunEvaluation[];
+  getRunEvaluation(runId: string): RunEvaluation | null;
+  insertRunEvaluation(evaluation: RunEvaluation): RunEvaluation;
+  listSkillCandidates(workSpecId?: string): SkillCandidate[];
+  getSkillCandidate(id: string): SkillCandidate | null;
+  insertSkillCandidate(candidate: SkillCandidate): SkillCandidate;
+  updateSkillCandidate(candidate: SkillCandidate): SkillCandidate;
   listSchedules(): Schedule[];
   getSchedule(id: string): Schedule | null;
   insertSchedule(schedule: Schedule): Schedule;
@@ -452,11 +468,17 @@ export interface ExecutorAdapter {
   health(): ExecutorHealth | Promise<ExecutorHealth>;
 }
 
+export interface RunCompletionObserver {
+  onRunCompleted(run: Run, requestId?: string): void;
+}
+
 export interface CreateRunOptions {
   input?: unknown;
   idempotencyKey?: string;
   retryOfRunId?: string;
   attempt?: number;
+  runMode?: RunMode;
+  rehearsalRootRunId?: string;
   requestId?: string;
 }
 
@@ -464,6 +486,7 @@ export class PersonalOsService {
   private readonly emitter = new EventEmitter();
   private readonly controllers = new Map<string, AbortController>();
   private readonly executors = new Map<WorkSpec["executorType"], ExecutorAdapter>();
+  private completionObserver: RunCompletionObserver | null = null;
 
   constructor(
     private readonly store: VNextStore,
@@ -474,6 +497,10 @@ export class PersonalOsService {
   ) {
     for (const adapter of adapters) this.executors.set(adapter.type, adapter);
     this.emitter.setMaxListeners(100);
+  }
+
+  setRunCompletionObserver(observer: RunCompletionObserver | null): void {
+    this.completionObserver = observer;
   }
 
   createProject(input: ProjectInput, requestId?: string): Project {
@@ -547,8 +574,18 @@ export class PersonalOsService {
     checks.push({ code: "retry", label: "失败恢复", status: workSpec.maxAttempts > 1 ? "pass" : "warning", detail: `最多尝试 ${workSpec.maxAttempts} 次，单次超时 ${workSpec.timeoutSeconds} 秒。` });
     if (workSpec.resultDeposition) {
       const vault = this.store.getVault(workSpec.resultDeposition.vaultId);
-      const available = Boolean(vault && isWritableRealDirectory(vault.rootPath));
-      checks.push({ code: "deposition", label: "Obsidian 沉淀", status: available ? "pass" : "fail", detail: available ? `验收后写入 ${vault!.name}/${workSpec.resultDeposition.directory}。` : "沉淀策略引用的 Vault 不存在或当前不可写。" });
+      const targetDirectory = vault ? resolve(vault.rootPath, workSpec.resultDeposition.directory, workSpec.resultDeposition.subdirectory) : null;
+      let targetSafe = false;
+      try {
+        if (vault && targetDirectory && isPathInside(resolve(vault.rootPath), targetDirectory)) {
+          assertNoSymlinkSegments(resolve(vault.rootPath), targetDirectory);
+          targetSafe = true;
+        }
+      } catch { targetSafe = false; }
+      const available = Boolean(vault && isWritableRealDirectory(vault.rootPath) && targetSafe);
+      const destination = [workSpec.resultDeposition.directory, workSpec.resultDeposition.subdirectory].filter(Boolean).join("/");
+      const timing = workSpec.resultDeposition.trigger === "on_success" ? "成功后自动写入" : "验收后写入";
+      checks.push({ code: "deposition", label: "Obsidian 沉淀", status: available ? "pass" : "fail", detail: available ? `${timing} ${vault!.name}/${destination}。` : "沉淀策略引用的 Vault 不存在或当前不可写。" });
     } else {
       checks.push({ code: "deposition", label: "Obsidian 沉淀", status: "warning", detail: "未配置自动沉淀；结果仍会保留在运行记录中。" });
     }
@@ -589,6 +626,15 @@ export class PersonalOsService {
     if (parsed.projectId && !this.store.getProject(parsed.projectId)) throw new Error("PROJECT_NOT_FOUND");
     if (parsed.resultDeposition && !this.store.getVault(parsed.resultDeposition.vaultId)) throw new Error("VAULT_NOT_FOUND");
     if (parsed.resultDeposition && redactSensitiveText(parsed.resultDeposition.titleTemplate) !== parsed.resultDeposition.titleTemplate) throw new Error("RESULT_DEPOSITION_SECRET_DETECTED");
+    if (parsed.resultDeposition && !isValidTimezone(parsed.resultDeposition.timezone)) throw new Error("INVALID_DEPOSITION_TIMEZONE");
+    if (parsed.reviewPolicy === "not_required") {
+      if (parsed.kind !== "workflow") throw new Error("AUTO_DEPOSITION_REQUIRES_WORKFLOW");
+      if (parsed.executorType !== "codex" && parsed.executorType !== "openworker") throw new Error("AUTO_DEPOSITION_REQUIRES_AGENT_RUNTIME");
+      if (!parsed.skill) throw new Error("AUTO_DEPOSITION_REQUIRES_PINNED_SKILL");
+      if (parsed.resultDeposition?.trigger !== "on_success") throw new Error("AUTO_DEPOSITION_POLICY_REQUIRED");
+    }
+    if (parsed.resultDeposition?.trigger === "on_success" && parsed.reviewPolicy !== "not_required") throw new Error("AUTO_DEPOSITION_REVIEW_POLICY_MISMATCH");
+    if (parsed.resultDeposition?.trigger === "on_acceptance" && parsed.reviewPolicy !== "required") throw new Error("ACCEPTANCE_DEPOSITION_REVIEW_POLICY_MISMATCH");
     let skill = parsed.skill;
     if (skill) {
       if (!this.skills) throw new Error("SKILL_REGISTRY_UNAVAILABLE");
@@ -648,8 +694,15 @@ export class PersonalOsService {
       const existing = this.store.findRunByIdempotencyKey(options.idempotencyKey);
       if (existing) return existing;
     }
+    const id = randomUUID();
+    const runMode = options.runMode ?? "production";
+    const rehearsalRootRunId = runMode === "production" ? null : options.rehearsalRootRunId ?? id;
+    if (options.rehearsalRootRunId) {
+      const root = this.store.getRun(options.rehearsalRootRunId);
+      if (!root || root.workSpecId !== workSpecId || root.runMode !== runMode) throw new Error("REHEARSAL_ROOT_MISMATCH");
+    }
     const run: Run = {
-      id: randomUUID(),
+      id,
       workSpecId,
       projectId: workSpec.projectId,
       executorType: workSpec.executorType,
@@ -658,6 +711,8 @@ export class PersonalOsService {
       attempt: options.attempt ?? 1,
       idempotencyKey: options.idempotencyKey ?? null,
       retryOfRunId: options.retryOfRunId ?? null,
+      runMode,
+      rehearsalRootRunId,
       externalRunId: null,
       errorCode: null,
       errorMessage: null,
@@ -674,7 +729,7 @@ export class PersonalOsService {
       finishedAt: null
     };
     this.store.insertRun(run);
-    this.publish(run.id, { eventType: "run.queued", level: "info", source: "application", message: "运行已进入队列。", structuredData: { workSpecId }, requestId: options.requestId });
+    this.publish(run.id, { eventType: "run.queued", level: "info", source: "application", message: "运行已进入队列。", structuredData: { workSpecId, runMode, rehearsalRootRunId }, requestId: options.requestId });
     this.audit("run.created", "run", run.id, run, options.requestId, run.id);
     return run;
   }
@@ -682,6 +737,7 @@ export class PersonalOsService {
   async startRun(runId: string, requestId?: string): Promise<Run> {
     let run = this.requireRun(runId);
     if (run.status !== "queued") throw new Error(`RUN_NOT_QUEUED:${run.status}`);
+    if (run.runMode === "failure_drill") throw new Error("FAILURE_DRILL_USES_DETERMINISTIC_RUNNER");
     if (!this.executors.has(run.executorType)) {
       const failed = this.failRun(run, "EXECUTOR_UNAVAILABLE", `执行器 ${run.executorType} 尚未配置。`, requestId);
       this.maybeAutoRetryScheduled(failed, "EXECUTOR_UNAVAILABLE", failed.errorMessage ?? "", requestId);
@@ -689,6 +745,19 @@ export class PersonalOsService {
     }
     run = this.transition(run, "running", { startedAt: this.clock.now().toISOString() }, requestId);
     return await this.executeRunningRun(run, null, requestId);
+  }
+
+  runFailureDrill(workSpecId: string, requestId?: string): Run {
+    const created = this.createRun(workSpecId, { runMode: "failure_drill", input: { phase12: { expectedInvalidResult: true } }, requestId });
+    const running = this.transition(created, "running", { startedAt: this.clock.now().toISOString() }, requestId);
+    const invalidFixture = { summary: "", data: {}, verification: [] };
+    const rejected = !runtimeResultInputSchema.safeParse(invalidFixture).success;
+    const withEvidence = this.store.updateRun({
+      ...running,
+      result: { failureDrill: { evaluatorVersion: REHEARSAL_EVALUATOR_VERSION, invalidFixture, rejected } }
+    });
+    if (!rejected) return this.transition(withEvidence, "succeeded", { finishedAt: this.clock.now().toISOString(), reviewStatus: "not_required" }, requestId);
+    return this.failRun(withEvidence, "EXPECTED_VALIDATION_REJECTION", "故意构造的无效结果已被当前结构校验器拒绝。", requestId);
   }
 
   submitRunInput(runId: string, input: unknown, requestId?: string): Run {
@@ -787,7 +856,7 @@ export class PersonalOsService {
     const workSpec = this.requireWorkSpec(run.workSpecId);
     const project = run.projectId ? this.store.getProject(run.projectId) : null;
     return {
-      run: { id: run.id, status: run.status, attempt: run.attempt, executorType: run.executorType, input: run.input, createdAt: run.createdAt, startedAt: run.startedAt },
+      run: { id: run.id, status: run.status, attempt: run.attempt, runMode: run.runMode, rehearsalRootRunId: run.rehearsalRootRunId, executorType: run.executorType, input: run.input, createdAt: run.createdAt, startedAt: run.startedAt },
       workSpec: { id: workSpec.id, kind: workSpec.kind, title: workSpec.title, instructions: workSpec.instructions, skill: workSpec.skill ? { name: workSpec.skill.name, version: workSpec.skill.version, contentHash: workSpec.skill.contentHash, path: workSpec.skill.path } : null },
       project: project ? { id: project.id, name: project.name, repositoryPath: project.repositoryPath, obsidianPath: project.obsidianPath } : null,
       recentEvents: this.store.listRunEvents(run.id).slice(-20),
@@ -874,6 +943,8 @@ export class PersonalOsService {
       input: previous.input,
       retryOfRunId: previous.id,
       attempt: previous.attempt + 1,
+      runMode: previous.runMode,
+      ...(previous.rehearsalRootRunId ? { rehearsalRootRunId: previous.rehearsalRootRunId } : {}),
       requestId
     });
     if (mode === "resume") this.copyCompletedCheckpoints(previous.id, retry.id, requestId);
@@ -948,16 +1019,23 @@ export class PersonalOsService {
         ...(runtimeSubmission === undefined ? {} : { runtimeSubmission }),
         ...(pendingApproval ? { requestType: pendingApproval.requestType, request: pendingApproval.payload, approvalId: pendingApproval.id } : {})
       };
+      const reviewStatus = waiting || latest.runMode !== "production" ? "not_required" : effectiveStatus === "succeeded" && workSpec.reviewPolicy === "not_required" ? "not_required" : "pending";
       const updated = this.transition(latest, effectiveStatus, {
         result: mergedResult,
         usage: redactSensitiveValue(output.usage ?? latest.usage),
         externalRunId,
-        reviewStatus: waiting ? "not_required" : "pending",
+        reviewStatus,
         reviewedAt: null,
         reviewComment: null,
         finishedAt: waiting ? null : this.clock.now().toISOString()
       }, requestId);
       if (effectiveStatus === "waiting_approval" && !pendingApproval) this.createApproval(updated, requestId);
+      if (latest.runMode === "production" && effectiveStatus === "succeeded" && workSpec.resultDeposition?.trigger === "on_success") {
+        try { this.completionObserver?.onRunCompleted(updated, requestId); }
+        catch (error) {
+          this.publish(updated.id, { eventType: "deposition.failed", level: "error", source: "application", message: `自动沉淀未启动：${error instanceof Error ? error.message : "RESULT_DEPOSITION_FAILED"}`, requestId });
+        }
+      }
       return updated;
     } catch (error) {
       const latest = this.requireRun(runId);
@@ -1050,6 +1128,7 @@ export class PersonalOsService {
   private reviewRun(runId: string, status: "accepted" | "rejected", input: unknown, requestId?: string): Run {
     const parsed = runReviewInputSchema.parse(input);
     const current = this.requireRun(runId);
+    if (current.runMode !== "production") throw new Error("RUN_REVIEW_PRODUCTION_ONLY");
     if (current.status !== "succeeded" && current.status !== "partially_succeeded") throw new Error("RUN_REVIEW_REQUIRES_COMPLETED_RUN");
     if (current.reviewStatus !== "pending") throw new Error("RUN_ALREADY_REVIEWED");
     const updated = this.store.updateRun({ ...current, reviewStatus: status, reviewedAt: this.clock.now().toISOString(), reviewComment: redactSensitiveText(parsed.comment) });
@@ -1135,6 +1214,141 @@ export class PersonalOsService {
     const workSpec = this.store.getWorkSpec(id);
     if (!workSpec) throw new Error("WORK_SPEC_NOT_FOUND");
     return workSpec;
+  }
+}
+
+export class RehearsalPromotionService {
+  constructor(
+    private readonly store: VNextStore,
+    private readonly execution: PersonalOsService,
+    private readonly skills: SkillRegistry,
+    private readonly clock: Clock = systemClock
+  ) {}
+
+  async createRehearsal(workSpecId: string, requestId?: string): Promise<Run> {
+    const workSpec = this.requireEligibleWorkSpec(workSpecId);
+    const preflight = await this.execution.preflightWorkSpec(workSpec.id);
+    if (!preflight.ready) throw new Error("WORK_SPEC_PREFLIGHT_FAILED");
+    const run = this.execution.createRun(workSpec.id, { runMode: "rehearsal", requestId });
+    this.audit("rehearsal.created", "run", run.id, { workSpecId, runMode: run.runMode, rehearsalRootRunId: run.rehearsalRootRunId }, requestId, run.id);
+    return run;
+  }
+
+  runFailureDrill(workSpecId: string, requestId?: string): { run: Run; evaluation: RunEvaluation } {
+    this.requireEligibleWorkSpec(workSpecId);
+    const run = this.execution.runFailureDrill(workSpecId, requestId);
+    const evaluation = this.evaluateRun(run.id, { note: "系统执行了结构校验失败演练。" }, requestId);
+    return { run, evaluation };
+  }
+
+  evaluateRun(runId: string, input: unknown = {}, requestId?: string): RunEvaluation {
+    const parsed = runEvaluationInputSchema.parse(input);
+    const existing = this.store.getRunEvaluation(runId);
+    if (existing) return existing;
+    const run = this.store.getRun(runId);
+    if (!run) throw new Error("RUN_NOT_FOUND");
+    if (run.runMode === "production") throw new Error("RUN_EVALUATION_REQUIRES_REHEARSAL");
+    if (!isTerminalRunStatus(run.status)) throw new Error("RUN_EVALUATION_REQUIRES_TERMINAL_RUN");
+    const rootId = run.rehearsalRootRunId ?? run.id;
+    const checks = run.runMode === "failure_drill"
+      ? failureDrillChecks(run)
+      : rehearsalChecks(run, this.store.listRunCheckpoints(run.id));
+    const now = this.clock.now().toISOString();
+    const evaluation = this.store.insertRunEvaluation({
+      id: randomUUID(), runId: run.id, workSpecId: run.workSpecId, runMode: run.runMode,
+      rehearsalRootRunId: rootId, evaluatorVersion: REHEARSAL_EVALUATOR_VERSION,
+      passed: checks.every((check) => check.passed), checks,
+      note: redactSensitiveText(parsed.note), createdAt: now
+    });
+    this.audit("rehearsal.evaluated", "run_evaluation", evaluation.id, {
+      runId: run.id, workSpecId: run.workSpecId, runMode: run.runMode, passed: evaluation.passed, checks: evaluation.checks
+    }, requestId, run.id);
+    return evaluation;
+  }
+
+  getGate(workSpecId: string): RehearsalPromotionGate {
+    this.requireEligibleWorkSpec(workSpecId);
+    const evaluations = this.store.listRunEvaluations(workSpecId);
+    const gate = promotionEvidence(workSpecId, evaluations);
+    return { ...gate, evaluations, candidates: this.store.listSkillCandidates(workSpecId) };
+  }
+
+  createCandidate(workSpecId: string, input: SkillDraftInput, requestId?: string): SkillCandidate {
+    this.requireEligibleWorkSpec(workSpecId);
+    const gate = this.getGate(workSpecId);
+    if (!gate.ready) throw new Error("SKILL_PROMOTION_EVIDENCE_INCOMPLETE");
+    const draft = skillDraftInputSchema.parse(input);
+    if (redactSensitiveText(`${draft.description}\n${draft.instructions}`) !== `${draft.description}\n${draft.instructions}`) throw new Error("SKILL_CANDIDATE_SECRET_DETECTED");
+    const validation = this.skills.validateDraft(draft);
+    if (!validation.valid) throw new Error(validation.issues.find((issue) => issue.level === "error")?.code ?? "SKILL_DRAFT_INVALID");
+    const evidenceRunIds = [...new Set([
+      ...gate.evaluations.filter((item) => item.passed && item.runMode === "rehearsal").map((item) => item.runId),
+      ...gate.evaluations.filter((item) => item.passed && item.runMode === "failure_drill").map((item) => item.runId)
+    ])];
+    const now = this.clock.now().toISOString();
+    const candidate = this.store.insertSkillCandidate({
+      id: randomUUID(), workSpecId, draft, content: validation.candidate.content,
+      contentHash: validation.candidate.contentHash, evidenceRunIds, status: "pending",
+      publishedSkill: null, publishedWorkSpecId: null, createdAt: now, updatedAt: now, publishedAt: null
+    });
+    this.audit("skill_candidate.created", "skill_candidate", candidate.id, {
+      workSpecId, name: draft.name, version: draft.version, contentHash: candidate.contentHash, evidenceRunIds
+    }, requestId);
+    return candidate;
+  }
+
+  getCandidate(id: string): SkillCandidate {
+    const candidate = this.store.getSkillCandidate(id);
+    if (!candidate) throw new Error("SKILL_CANDIDATE_NOT_FOUND");
+    return candidate;
+  }
+
+  publishCandidate(id: string, requestId?: string): SkillCandidate {
+    const candidate = this.getCandidate(id);
+    if (candidate.status !== "pending") throw new Error("SKILL_CANDIDATE_ALREADY_PUBLISHED");
+    const source = this.requireEligibleWorkSpec(candidate.workSpecId);
+    const evidence = this.store.listRunEvaluations(candidate.workSpecId).filter((item) => candidate.evidenceRunIds.includes(item.runId));
+    if (!promotionEvidence(candidate.workSpecId, evidence).ready) throw new Error("SKILL_CANDIDATE_EVIDENCE_STALE");
+    const validation = this.skills.validateDraft(candidate.draft);
+    if (!validation.valid) throw new Error(validation.issues.find((issue) => issue.level === "error")?.code ?? "SKILL_DRAFT_INVALID");
+    if (validation.candidate.contentHash !== candidate.contentHash || validation.candidate.content !== candidate.content) throw new Error("SKILL_CANDIDATE_CHANGED_AFTER_VALIDATION");
+    const published = this.skills.publish({ ...candidate.draft, validatedContentHash: candidate.contentHash });
+    const revision = this.execution.createWorkSpecRevision(source.id, {
+      projectId: source.projectId,
+      title: source.title,
+      instructions: source.instructions,
+      executorType: source.executorType,
+      input: source.input,
+      timeoutSeconds: source.timeoutSeconds,
+      maxAttempts: source.maxAttempts,
+      lifecycleStatus: "active",
+      skill: published,
+      reviewPolicy: source.reviewPolicy,
+      resultDeposition: source.resultDeposition
+    }, requestId);
+    const now = this.clock.now().toISOString();
+    const updated = this.store.updateSkillCandidate({
+      ...candidate, status: "published", publishedSkill: published,
+      publishedWorkSpecId: revision.id, updatedAt: now, publishedAt: now
+    });
+    this.audit("skill_candidate.published", "skill_candidate", updated.id, {
+      workSpecId: source.id, publishedWorkSpecId: revision.id, name: published.name,
+      version: published.version, contentHash: published.contentHash
+    }, requestId);
+    return updated;
+  }
+
+  private requireEligibleWorkSpec(id: string): WorkSpec {
+    const workSpec = this.store.getWorkSpec(id);
+    if (!workSpec) throw new Error("WORK_SPEC_NOT_FOUND");
+    if (workSpec.kind !== "workflow" || workSpec.lifecycleStatus !== "active") throw new Error("REHEARSAL_REQUIRES_ACTIVE_WORKFLOW");
+    if (workSpec.executorType !== "codex" && workSpec.executorType !== "openworker") throw new Error("REHEARSAL_REQUIRES_AGENT_RUNTIME");
+    if (!workSpec.skill) throw new Error("REHEARSAL_REQUIRES_PINNED_BASE_SKILL");
+    return workSpec;
+  }
+
+  private audit(action: string, resourceType: string, resourceId: string, afterSnapshot: unknown, requestId?: string, runId?: string): void {
+    this.store.insertAudit({ actorType: "user", actorId: "local-user", action, resourceType, resourceId, afterSnapshot: redactSensitiveValue(afterSnapshot), requestId, runId }, this.clock.now().toISOString());
   }
 }
 
@@ -1339,10 +1553,11 @@ export class KnowledgeService {
     const root = resolve(vault.rootPath);
     if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error("VAULT_PATH_NOT_FOUND");
     if (lstatSync(root).isSymbolicLink()) throw new Error("VAULT_SYMLINK_NOT_ALLOWED");
-    const directory = resolve(root, parsed.directory);
+    const directory = resolve(root, parsed.directory, parsed.subdirectory);
     if (!isPathInside(root, directory)) throw new Error("KNOWLEDGE_PATH_NOT_ALLOWED");
+    assertNoSymlinkSegments(root, directory);
     mkdirSync(directory, { recursive: true });
-    if (lstatSync(directory).isSymbolicLink()) throw new Error("KNOWLEDGE_SYMLINK_NOT_ALLOWED");
+    assertNoSymlinkSegments(root, directory);
     const safeTitle = redactSensitiveText(parsed.title);
     const fileName = `${knowledgeFileStem(safeTitle)}.md`;
     const target = resolve(directory, fileName);
@@ -1432,31 +1647,88 @@ export class ResultDepositionService {
   list(status?: RunDeposition["status"]): RunDeposition[] { return this.store.listRunDepositions(status); }
   get(runId: string): RunDeposition | null { return this.store.getRunDeposition(runId); }
 
+  onRunCompleted(run: Run, requestId?: string): void {
+    if (run.runMode !== "production" || run.status !== "succeeded") return;
+    const workSpec = this.store.getWorkSpec(run.workSpecId);
+    if (workSpec?.resultDeposition?.trigger !== "on_success") return;
+    this.depositSuccessfulRun(run.id, requestId);
+  }
+
   depositAcceptedRun(runId: string, requestId?: string): RunDeposition | null {
     const run = this.store.getRun(runId);
     if (!run) throw new Error("RUN_NOT_FOUND");
+    if (run.runMode !== "production") throw new Error("RUN_DEPOSITION_PRODUCTION_ONLY");
     if (run.reviewStatus !== "accepted") throw new Error("RUN_DEPOSITION_REQUIRES_ACCEPTED_RUN");
     const workSpec = this.store.getWorkSpec(run.workSpecId);
     if (!workSpec) throw new Error("WORK_SPEC_NOT_FOUND");
     const policy = workSpec.resultDeposition;
     if (!policy) return null;
+    if (policy.trigger !== "on_acceptance") throw new Error("RUN_DEPOSITION_TRIGGER_MISMATCH");
+    return this.deposit(run, workSpec, requestId);
+  }
+
+  depositSuccessfulRun(runId: string, requestId?: string): RunDeposition | null {
+    const run = this.store.getRun(runId);
+    if (!run) throw new Error("RUN_NOT_FOUND");
+    if (run.runMode !== "production") throw new Error("RUN_DEPOSITION_PRODUCTION_ONLY");
+    if (run.status !== "succeeded") throw new Error("RUN_DEPOSITION_REQUIRES_SUCCESS");
+    if (run.reviewStatus !== "not_required") throw new Error("RUN_DEPOSITION_REVIEW_POLICY_MISMATCH");
+    const workSpec = this.store.getWorkSpec(run.workSpecId);
+    if (!workSpec) throw new Error("WORK_SPEC_NOT_FOUND");
+    const policy = workSpec.resultDeposition;
+    if (!policy) return null;
+    if (workSpec.reviewPolicy !== "not_required" || policy.trigger !== "on_success") throw new Error("RUN_DEPOSITION_TRIGGER_MISMATCH");
+    return this.deposit(run, workSpec, requestId);
+  }
+
+  retryRunDeposition(runId: string, requestId?: string): RunDeposition | null {
+    const workSpecId = this.store.getRun(runId)?.workSpecId;
+    if (!workSpecId) throw new Error("RUN_NOT_FOUND");
+    const workSpec = this.store.getWorkSpec(workSpecId);
+    if (!workSpec) throw new Error("WORK_SPEC_NOT_FOUND");
+    return workSpec.resultDeposition?.trigger === "on_success"
+      ? this.depositSuccessfulRun(runId, requestId)
+      : this.depositAcceptedRun(runId, requestId);
+  }
+
+  private deposit(run: Run, workSpec: WorkSpec, requestId?: string): RunDeposition {
+    const policy = workSpec.resultDeposition;
+    if (!policy) throw new Error("RESULT_DEPOSITION_POLICY_NOT_FOUND");
     const vault = this.store.getVault(policy.vaultId);
     if (!vault) throw new Error("VAULT_NOT_FOUND");
     const existing = this.store.getRunDeposition(run.id);
     if (existing?.status === "succeeded") return existing;
     const now = this.clock.now().toISOString();
-    const title = existing?.title ?? depositionTitle(policy.titleTemplate, workSpec.title, run.id, now);
+    const completedAt = run.finishedAt ?? now;
+    const dateKey = localDate(completedAt, policy.timezone);
+    const deduplicationKey = policy.period === "calendar_day" ? `${workSpec.id}:${dateKey}` : null;
+    const title = existing?.title ?? depositionTitle(policy, workSpec.title, run.id, completedAt);
     let deposition = existing
       ? this.store.updateRunDeposition({ ...existing, status: "pending", errorCode: null, errorMessage: null, attempts: existing.attempts + 1, updatedAt: now })
-      : this.store.insertRunDeposition({ id: randomUUID(), runId: run.id, vaultId: vault.id, directory: policy.directory, title, status: "pending", documentId: null, artifactId: null, relativePath: null, errorCode: null, errorMessage: null, attempts: 1, createdAt: now, updatedAt: now });
+      : this.store.insertRunDeposition({ id: randomUUID(), runId: run.id, vaultId: vault.id, directory: policy.directory, subdirectory: policy.subdirectory, deduplicationKey, title, status: "pending", documentId: null, artifactId: null, relativePath: null, errorCode: null, errorMessage: null, attempts: 1, createdAt: now, updatedAt: now });
     try {
+      const prior = deduplicationKey ? this.store.findSucceededRunDepositionByDeduplicationKey(deduplicationKey) : null;
+      if (prior?.documentId && prior.relativePath && prior.runId !== run.id) {
+        const document = this.knowledge.getDocument(prior.documentId).document;
+        const uri = `${vault.name}/${prior.relativePath}`;
+        const artifact = this.store.listArtifactsForRun(run.id).find((item) => item.storageKind === "obsidian" && item.uri === uri) ?? this.store.insertArtifact({
+          id: randomUUID(), runId: run.id, workSpecId: run.workSpecId, projectId: run.projectId,
+          storageKind: "obsidian", name: `${prior.title}.md`, uri, mimeType: "text/markdown", sizeBytes: null,
+          checksum: document.contentHash, createdAt: now
+        });
+        deposition = this.store.updateRunDeposition({ ...deposition, title: prior.title, status: "succeeded", documentId: prior.documentId, artifactId: artifact.id, relativePath: prior.relativePath, errorCode: null, errorMessage: null, updatedAt: this.clock.now().toISOString() });
+        this.store.appendRunEvent(run.id, { eventType: "deposition.reused", level: "info", source: "result-depositor", message: `同一周期的 Obsidian 笔记已存在，已复用：${prior.relativePath}`, structuredData: { depositionId: deposition.id, sourceRunId: prior.runId, documentId: prior.documentId, artifactId: artifact.id } }, deposition.updatedAt);
+        this.store.insertAudit({ actorType: "system", actorId: "result-depositor", action: "run.deposition_reused", resourceType: "run_deposition", resourceId: deposition.id, afterSnapshot: deposition, requestId, runId: run.id }, deposition.updatedAt);
+        return deposition;
+      }
       const linked = this.store.listKnowledgeLinksForEntity("run", run.id).find((link) => link.relation === "result");
       const detail = linked ? this.knowledge.getDocument(linked.documentId) : this.knowledge.createDocument({
         vaultId: vault.id,
         directory: policy.directory,
+        subdirectory: policy.subdirectory,
         title,
         body: depositionBody(run, workSpec),
-        tags: ["personal-os", "run-result", ...(workSpec.skill ? [workSpec.skill.name] : [])],
+        tags: ["personal-os", "run-result", ...(run.reviewStatus === "accepted" ? ["reviewed"] : ["ai-unreviewed"]), ...(workSpec.skill ? [workSpec.skill.name] : [])],
         links: [
           ...(run.projectId ? [{ entityType: "project" as const, entityId: run.projectId, relation: "result_of" }] : []),
           { entityType: "work_spec", entityId: workSpec.id, relation: "result_of" },
@@ -1811,11 +2083,11 @@ function reversalTransaction(target: FinanceTransaction, now: string): FinanceTr
   };
 }
 
-function depositionTitle(template: string, workSpecTitle: string, runId: string, createdAt: string): string {
-  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(createdAt));
+function depositionTitle(policy: NonNullable<WorkSpec["resultDeposition"]>, workSpecTitle: string, runId: string, createdAt: string): string {
+  const date = localDate(createdAt, policy.timezone);
   const shortId = runId.slice(0, 8);
-  let title = template.replaceAll("{title}", workSpecTitle).replaceAll("{date}", date).replaceAll("{runId}", shortId).trim();
-  if (!title.includes(shortId)) title = `${title} (${shortId})`;
+  let title = policy.titleTemplate.replaceAll("{title}", workSpecTitle).replaceAll("{date}", date).replaceAll("{runId}", shortId).trim();
+  if (policy.period === "run" && !title.includes(shortId)) title = `${title} (${shortId})`;
   title = redactSensitiveText(title).replace(/[\\/:\0]/g, "-").replace(/\s+/g, " ").trim().slice(0, 200);
   if (!title) throw new Error("INVALID_KNOWLEDGE_TITLE");
   return title;
@@ -1823,7 +2095,8 @@ function depositionTitle(template: string, workSpecTitle: string, runId: string,
 
 function depositionBody(run: Run, workSpec: WorkSpec): string {
   const submission = objectRecord(objectRecord(run.result).runtimeSubmission);
-  const summary = String(submission.summary ?? objectRecord(run.result).finalResponse ?? "运行已完成并通过人工验收。");
+  const reviewed = run.reviewStatus === "accepted";
+  const summary = String(submission.summary ?? objectRecord(run.result).finalResponse ?? (reviewed ? "运行已完成并通过人工验收。" : "运行已完成，结果尚未人工复核。"));
   const data = redactSensitiveValue(submission.data ?? run.result ?? {});
   const verification = Array.isArray(submission.verification) ? submission.verification.map((item) => `- ${String(item)}`).join("\n") : "- 未提供独立验证条目";
   return [
@@ -1843,11 +2116,65 @@ function depositionBody(run: Run, workSpec: WorkSpec): string {
     "",
     "## 运行信息",
     "",
+    `- 结果状态：${reviewed ? "已人工验收" : "AI 生成，未人工复核"}`,
     `- 工作流：${workSpec.title}`,
     `- Run：${run.id}`,
     `- Runtime：${run.executorType}`,
-    `- 尝试次数：${run.attempt}`
+    `- 尝试次数：${run.attempt}`,
+    `- Skill：${workSpec.skill ? `${workSpec.skill.name}@${workSpec.skill.version} (${workSpec.skill.contentHash})` : "未绑定"}`
   ].join("\n");
+}
+
+function rehearsalChecks(run: Run, checkpoints: RunCheckpoint[]): RunEvaluationCheck[] {
+  const submission = objectRecord(run.result).runtimeSubmission;
+  const parsed = runtimeResultInputSchema.safeParse(submission);
+  const verificationCount = parsed.success ? parsed.data.verification.length : 0;
+  const completed = checkpoints.filter((checkpoint) => checkpoint.status === "completed" || checkpoint.status === "reused");
+  return [
+    { code: "rehearsal_mode", passed: run.runMode === "rehearsal", detail: run.runMode === "rehearsal" ? "这是预执行 Run。" : "Run 模式不是 rehearsal。" },
+    { code: "terminal_success", passed: run.status === "succeeded", detail: run.status === "succeeded" ? "Runtime 已成功结束。" : `当前状态是 ${run.status}。` },
+    { code: "structured_result", passed: parsed.success, detail: parsed.success ? "结构化结果符合当前 Schema。" : "缺少有效的结构化结果。" },
+    { code: "verification", passed: verificationCount > 0, detail: verificationCount > 0 ? `包含 ${verificationCount} 条验证证据。` : "没有独立验证条目。" },
+    { code: "checkpoint_evidence", passed: completed.length > 0, detail: completed.length > 0 ? `包含 ${completed.length} 个完成或复用的步骤证据。` : "没有完成的步骤检查点。" }
+  ];
+}
+
+function failureDrillChecks(run: Run): RunEvaluationCheck[] {
+  const drill = objectRecord(objectRecord(run.result).failureDrill);
+  return [
+    { code: "failure_drill_mode", passed: run.runMode === "failure_drill", detail: run.runMode === "failure_drill" ? "这是失败演练 Run。" : "Run 模式不是 failure_drill。" },
+    { code: "invalid_result_rejected", passed: drill.rejected === true, detail: drill.rejected === true ? "无效结果被当前 Schema 拒绝。" : "无效结果没有被拒绝。" },
+    { code: "expected_failure_recorded", passed: run.status === "failed" && run.errorCode === "EXPECTED_VALIDATION_REJECTION", detail: run.status === "failed" && run.errorCode === "EXPECTED_VALIDATION_REJECTION" ? "拒绝被记录为预期失败。" : "没有记录预期的校验拒绝。" }
+  ];
+}
+
+function promotionEvidence(workSpecId: string, evaluations: RunEvaluation[]): Pick<RehearsalPromotionGate, "workSpecId" | "ready" | "passedRehearsalRoots" | "passedFailureDrillRunIds" | "missing"> {
+  const relevant = evaluations.filter((item) => item.workSpecId === workSpecId && item.passed);
+  const passedRehearsalRoots = [...new Set(relevant.filter((item) => item.runMode === "rehearsal").map((item) => item.rehearsalRootRunId))];
+  const passedFailureDrillRunIds = [...new Set(relevant.filter((item) => item.runMode === "failure_drill").map((item) => item.runId))];
+  const missing: string[] = [];
+  if (passedRehearsalRoots.length < 2) missing.push(`还需要 ${2 - passedRehearsalRoots.length} 次独立通过的预执行`);
+  if (passedFailureDrillRunIds.length < 1) missing.push("还需要 1 次通过的失败演练");
+  return { workSpecId, ready: missing.length === 0, passedRehearsalRoots, passedFailureDrillRunIds, missing };
+}
+
+function localDate(value: string, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
+}
+
+function isValidTimezone(timezone: string): boolean {
+  try { new Intl.DateTimeFormat("en", { timeZone: timezone }).format(); return true; }
+  catch { return false; }
+}
+
+function assertNoSymlinkSegments(root: string, target: string): void {
+  const path = relative(root, target);
+  if (path.startsWith("../") || path === "..") throw new Error("KNOWLEDGE_PATH_NOT_ALLOWED");
+  let cursor = root;
+  for (const segment of path.split(sep).filter(Boolean)) {
+    cursor = resolve(cursor, segment);
+    if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink()) throw new Error("KNOWLEDGE_SYMLINK_NOT_ALLOWED");
+  }
 }
 
 function isWritableRealDirectory(path: string): boolean {

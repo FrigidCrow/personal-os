@@ -652,3 +652,17 @@ Status: **Passed and deployed on 2026-08-03.** Both Runtimes completed real MCP 
 Phase 11 adds immutable per-step checkpoints to the native Agent Gateway, explicit resume-versus-restart retries, and controlled result deposition after human acceptance. SQLite remains the authority for recovery state; Obsidian remains the Markdown authority. Deposition failures do not falsify Run success and are surfaced in Today for manual retry.
 
 Status: **Passed and deployed on 2026-08-03.** Migration 11, the eighth MCP tool, desktop/mobile recovery UI, controlled `Reports`/`Generated` writes and production health gates all passed. Evidence is recorded in [PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-ACCEPTANCE.md](PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-ACCEPTANCE.md).
+
+### 2026-08-04 Phase 11.1 automatic low-risk report deposition
+
+Recurring read-only reports must not require repetitive daily acceptance. This correction adds explicit review and deposition triggers, managed Obsidian subdirectories, local-day note deduplication and actionable deposition failures. Existing WorkSpecs keep the conservative Phase 11 defaults. The canonical AI briefing and opportunity scan move through immutable revisions and explicit schedule rebinds.
+
+Status: **Passed and deployed on 2026-08-04.** Migration 12, managed subdirectories, local-day deduplication and the automatic-success policy passed all gates. The production Obsidian Vault is registered, and the canonical 06:30 AI briefing and 08:00 opportunity scan schedules now bind immutable revision 2 WorkSpecs that write successful reports to `Reports/AI日报` and `Reports/机会雷达` without daily approval. Evidence is recorded in [PERSONAL-OS-PHASE11-1-AUTOMATIC-DEPOSITION-ACCEPTANCE.md](PERSONAL-OS-PHASE11-1-AUTOMATIC-DEPOSITION-ACCEPTANCE.md).
+
+### 2026-08-04 Phase 12 rehearsal-to-Skill production gate
+
+The v2 control plane will restore the proven Radar lifecycle that was lost during the rewrite: real preflight, two independent rehearsals, a failure-path drill, a database-only Skill candidate, human publication into `.agents/skills`, a new immutable WorkSpec revision and a separate schedule rebind. It reuses Phase 11 checkpoints and does not introduce arbitrary DAG orchestration.
+
+Status: **Passed and deployed on 2026-08-04.** Migration 13 restores the real rehearsal-to-Skill lifecycle on the current v2 control plane. Two distinct passed rehearsal roots and one passed deterministic failure drill are required; pending candidates stay in SQLite; human publication creates an immutable WorkSpec revision; Schedule rebinding remains a separate explicit action. Evidence is recorded in [PERSONAL-OS-PHASE12-REHEARSAL-TO-SKILL-ACCEPTANCE.md](PERSONAL-OS-PHASE12-REHEARSAL-TO-SKILL-ACCEPTANCE.md).
+
+The Qishui production proof also adds a bounded managed-resource lifecycle: Core starts and stops the dedicated Android AVD outside the Codex workspace sandbox, while Codex remains the visual control loop. Two live isolated rehearsals and a failure drill passed before the daily `09:00 Asia/Tokyo` schedule was enabled.

@@ -48,9 +48,24 @@ export type SkillPublishInput = z.infer<typeof skillPublishInputSchema>;
 export const resultDepositionPolicySchema = z.object({
   vaultId: idSchema,
   directory: z.enum(["Generated", "Reports"]).default("Reports"),
-  titleTemplate: z.string().trim().min(1).max(200).default("{title} {date}")
+  subdirectory: z.string().trim().max(500).default("").superRefine((value, context) => {
+    if (!value) return;
+    if (value.startsWith("/") || value.endsWith("/") || value.includes("\\") || value.includes("\0")) {
+      context.addIssue({ code: "custom", message: "INVALID_KNOWLEDGE_SUBDIRECTORY" });
+      return;
+    }
+    if (value.split("/").some((segment) => !segment || segment === "." || segment === ".." || segment.includes(":"))) {
+      context.addIssue({ code: "custom", message: "INVALID_KNOWLEDGE_SUBDIRECTORY" });
+    }
+  }),
+  titleTemplate: z.string().trim().min(1).max(200).default("{title} {date}"),
+  trigger: z.enum(["on_acceptance", "on_success"]).default("on_acceptance"),
+  period: z.enum(["run", "calendar_day"]).default("run"),
+  timezone: z.string().trim().min(1).max(100).default("Asia/Tokyo")
 });
 export type ResultDepositionPolicy = z.infer<typeof resultDepositionPolicySchema>;
+export const workSpecReviewPolicySchema = z.enum(["required", "not_required"]);
+export type WorkSpecReviewPolicy = z.infer<typeof workSpecReviewPolicySchema>;
 export const workSpecInputSchema = z.object({
   projectId: idSchema.nullable().default(null),
   kind: workSpecKindSchema.default("one_off"),
@@ -62,6 +77,7 @@ export const workSpecInputSchema = z.object({
   maxAttempts: z.number().int().min(1).max(10).default(2),
   lifecycleStatus: workSpecStatusSchema.default("active"),
   skill: skillSnapshotSchema.nullable().default(null),
+  reviewPolicy: workSpecReviewPolicySchema.default("required"),
   resultDeposition: resultDepositionPolicySchema.nullable().default(null)
 });
 export type WorkSpecInput = z.input<typeof workSpecInputSchema>;
@@ -125,6 +141,8 @@ export const runStatusSchema = z.enum([
 export type RunStatus = z.infer<typeof runStatusSchema>;
 export const runReviewStatusSchema = z.enum(["not_required", "pending", "accepted", "rejected"]);
 export type RunReviewStatus = z.infer<typeof runReviewStatusSchema>;
+export const runModeSchema = z.enum(["production", "rehearsal", "failure_drill"]);
+export type RunMode = z.infer<typeof runModeSchema>;
 export interface Run {
   id: string;
   workSpecId: string;
@@ -135,6 +153,8 @@ export interface Run {
   attempt: number;
   idempotencyKey: string | null;
   retryOfRunId: string | null;
+  runMode: RunMode;
+  rehearsalRootRunId: string | null;
   externalRunId: string | null;
   errorCode: string | null;
   errorMessage: string | null;
@@ -149,6 +169,55 @@ export interface Run {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+export interface RunEvaluationCheck {
+  code: string;
+  passed: boolean;
+  detail: string;
+}
+export interface RunEvaluation {
+  id: string;
+  runId: string;
+  workSpecId: string;
+  runMode: Exclude<RunMode, "production">;
+  rehearsalRootRunId: string;
+  evaluatorVersion: string;
+  passed: boolean;
+  checks: RunEvaluationCheck[];
+  note: string;
+  createdAt: string;
+}
+
+export const runEvaluationInputSchema = z.object({
+  note: z.string().trim().max(4_000).default("")
+});
+export type RunEvaluationInput = z.infer<typeof runEvaluationInputSchema>;
+
+export const skillCandidateStatusSchema = z.enum(["pending", "published"]);
+export type SkillCandidateStatus = z.infer<typeof skillCandidateStatusSchema>;
+export interface SkillCandidate {
+  id: string;
+  workSpecId: string;
+  draft: SkillDraftInput;
+  content: string;
+  contentHash: string;
+  evidenceRunIds: string[];
+  status: SkillCandidateStatus;
+  publishedSkill: SkillSnapshot | null;
+  publishedWorkSpecId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt: string | null;
+}
+export interface RehearsalPromotionGate {
+  workSpecId: string;
+  ready: boolean;
+  passedRehearsalRoots: string[];
+  passedFailureDrillRunIds: string[];
+  missing: string[];
+  evaluations: RunEvaluation[];
+  candidates: SkillCandidate[];
 }
 
 export const runCreateInputSchema = z.object({
@@ -223,6 +292,8 @@ export interface RunDeposition {
   runId: string;
   vaultId: string;
   directory: "Generated" | "Reports";
+  subdirectory: string;
+  deduplicationKey: string | null;
   title: string;
   status: RunDepositionStatus;
   documentId: string | null;
@@ -299,6 +370,8 @@ export const processExecutionInputSchema = z.object({
 export const codexRuntimeOptionsSchema = z.object({
   additionalInstructions: z.string().trim().max(20_000).default(""),
   sandboxMode: z.enum(["read-only", "workspace-write"]).default("read-only"),
+  additionalDirectories: z.array(z.string().trim().min(1).max(2_000)).max(20).default([]),
+  managedResource: z.string().trim().min(1).max(100).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
   networkAccess: z.boolean().default(false),
   webSearch: z.boolean().default(false),
   model: z.string().trim().min(1).max(200).optional()
@@ -387,12 +460,18 @@ export const knowledgeDirectorySchema = z.enum(["Inbox", "Generated", "Reports"]
 export const knowledgeCreateInputSchema = z.object({
   vaultId: idSchema,
   directory: knowledgeDirectorySchema,
+  subdirectory: z.string().trim().max(500).default("").superRefine((value, context) => {
+    if (!value) return;
+    if (value.startsWith("/") || value.endsWith("/") || value.includes("\\") || value.includes("\0") || value.split("/").some((segment) => !segment || segment === "." || segment === ".." || segment.includes(":"))) {
+      context.addIssue({ code: "custom", message: "INVALID_KNOWLEDGE_SUBDIRECTORY" });
+    }
+  }),
   title: z.string().trim().min(1).max(200).refine((value) => !/[\\/:\0]/.test(value), "INVALID_KNOWLEDGE_TITLE"),
   body: z.string().max(100_000).default(""),
   tags: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
   links: z.array(knowledgeLinkInputSchema).max(50).default([])
 });
-export type KnowledgeCreateInput = z.infer<typeof knowledgeCreateInputSchema>;
+export type KnowledgeCreateInput = z.input<typeof knowledgeCreateInputSchema>;
 export interface KnowledgeIndexResult {
   indexed: number;
   unchanged: number;

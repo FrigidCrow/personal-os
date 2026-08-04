@@ -264,11 +264,11 @@ test("工作流验收后自动沉淀 Obsidian，并显示可恢复步骤区域",
   await page.getByLabel("执行要求").fill("生成日报，使用检查点记录进度，验收后沉淀到知识库。");
   await page.getByLabel("输出消息").fill("阶段十一浏览器结果");
   await page.getByRole("checkbox", { name: "写入 Obsidian 报告" }).check();
-  await page.getByLabel("目标目录").selectOption("Reports");
+  await page.getByLabel("托管根目录").selectOption("Reports");
   await page.getByLabel("笔记标题模板").fill("{date}-{title}");
   await page.getByRole("button", { name: "保存固定版本" }).click();
   await page.getByRole("heading", { name: "阶段十一可恢复日报" }).click();
-  await expect(page.locator(".definition-panel")).toContainText("Reports · 验收后写入");
+  await expect(page.locator(".definition-panel")).toContainText("Reports，验收后写入");
 
   const specsResponse = await page.request.get("/api/v2/work-specs");
   const specs = (await specsResponse.json() as { data: Array<{ id: string; title: string }> }).data;
@@ -294,6 +294,56 @@ test("工作流验收后自动沉淀 Obsidian，并显示可恢复步骤区域",
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(async () => await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
   await page.screenshot({ path: "review-artifacts/phase11/recoverable-run-deposition-mobile-dark.png", fullPage: true });
+});
+
+test("低风险日报可在雷达中配置成功后自动沉淀", async ({ page }) => {
+  await page.goto("/radar");
+  await page.getByRole("button", { name: "新建雷达" }).click();
+  await page.getByLabel("名称").fill("自动沉淀浏览器日报");
+  await page.getByLabel("Runtime").selectOption("openworker");
+  await page.getByLabel("固定 Skill").selectOption({ index: 1 });
+  await page.getByLabel("执行要求").fill("只读检索公开信息，提交结构化日报并自动沉淀。");
+  await page.getByRole("checkbox", { name: "写入 Obsidian 报告" }).check();
+  await page.getByLabel("写入时机").selectOption("on_success");
+  await page.getByLabel("子目录").fill("AI日报");
+  await page.getByLabel("去重周期").selectOption("calendar_day");
+  await page.getByLabel("笔记标题模板").fill("{date} 自动日报");
+  await page.getByRole("button", { name: "保存固定版本" }).click();
+  await page.getByRole("heading", { name: "自动沉淀浏览器日报" }).click();
+  await expect(page.locator(".definition-panel")).toContainText("Reports/AI日报，成功后自动写入");
+
+  const response = await page.request.get("/api/v2/work-specs");
+  const specs = (await response.json() as { data: Array<{ title: string; reviewPolicy: string; resultDeposition: { trigger: string; period: string; subdirectory: string } | null }> }).data;
+  expect(specs.find((item) => item.title === "自动沉淀浏览器日报")).toMatchObject({ reviewPolicy: "not_required", resultDeposition: { trigger: "on_success", period: "calendar_day", subdirectory: "AI日报" } });
+});
+
+test("复杂雷达以真实证据门禁生成候选 Skill，发布后仍需明确换绑", async ({ page }) => {
+  const skillsResponse = await page.request.get("/api/v2/skills");
+  const skills = (await skillsResponse.json() as { data: Array<Record<string, unknown>> }).data;
+  const skill = skills.find((item) => item.name === "personal-os-agent-run");
+  const workflowResponse = await page.request.post("/api/v2/work-specs", { data: { title: "阶段十二晋级浏览器雷达", instructions: "通过真实预执行与失败演练后沉淀专属 Skill。", kind: "workflow", executorType: "openworker", input: { runtime: { agent: "cowork" } }, skill } });
+  const workflow = (await workflowResponse.json() as { data: { id: string; title: string } }).data;
+  expect(workflowResponse.ok()).toBe(true);
+  const now = new Date().toISOString();
+  const evaluations = ["rehearsal-root-1", "rehearsal-root-2"].map((runId, index) => ({ id: `evaluation-${index}`, runId, workSpecId: workflow.id, runMode: "rehearsal", rehearsalRootRunId: runId, evaluatorVersion: "rehearsal-gate-v1", passed: true, checks: [{ code: "terminal_success", passed: true, detail: "通过" }], note: "", createdAt: now }));
+  let candidates: unknown[] = [];
+  let failureDrillRunIds: string[] = [];
+  const promotion = () => ({ workSpecId: workflow.id, ready: failureDrillRunIds.length === 1, passedRehearsalRoots: ["rehearsal-root-1", "rehearsal-root-2"], passedFailureDrillRunIds: failureDrillRunIds, missing: failureDrillRunIds.length ? [] : ["还需要 1 次通过的失败演练"], evaluations: [...evaluations, ...(failureDrillRunIds.length ? [{ id: "evaluation-drill", runId: "failure-drill-1", workSpecId: workflow.id, runMode: "failure_drill", rehearsalRootRunId: "failure-drill-1", evaluatorVersion: "rehearsal-gate-v1", passed: true, checks: [{ code: "invalid_result_rejected", passed: true, detail: "已拒绝" }], note: "", createdAt: now }] : [])], candidates });
+  await page.route(`**/api/v2/work-specs/${workflow.id}/promotion`, async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: promotion(), requestId: "e2e-promotion" }) }));
+  await page.route(`**/api/v2/work-specs/${workflow.id}/failure-drills`, async (route) => { failureDrillRunIds = ["failure-drill-1"]; await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ success: true, data: { run: { id: "failure-drill-1", runMode: "failure_drill", status: "failed" }, evaluation: promotion().evaluations.at(-1) }, requestId: "e2e-drill" }) }); });
+  await page.route(`**/api/v2/work-specs/${workflow.id}/skill-candidates`, async (route) => { const draft = route.request().postDataJSON(); candidates = [{ id: "candidate-1", workSpecId: workflow.id, draft, content: `---\nname: ${draft.name}\n---\n\n${draft.instructions}`, contentHash: "a".repeat(64), evidenceRunIds: ["rehearsal-root-1", "rehearsal-root-2", "failure-drill-1"], status: "pending", publishedSkill: null, publishedWorkSpecId: null, createdAt: now, updatedAt: now, publishedAt: null }]; await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ success: true, data: candidates[0], requestId: "e2e-candidate" }) }); });
+  await page.route("**/api/v2/skill-candidates/candidate-1/publish", async (route) => { const current = candidates[0] as Record<string, unknown>; candidates = [{ ...current, status: "published", publishedSkill: { name: "auto-brief", version: "1.0.1", contentHash: "a".repeat(64), path: ".agents/skills/auto-brief/SKILL.md", content: current.content }, publishedWorkSpecId: "published-work-spec", publishedAt: now }]; await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ success: true, data: candidates[0], requestId: "e2e-publish" }) }); });
+
+  await page.goto(`/radar/${workflow.id}`);
+  await expect(page.getByRole("heading", { name: "先把流程真实跑通" })).toBeVisible();
+  await expect(page.getByText("还需要 1 次通过的失败演练")).toBeVisible();
+  await page.getByRole("button", { name: "运行结构失败演练" }).click();
+  await expect(page.getByRole("heading", { name: "证据齐全，可以生成候选 Skill" })).toBeVisible();
+  await page.getByRole("button", { name: "保存数据库候选" }).click();
+  await expect(page.getByText(/待人工发布 ·/)).toBeVisible();
+  await page.getByRole("button", { name: "人工发布并创建新版" }).click();
+  await expect(page.getByText(/已人工发布 ·/)).toBeVisible();
+  await expect(page.getByText("发布没有自动改定时。")).toBeVisible();
 });
 
 test("完整财务工作台从现金事实走到预算、预测、经营归因和审批", async ({ page }) => {

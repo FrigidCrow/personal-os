@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -308,6 +308,101 @@ describe("vNext API", () => {
     expect(readFileSync(join(root, saved.relativePath), "utf8")).toContain("阶段十一结果");
     expect(await body(await app.request(`/api/v2/runs/${run.id}/artifacts`))).toMatchObject({ data: [expect.objectContaining({ storageKind: "obsidian", uri: expect.stringContaining(saved.relativePath) })] });
     expect(await body(await app.request("/api/v2/depositions?status=succeeded"))).toMatchObject({ data: [expect.objectContaining({ runId: run.id })] });
+    store.close();
+  });
+
+  it("auto-deposits an explicit low-risk daily report without an acceptance request", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-api-phase11-auto-")); directories.push(root);
+    const vaultRoot = join(root, "vault");
+    const skillRoot = join(root, "skills");
+    mkdirSync(vaultRoot, { recursive: true });
+    mkdirSync(join(skillRoot, "auto-brief"), { recursive: true });
+    writeFileSync(join(skillRoot, "auto-brief", "SKILL.md"), `---\nname: auto-brief\ndescription: Generate an automatic structured briefing.\nmetadata:\n  version: "1.0.0"\n---\n\n# Automatic briefing\n`);
+    const registry = new RepositorySkillRegistry(skillRoot);
+    const store = new SqliteVNextStore();
+    const adapter: ExecutorAdapter = {
+      type: "openworker",
+      validate: () => undefined,
+      health: () => ({ available: true, detail: "fixture" }),
+      execute: async (context) => {
+        const grant = execution.getCapabilityAuthority().authorize(context.capability!.token, "result:submit");
+        execution.submitRuntimeResult(grant, { summary: "自动日报完成", data: { qualityStatus: "passed" }, verification: ["来源已核验"] });
+        return { status: "succeeded", externalRunId: `openworker-${context.run.id}`, result: { finalResponse: "自动日报完成" } };
+      }
+    };
+    const execution = new PersonalOsService(store, [adapter], undefined, undefined, registry);
+    const schedules = new ScheduleService(store, execution);
+    const knowledge = new KnowledgeService(store);
+    const vault = knowledge.addVault({ name: "自动日报 Vault", rootPath: vaultRoot });
+    const app = createVNextApp({ store, execution, schedules, knowledge, finance: new FinanceService(store), skills: registry });
+    const createdResponse = await app.request("/api/v2/work-specs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+      title: "自动 AI 日报", instructions: "生成只读日报", kind: "workflow", executorType: "openworker", input: {}, skill: registry.get("auto-brief"), reviewPolicy: "not_required",
+      resultDeposition: { vaultId: vault.id, directory: "Reports", subdirectory: "AI日报", titleTemplate: "{date} AI 日报", trigger: "on_success", period: "calendar_day", timezone: "Asia/Tokyo" }
+    }) });
+    expect(createdResponse.status).toBe(201);
+    const workSpec = (await body<{ data: { id: string } }>(createdResponse)).data;
+    const runResponse = await app.request(`/api/v2/work-specs/${workSpec.id}/runs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ start: true }) });
+    const run = (await body<{ data: { id: string } }>(runResponse)).data;
+    await waitUntil(() => store.getRun(run.id)?.status === "succeeded" && store.getRunDeposition(run.id)?.status === "succeeded");
+    expect(await body(await app.request(`/api/v2/runs/${run.id}`))).toMatchObject({ data: { reviewStatus: "not_required" } });
+    expect(await body(await app.request(`/api/v2/runs/${run.id}/deposition`))).toMatchObject({ data: { status: "succeeded", relativePath: expect.stringMatching(/^Reports\/AI日报\//) } });
+    expect((await app.request(`/api/v2/runs/${run.id}/accept`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(409);
+    store.close();
+  });
+
+  it("exposes the Phase 12 rehearsal, evaluation, failure-drill, candidate and human publish gate", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-api-phase12-")); directories.push(root);
+    const skillRoot = join(root, "skills");
+    mkdirSync(join(skillRoot, "base-radar"), { recursive: true });
+    writeFileSync(join(skillRoot, "base-radar", "SKILL.md"), `---\nname: base-radar\ndescription: Execute a governed Radar rehearsal.\nmetadata:\n  version: "1.0.0"\n---\n\n# Base Radar\n`);
+    const registry = new RepositorySkillRegistry(skillRoot);
+    const store = new SqliteVNextStore();
+    const adapter: ExecutorAdapter = {
+      type: "openworker",
+      validate: () => undefined,
+      health: () => ({ available: true, detail: "fixture" }),
+      execute: async (context) => {
+        const checkpointGrant = execution.getCapabilityAuthority().authorize(context.capability!.token, "checkpoint:write");
+        execution.saveRuntimeCheckpoint(checkpointGrant, { stepKey: "verify", label: "验证", status: "completed", summary: "已完成验证", data: {} });
+        const resultGrant = execution.getCapabilityAuthority().authorize(context.capability!.token, "result:submit");
+        execution.submitRuntimeResult(resultGrant, { summary: "预执行通过", data: { valid: true }, verification: ["结构化结果已核对"] });
+        return { status: "succeeded", externalRunId: `openworker-${context.run.id}`, result: { finalResponse: "通过" } };
+      }
+    };
+    const execution = new PersonalOsService(store, [adapter], undefined, undefined, registry);
+    const schedules = new ScheduleService(store, execution);
+    const app = createVNextApp({ store, execution, schedules, knowledge: new KnowledgeService(store), finance: new FinanceService(store), skills: registry });
+    const source = execution.createWorkSpec({ title: "晋级雷达", instructions: "先预执行，再发布专属 Skill。", kind: "workflow", executorType: "openworker", input: {}, skill: registry.get("base-radar") });
+    const schedule = schedules.create({ workSpecId: source.id, name: "晋级后定时", cronExpression: "0 8 * * *", timezone: "Asia/Tokyo", enabled: false, catchUp: false });
+
+    for (let index = 0; index < 2; index += 1) {
+      const response = await app.request(`/api/v2/work-specs/${source.id}/rehearsals`, { method: "POST" });
+      expect(response.status).toBe(202);
+      const run = (await body<{ data: { id: string; runMode: string } }>(response)).data;
+      expect(run.runMode).toBe("rehearsal");
+      await waitUntil(() => store.getRun(run.id)?.status === "succeeded");
+      const evaluated = await app.request(`/api/v2/runs/${run.id}/evaluation`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ note: `第 ${index + 1} 次` }) });
+      expect(await body(evaluated)).toMatchObject({ data: { passed: true, runMode: "rehearsal" } });
+    }
+    const beforeDrill = await app.request(`/api/v2/work-specs/${source.id}/promotion`);
+    expect(await body(beforeDrill)).toMatchObject({ data: { ready: false, passedRehearsalRoots: expect.any(Array) } });
+    const drill = await app.request(`/api/v2/work-specs/${source.id}/failure-drills`, { method: "POST" });
+    expect(await body(drill)).toMatchObject({ data: { run: { runMode: "failure_drill", status: "failed" }, evaluation: { passed: true } } });
+    expect(await body(await app.request(`/api/v2/work-specs/${source.id}/promotion`))).toMatchObject({ data: { ready: true, passedRehearsalRoots: expect.any(Array), passedFailureDrillRunIds: expect.any(Array) } });
+
+    const draft = { name: "promoted-radar", version: "1.0.0", displayName: "晋级雷达", description: "把验证通过的雷达流程沉淀成固定技能。", instructions: "# 晋级雷达\n\n1. 读取运行上下文。\n2. 保存步骤证据。\n3. 提交结构化结果并核验。", expectedCurrentHash: null };
+    const candidateResponse = await app.request(`/api/v2/work-specs/${source.id}/skill-candidates`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
+    expect(candidateResponse.status).toBe(201);
+    const candidate = (await body<{ data: { id: string; status: string } }>(candidateResponse)).data;
+    expect(candidate.status).toBe("pending");
+    expect(existsSync(join(skillRoot, draft.name))).toBe(false);
+    const publishedResponse = await app.request(`/api/v2/skill-candidates/${candidate.id}/publish`, { method: "POST" });
+    expect(publishedResponse.status).toBe(201);
+    const published = (await body<{ data: { publishedWorkSpecId: string; publishedSkill: { name: string } } }>(publishedResponse)).data;
+    expect(published.publishedSkill.name).toBe(draft.name);
+    expect(store.getWorkSpec(published.publishedWorkSpecId)).toMatchObject({ revisionOfWorkSpecId: source.id, skill: { name: draft.name } });
+    expect(store.getSchedule(schedule.id)?.workSpecId).toBe(source.id);
+    expect((await app.request(`/api/v2/skill-candidates/${candidate.id}/publish`, { method: "POST" })).status).toBe(409);
     store.close();
   });
 });

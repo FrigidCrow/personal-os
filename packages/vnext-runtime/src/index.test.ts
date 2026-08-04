@@ -7,8 +7,8 @@ import { CodexExecutor, InternalExecutor, OpenWorkerExecutor, ProcessExecutor, b
 
 function context(input: unknown): ExecutionContext {
   return {
-    run: { id: "r", workSpecId: "w", projectId: null, executorType: "internal", status: "running", input, attempt: 1, idempotencyKey: null, retryOfRunId: null, externalRunId: null, errorCode: null, errorMessage: null, result: null, usage: null, actualCostMinor: null, actualCostCurrency: null, costSource: null, reviewStatus: "not_required", reviewedAt: null, reviewComment: null, createdAt: "", startedAt: "", finishedAt: null },
-    workSpec: { id: "w", projectId: null, kind: "one_off", title: "test", instructions: "test", executorType: "internal", input, timeoutSeconds: 10, maxAttempts: 2, lifecycleStatus: "active", skill: null, resultDeposition: null, revisionOfWorkSpecId: null, revisionNumber: 1, createdAt: "", updatedAt: "" },
+    run: { id: "r", workSpecId: "w", projectId: null, executorType: "internal", status: "running", input, attempt: 1, idempotencyKey: null, retryOfRunId: null, runMode: "production", rehearsalRootRunId: null, externalRunId: null, errorCode: null, errorMessage: null, result: null, usage: null, actualCostMinor: null, actualCostCurrency: null, costSource: null, reviewStatus: "not_required", reviewedAt: null, reviewComment: null, createdAt: "", startedAt: "", finishedAt: null },
+    workSpec: { id: "w", projectId: null, kind: "one_off", title: "test", instructions: "test", executorType: "internal", input, timeoutSeconds: 10, maxAttempts: 2, lifecycleStatus: "active", skill: null, reviewPolicy: "required", resultDeposition: null, revisionOfWorkSpecId: null, revisionNumber: 1, createdAt: "", updatedAt: "" },
     project: null,
     resume: null,
     signal: new AbortController().signal,
@@ -129,6 +129,105 @@ describe("runtime adapters", () => {
     const adapter = new CodexExecutor({ allowedRoots: [allowed] });
     expect(() => adapter.validate(projectContext(outside, "codex"))).toThrow("WORKING_DIRECTORY_NOT_ALLOWED");
     expect(() => adapter.validate(projectContext(allowed, "codex"))).toThrow("CODEX_GIT_REPOSITORY_REQUIRED");
+  });
+
+  it("passes only existing explicitly allowed additional directories to Codex", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-codex-root-"));
+    const vault = mkdtempSync(join(tmpdir(), "personal-os-codex-vault-"));
+    mkdirSync(join(root, ".git"));
+    let receivedOptions: Record<string, unknown> = {};
+    const adapter = new CodexExecutor({
+      allowedRoots: [root, vault],
+      clientFactory: () => ({
+        startThread(options) {
+          receivedOptions = options;
+          return {
+            id: "codex-extra-dir",
+            async runStreamed() {
+              return { events: (async function* () {
+                yield { type: "item.completed", item: { id: "external", type: "file_change", status: "completed", changes: [{ path: join(vault, "note.md"), kind: "add" }] } } as const;
+                yield { type: "item.completed", item: { id: "a", type: "agent_message", text: "ok" } } as const;
+                yield { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 } } as const;
+              })() };
+            }
+          };
+        }
+      })
+    });
+    const context = projectContext(root, "codex", { runtime: { sandboxMode: "workspace-write", additionalDirectories: [vault] } });
+    const result = await adapter.execute(context);
+    expect(receivedOptions).toMatchObject({ additionalDirectories: [vault], sandboxMode: "workspace-write" });
+    expect(result.artifacts).toEqual([]);
+
+    const outside = mkdtempSync(join(tmpdir(), "personal-os-codex-untrusted-"));
+    const rejected = projectContext(root, "codex", { runtime: { additionalDirectories: [outside] } });
+    expect(() => adapter.validate(rejected)).toThrow("ADDITIONAL_DIRECTORY_NOT_ALLOWED");
+  });
+
+  it("starts and stops a configured managed resource around the Codex turn", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-codex-managed-"));
+    mkdirSync(join(root, ".git"));
+    const order: string[] = [];
+    const managedResource = {
+      start: vi.fn(async () => { order.push("start"); }),
+      stop: vi.fn(async () => { order.push("stop"); })
+    };
+    const adapter = new CodexExecutor({
+      allowedRoots: [root],
+      managedResources: { "qishui-emulator": managedResource },
+      clientFactory: () => ({
+        startThread() {
+          order.push("thread");
+          return {
+            id: "managed-thread",
+            async runStreamed() {
+              return { events: (async function* () {
+                yield { type: "item.completed", item: { id: "a", type: "agent_message", text: "ok" } } as const;
+                yield { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 } } as const;
+              })() };
+            }
+          };
+        }
+      })
+    });
+    await expect(adapter.execute(projectContext(root, "codex", { runtime: { managedResource: "qishui-emulator" } }))).resolves.toMatchObject({ status: "succeeded" });
+    expect(order).toEqual(["start", "thread", "stop"]);
+    expect(managedResource.start).toHaveBeenCalledOnce();
+    expect(managedResource.stop).toHaveBeenCalledOnce();
+  });
+
+  it("stops a managed resource when the Codex turn fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-codex-managed-failure-"));
+    mkdirSync(join(root, ".git"));
+    const managedResource = { start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) };
+    const adapter = new CodexExecutor({
+      allowedRoots: [root],
+      managedResources: { "qishui-emulator": managedResource },
+      clientFactory: () => ({
+        startThread: () => ({ id: "failed-thread", async runStreamed() { throw new Error("provider failed"); } })
+      })
+    });
+    await expect(adapter.execute(projectContext(root, "codex", { runtime: { managedResource: "qishui-emulator" } }))).rejects.toThrow("provider failed");
+    expect(managedResource.stop).toHaveBeenCalledOnce();
+  });
+
+  it("cleans up a managed resource after a partial start failure", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-codex-managed-start-failure-"));
+    mkdirSync(join(root, ".git"));
+    const managedResource = {
+      start: vi.fn(async () => { throw new Error("boot timeout"); }),
+      stop: vi.fn(async () => undefined)
+    };
+    const adapter = new CodexExecutor({ allowedRoots: [root], managedResources: { "qishui-emulator": managedResource } });
+    await expect(adapter.execute(projectContext(root, "codex", { runtime: { managedResource: "qishui-emulator" } }))).rejects.toThrow("boot timeout");
+    expect(managedResource.stop).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an unconfigured managed resource before execution", () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-codex-managed-missing-"));
+    mkdirSync(join(root, ".git"));
+    const adapter = new CodexExecutor({ allowedRoots: [root] });
+    expect(() => adapter.validate(projectContext(root, "codex", { runtime: { managedResource: "qishui-emulator" } }))).toThrow("MANAGED_RESOURCE_UNAVAILABLE:qishui-emulator");
   });
 
   it("resumes the persisted Codex thread instead of starting a new one", async () => {

@@ -42,6 +42,17 @@ npm run healthcheck
 安装命令只会生成当前 API 和 Web 两个 LaunchAgent。若传入已废弃的 `--generation` 参数会直接拒绝执行。
 `healthcheck` 会在服务刚重启时短暂重试，避免 LaunchAgent 还没监听端口就误报失败。
 
+在这台个人机器上，安装器会自动检测 `~/Dev/qishui-music`、对应的 Obsidian 项目目录和 Python 3.12，并把 `qishui-emulator` 注册为 API 的受管资源。也可以显式覆盖：
+
+```bash
+PERSONAL_OS_ALLOWED_ROOTS="/path/to/personal-os:/path/to/qishui-music:/path/to/Obsidian/Qishui" \
+PERSONAL_OS_QISHUI_EMULATOR_SCRIPT="/path/to/qishui-music/scripts/qishui_emulator.py" \
+PERSONAL_OS_PYTHON_PATH="/absolute/path/to/python3" \
+npm run launchagent:install -- --apply
+```
+
+这些变量只配置可信本地命令和目录，不接受 Task 输入覆盖。不要把整个 Home 目录加入允许路径。
+
 ## 检查
 
 ```bash
@@ -61,7 +72,7 @@ npm run lint
 npm run build
 ```
 
-当前数据库 Schema 为 10。正式更新时由 API 启动过程自动执行 migration 10，为 WorkSpec 增加不可变版本链字段。
+当前数据库 Schema 为 13。正式更新时由 API 启动过程按顺序执行迁移；migration 12 增加自动日报沉淀，migration 13 增加预执行评估与候选 Skill 状态。
 
 执行器级验证：
 

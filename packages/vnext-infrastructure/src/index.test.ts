@@ -77,6 +77,36 @@ describe("vNext SQLite migrations", () => {
     database.close();
   });
 
+  it("adds Phase 11.1 automatic deposition metadata with conservative backfills", () => {
+    const database = new Database(":memory:");
+    applyMigrations(database, migrations.slice(0, 11));
+    const now = "2026-08-03T00:00:00.000Z";
+    database.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,result_deposition_json,revision_of_work_spec_id,revision_number,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("phase11-workflow", null, "workflow", "旧工作流", "旧定义", "internal", "{}", 5, 2, "active", null, null, null, 1, now, now);
+    applyMigrations(database);
+    expect(database.prepare("SELECT review_policy FROM work_specs WHERE id='phase11-workflow'").get()).toEqual({ review_policy: "required" });
+    expect(database.prepare("PRAGMA table_info(run_depositions)").all()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "subdirectory", dflt_value: "''" }),
+      expect.objectContaining({ name: "deduplication_key" })
+    ]));
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='run_depositions_deduplication_idx'").get()).toEqual({ name: "run_depositions_deduplication_idx" });
+    expect(database.pragma("foreign_key_check")).toEqual([]);
+    database.close();
+  });
+
+  it("adds Phase 12 rehearsal evidence without changing historical Runs", () => {
+    const database = new Database(":memory:");
+    applyMigrations(database, migrations.slice(0, 12));
+    const now = "2026-08-04T00:00:00.000Z";
+    database.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,result_deposition_json,revision_of_work_spec_id,revision_number,review_policy,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("phase12-workflow", null, "workflow", "历史工作流", "旧定义", "internal", "{}", 5, 2, "active", null, null, null, 1, "required", now, now);
+    database.prepare(`INSERT INTO runs(id,work_spec_id,project_id,executor_type,status,input_json,attempt,created_at,finished_at,usage_json,review_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run("phase12-run", "phase12-workflow", null, "internal", "succeeded", "{}", 1, now, now, null, "accepted");
+    applyMigrations(database);
+    expect(database.prepare("SELECT run_mode,rehearsal_root_run_id FROM runs WHERE id='phase12-run'").get()).toEqual({ run_mode: "production", rehearsal_root_run_id: null });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('run_evaluations','skill_candidates') ORDER BY name").all()).toEqual([{ name: "run_evaluations" }, { name: "skill_candidates" }]);
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='runs_rehearsal_idx'").get()).toEqual({ name: "runs_rehearsal_idx" });
+    expect(database.pragma("foreign_key_check")).toEqual([]);
+    database.close();
+  });
+
   it("creates all seven Phase 5 finance tables and backfills transaction facts", () => {
     const database = new Database(":memory:");
     applyMigrations(database, migrations.slice(0, 6));
@@ -93,6 +123,17 @@ describe("vNext SQLite migrations", () => {
 });
 
 describe("vNext repository integrations", () => {
+  it("normalizes pre-Phase-11.1 deposition JSON to conservative defaults", () => {
+    const store = new SqliteVNextStore();
+    const now = "2026-08-03T00:00:00.000Z";
+    store.connection.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,result_deposition_json,revision_of_work_spec_id,revision_number,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("legacy-deposition", null, "workflow", "旧日报", "旧定义", "internal", "{}", 5, 2, "active", null, JSON.stringify({ vaultId: "legacy-vault", directory: "Reports", titleTemplate: "{date}-{title}" }), null, 1, now, now);
+    expect(store.getWorkSpec("legacy-deposition")).toMatchObject({
+      reviewPolicy: "required",
+      resultDeposition: { subdirectory: "", trigger: "on_acceptance", period: "run", timezone: "Asia/Tokyo" }
+    });
+    store.close();
+  });
+
   it("persists a unified run and append-only events", async () => {
     const store = new SqliteVNextStore();
     const fake = new FakeExecutor();

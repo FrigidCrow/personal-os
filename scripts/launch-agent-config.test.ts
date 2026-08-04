@@ -27,4 +27,20 @@ describe("current Personal OS LaunchAgents", () => {
     expect(plist).toContain("PERSONAL_OS_SKILLS_ROOT");
     expect(plist).not.toMatch(/TOKEN|API_KEY|SECRET/);
   });
+
+  it("passes an optional trusted Qishui emulator lifecycle to the API only", () => {
+    const services = buildPersonalOsServices({
+      ...base,
+      qishuiEmulatorScript: "/projects/qishui/scripts/qishui_emulator.py",
+      pythonPath: "/python"
+    });
+    expect(services[0]!.environment).toMatchObject({
+      PERSONAL_OS_QISHUI_EMULATOR_SCRIPT: "/projects/qishui/scripts/qishui_emulator.py",
+      PERSONAL_OS_PYTHON_PATH: "/python"
+    });
+    expect(services[1]!.environment).not.toHaveProperty("PERSONAL_OS_QISHUI_EMULATOR_SCRIPT");
+    const plist = renderLaunchAgentPlist(services[0]!, "/logs");
+    expect(plist).toContain("PERSONAL_OS_QISHUI_EMULATOR_SCRIPT");
+    expect(plist).not.toMatch(/TOKEN|API_KEY|SECRET/);
+  });
 });

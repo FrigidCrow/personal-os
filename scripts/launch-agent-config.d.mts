@@ -12,6 +12,8 @@ export interface LaunchAgentOptions {
   v2DatabasePath: string;
   obsidianVaultPath: string;
   allowedRoots?: string[];
+  qishuiEmulatorScript?: string;
+  pythonPath?: string;
   timezone?: string;
 }
 

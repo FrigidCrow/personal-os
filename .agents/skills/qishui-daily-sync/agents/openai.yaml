@@ -1,0 +1,4 @@
+interface:
+  display_name: "汽水音乐双榜同步"
+  short_description: "Operate the daily Qishui Music library sync through Codex or OpenWorker. Use when a Radar run must collect 热歌榜 and 新歌榜 T"
+  default_prompt: "Use $qishui-daily-sync to complete this governed Personal OS run."

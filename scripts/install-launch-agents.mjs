@@ -24,7 +24,18 @@ const openWorkerApiToken = process.env.OPENWORKER_API_TOKEN ?? "";
 if (process.argv.some((argument) => argument.startsWith("--generation=")) || process.env.PERSONAL_OS_GENERATION) {
   throw new Error("Generation switching has been removed; Personal OS now has one current runtime.");
 }
-const allowedRoots = (process.env.PERSONAL_OS_ALLOWED_ROOTS ?? projectRoot).split(delimiter).filter(Boolean).map((value) => resolve(value));
+const defaultQishuiRepository = join(homedir(), "Dev", "qishui-music");
+const defaultQishuiEmulatorScript = join(defaultQishuiRepository, "scripts", "qishui_emulator.py");
+const defaultQishuiObsidianPath = join(obsidianVaultPath, "Projects", "Qishui Music");
+const defaultPythonPath = join(homedir(), ".pyenv", "versions", "3.12.9", "bin", "python3");
+const defaultAllowedRoots = [projectRoot, ...(existsSync(defaultQishuiRepository) ? [defaultQishuiRepository] : []), ...(existsSync(defaultQishuiObsidianPath) ? [defaultQishuiObsidianPath] : [])];
+const allowedRoots = (process.env.PERSONAL_OS_ALLOWED_ROOTS ? process.env.PERSONAL_OS_ALLOWED_ROOTS.split(delimiter) : defaultAllowedRoots).filter(Boolean).map((value) => resolve(value));
+const qishuiEmulatorScript = process.env.PERSONAL_OS_QISHUI_EMULATOR_SCRIPT
+  ? resolve(process.env.PERSONAL_OS_QISHUI_EMULATOR_SCRIPT)
+  : existsSync(defaultQishuiEmulatorScript) ? defaultQishuiEmulatorScript : undefined;
+const pythonPath = process.env.PERSONAL_OS_PYTHON_PATH
+  ? resolve(process.env.PERSONAL_OS_PYTHON_PATH)
+  : qishuiEmulatorScript && existsSync(defaultPythonPath) ? defaultPythonPath : undefined;
 const controlDirectory = join(homedir(), ".local", "share", "personal-os-v2", "control");
 
 const services = buildPersonalOsServices({
@@ -34,6 +45,8 @@ const services = buildPersonalOsServices({
   v2DatabasePath,
   obsidianVaultPath,
   allowedRoots,
+  qishuiEmulatorScript,
+  pythonPath,
   timezone: process.env.PERSONAL_OS_TIMEZONE ?? "Asia/Tokyo"
 });
 
