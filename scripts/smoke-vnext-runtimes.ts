@@ -88,6 +88,8 @@ function runtimeContext(executorType: "codex" | "openworker", title: string, ins
     maxAttempts: 1,
     lifecycleStatus: "active",
     skill: null,
+    revisionOfWorkSpecId: null,
+    revisionNumber: 1,
     createdAt: run.createdAt,
     updatedAt: run.createdAt
   };

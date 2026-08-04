@@ -32,10 +32,14 @@ import {
   runtimeApprovalRequestSchema,
   runtimeEventInputSchema,
   runtimeResultInputSchema,
+  scheduleRebindInputSchema,
   scheduleInputSchema,
   scheduleUpdateInputSchema,
+  skillDraftInputSchema,
+  skillPublishInputSchema,
   vaultInputSchema,
   workSpecInputSchema,
+  workSpecRevisionInputSchema,
   type RunEvent,
   type RuntimeCapabilityScope
 } from "@personal-os/vnext-contracts";
@@ -97,8 +101,13 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
     ...(context.req.query("kind") === "workflow" || context.req.query("kind") === "one_off" ? { kind: context.req.query("kind") as "workflow" | "one_off" } : {})
   }), context.get("requestId"))));
   app.post("/api/v2/work-specs", async (context) => context.json(success(execution.createWorkSpec(workSpecInputSchema.parse(await context.req.json()), context.get("requestId")), context.get("requestId")), 201));
+  app.post("/api/v2/work-specs/:id/revisions", async (context) => context.json(success(execution.createWorkSpecRevision(context.req.param("id"), workSpecRevisionInputSchema.parse(await context.req.json()), context.get("requestId")), context.get("requestId")), 201));
+  app.get("/api/v2/work-specs/:id/preflight", async (context) => context.json(success(await execution.preflightWorkSpec(context.req.param("id")), context.get("requestId"))));
+  app.get("/api/v2/operations/workflows", (context) => context.json(success(execution.listWorkflowOperations(), context.get("requestId"))));
   app.post("/api/v2/work-specs/:id/retire", (context) => context.json(success(execution.retireWorkSpec(context.req.param("id"), context.get("requestId")), context.get("requestId"))));
   app.get("/api/v2/skills", (context) => context.json(success(dependencies.skills?.list() ?? [], context.get("requestId"))));
+  app.post("/api/v2/skills/validate", async (context) => context.json(success(execution.validateSkillDraft(skillDraftInputSchema.parse(await context.req.json())), context.get("requestId"))));
+  app.post("/api/v2/skills/publish", async (context) => context.json(success(execution.publishSkill(skillPublishInputSchema.parse(await context.req.json()), context.get("requestId")), context.get("requestId")), 201));
 
   app.get("/api/v2/runtime/mcp/context", (context) => {
     const grant = runtimeGrant(context.req.header("authorization"), "context:read", execution);
@@ -231,6 +240,12 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
   app.get("/api/v2/schedules", (context) => context.json(success(store.listSchedules(), context.get("requestId"))));
   app.post("/api/v2/schedules", async (context) => context.json(success(schedules.create(scheduleInputSchema.parse(await context.req.json()), context.get("requestId")), context.get("requestId")), 201));
   app.patch("/api/v2/schedules/:id", async (context) => context.json(success(schedules.update(context.req.param("id"), scheduleUpdateInputSchema.parse(await context.req.json()), context.get("requestId")), context.get("requestId"))));
+  app.post("/api/v2/schedules/:id/rebind", async (context) => {
+    const input = scheduleRebindInputSchema.parse(await context.req.json());
+    const preflight = await execution.preflightWorkSpec(input.workSpecId);
+    if (!preflight.ready) throw new Error("WORK_SPEC_PREFLIGHT_FAILED");
+    return context.json(success(schedules.rebind(context.req.param("id"), input, context.get("requestId")), context.get("requestId")));
+  });
   app.post("/api/v2/schedules/:id/pause", (context) => context.json(success(schedules.setEnabled(context.req.param("id"), false, context.get("requestId")), context.get("requestId"))));
   app.post("/api/v2/schedules/:id/resume", (context) => context.json(success(schedules.setEnabled(context.req.param("id"), true, context.get("requestId")), context.get("requestId"))));
   app.post("/api/v2/schedules/:id/run-now", (context) => context.json(success(schedules.runNow(context.req.param("id"), context.get("requestId")), context.get("requestId")), 202));
@@ -317,9 +332,9 @@ function statusFor(code: string): 400 | 401 | 403 | 404 | 409 | 500 | 503 {
   if (code === "RUNTIME_CAPABILITY_REQUIRED" || code === "RUNTIME_CAPABILITY_INVALID" || code === "RUNTIME_CAPABILITY_EXPIRED") return 401;
   if (code === "RUNTIME_CAPABILITY_SCOPE_DENIED") return 403;
   if (code.endsWith("_NOT_FOUND")) return 404;
-  if (code.includes("TRANSITION") || code.includes("NOT_RETRYABLE") || code.includes("ALREADY_") || code.includes("NOT_WAITING_") || code.includes("REQUIRES_COMPLETED") || code.includes("HAS_ACTIVE") || code.includes("EXCEEDS_") || code.includes("_CONFLICT") || code.endsWith("_EXISTS") || code === "MAX_ATTEMPTS_REACHED" || code === "WORK_SPEC_NOT_ACTIVE" || code === "APPROVAL_EXPIRED") return 409;
+  if (code.includes("TRANSITION") || code.includes("NOT_RETRYABLE") || code.includes("ALREADY_") || code.includes("NOT_WAITING_") || code.includes("REQUIRES_COMPLETED") || code.includes("HAS_ACTIVE") || code.includes("EXCEEDS_") || code.includes("_CONFLICT") || code.endsWith("_EXISTS") || code === "MAX_ATTEMPTS_REACHED" || code === "WORK_SPEC_NOT_ACTIVE" || code === "WORK_SPEC_RETIRED" || code === "SCHEDULE_REBIND_TARGET_NOT_ACTIVE_WORKFLOW" || code === "APPROVAL_EXPIRED" || code === "SKILL_CONCURRENT_UPDATE" || code === "SKILL_CURRENT_VERSION_MISSING" || code === "SKILL_VERSION_MUST_INCREASE" || code === "SKILL_DRAFT_CHANGED_AFTER_VALIDATION") return 409;
   if (code === "EXECUTOR_UNAVAILABLE") return 503;
-  if (code.includes("NOT_ALLOWED") || code.includes("NOT_CHANGEABLE") || code.includes("NOT_REFUNDABLE") || code.includes("MISMATCH") || code.includes("MUST_") || code.includes("PATH_ESCAPE") || code.endsWith("_REQUIRED") || code.startsWith("INVALID_")) return 400;
+  if (code.includes("NOT_ALLOWED") || code.includes("NOT_CHANGEABLE") || code.includes("NOT_REFUNDABLE") || code.includes("MISMATCH") || code.includes("MUST_") || code.includes("REQUIRES_WORKFLOW") || code.includes("PATH_ESCAPE") || code.includes("SECRET_DETECTED") || code.includes("PREFLIGHT_FAILED") || code.endsWith("_REQUIRED") || code.startsWith("INVALID_")) return 400;
   return 500;
 }
 function runtimeGrant(authorization: string | undefined, scope: RuntimeCapabilityScope, execution: PersonalOsService): RuntimeCapabilityGrant {

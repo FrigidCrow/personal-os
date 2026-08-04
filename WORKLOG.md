@@ -928,3 +928,33 @@ Phase E verification so far:
 - All three Skills passed `quick_validate.py`; SQLite migration 9 has `quick_check=ok` and zero foreign-key violations.
 - Formal API/Scheduler report healthy with two enabled schedules, zero pending approvals, three Skills and seven MCP tools.
 - Real Codex Run `a7dea800-63ff-4357-8164-2cc5bb94e7c5` and OpenWorker Run `1285be3f-e7e0-4561-bf70-8c842cd1f780` both submitted the exact structured acceptance result and were accepted.
+
+## 2026-08-03 - Personal OS Phase 10 workflow operations
+
+### Plan
+
+- Froze the human-controlled lifecycle: write Skill, validate, publish, create an immutable workflow revision, preflight, explicitly rebind a Schedule and observe bounded retry.
+- Kept Git as Skill authority, SQLite as business authority and Core API as the only write path; no new high-risk Agent action was authorized.
+- Defined 13 acceptance gates covering security, lineage, Schedule binding, retry, UI, production health and documentation.
+
+### Work
+
+- Added a two-step Skill workbench with atomic repository publishing, strict version increase, optimistic Hash protection and Secret/path/symlink rejection.
+- Added immutable WorkSpec revision lineage, explainable preflight checks, explicit audited Schedule rebinding and a unified workflow operations health view.
+- Added Scheduler-only bounded automatic retry with one Run per attempt, retry lineage and an exhausted event; manual failures remain user-controlled.
+- Rebuilt the Radar workspace around operational health, preflight, version creation and Schedule rebinding; added a simple Chinese user guide and current README.
+- Made the formal Runtime read Skills from the source Git worktree and added bounded startup retries to the health command.
+
+### Review
+
+- Fixed production Skill authority accidentally pointing at an ephemeral deployed Runtime by explicitly configuring the source `.agents/skills` root.
+- Fixed Schedule rebinding storage so `work_spec_id` is actually updated without changing Cron, timezone or enabled state.
+- Enforced root and symlink checks on both Skill reads and writes, and kept Skill bodies out of Audit payloads.
+- Visual review passed on desktop dark and 390px mobile dark. No unresolved Blocker, Critical or High finding remains.
+
+### Test
+
+- Vitest 8 files / 100 tests; Playwright 11/11.
+- TypeScript, ESLint, Build and `git diff --check` passed; only the existing Vite bundle-size advisory remains.
+- Production Web/API/Scheduler and both Runtime adapters report healthy; schema 10 has `quick_check=ok`, zero foreign-key violations and two enabled schedules.
+- Production backup created at `~/.local/share/personal-os-v2/backups/personal-os-v2-2026-08-03T01-49-01-441Z.db` before deployment.

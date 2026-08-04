@@ -8,7 +8,7 @@ import { CodexExecutor, InternalExecutor, OpenWorkerExecutor, ProcessExecutor, b
 function context(input: unknown): ExecutionContext {
   return {
     run: { id: "r", workSpecId: "w", projectId: null, executorType: "internal", status: "running", input, attempt: 1, idempotencyKey: null, retryOfRunId: null, externalRunId: null, errorCode: null, errorMessage: null, result: null, usage: null, actualCostMinor: null, actualCostCurrency: null, costSource: null, reviewStatus: "not_required", reviewedAt: null, reviewComment: null, createdAt: "", startedAt: "", finishedAt: null },
-    workSpec: { id: "w", projectId: null, kind: "one_off", title: "test", instructions: "test", executorType: "internal", input, timeoutSeconds: 10, maxAttempts: 2, lifecycleStatus: "active", skill: null, createdAt: "", updatedAt: "" },
+    workSpec: { id: "w", projectId: null, kind: "one_off", title: "test", instructions: "test", executorType: "internal", input, timeoutSeconds: 10, maxAttempts: 2, lifecycleStatus: "active", skill: null, revisionOfWorkSpecId: null, revisionNumber: 1, createdAt: "", updatedAt: "" },
     project: null,
     resume: null,
     signal: new AbortController().signal,

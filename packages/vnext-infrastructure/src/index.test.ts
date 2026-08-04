@@ -52,6 +52,17 @@ describe("vNext SQLite migrations", () => {
     database.close();
   });
 
+  it("adds Phase 10 workflow revision lineage with a safe version-one backfill", () => {
+    const database = new Database(":memory:");
+    applyMigrations(database, migrations.slice(0, 9));
+    const now = "2026-08-03T00:00:00.000Z";
+    database.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("legacy-workflow", null, "workflow", "旧工作流", "旧定义", "internal", "{}", 5, 2, "active", null, now, now);
+    applyMigrations(database);
+    expect(database.prepare("SELECT revision_of_work_spec_id,revision_number FROM work_specs WHERE id='legacy-workflow'").get()).toEqual({ revision_of_work_spec_id: null, revision_number: 1 });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='work_specs_revision_idx'").get()).toEqual({ name: "work_specs_revision_idx" });
+    database.close();
+  });
+
   it("creates all seven Phase 5 finance tables and backfills transaction facts", () => {
     const database = new Database(":memory:");
     applyMigrations(database, migrations.slice(0, 6));

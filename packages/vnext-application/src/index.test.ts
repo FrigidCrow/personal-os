@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -37,6 +37,14 @@ async function waitForRun(store: SqliteVNextStore, id: string, status: string): 
   throw new Error(`RUN_DID_NOT_REACH:${status}`);
 }
 
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  for (let index = 0; index < 200; index += 1) {
+    if (predicate()) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2));
+  }
+  throw new Error("WAIT_TIMEOUT");
+}
+
 describe("PersonalOsService execution lifecycle", () => {
   it("issues scoped capabilities that expire and revoke without persisting the secret", () => {
     const clock = new MutableClock(new Date("2026-08-03T00:00:00.000Z"));
@@ -68,6 +76,49 @@ describe("PersonalOsService execution lifecycle", () => {
     expect(() => service.createWorkSpec({ title: "forged", instructions: "forged", executorType: "fake", input: {}, skill: { ...snapshot!, contentHash: "0".repeat(64) } })).toThrow("SKILL_SNAPSHOT_MISMATCH");
     store.close();
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it("validates and atomically publishes increasing Skill versions", () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-skill-studio-"));
+    const registry = new RepositorySkillRegistry(join(root, "skills"));
+    const store = new SqliteVNextStore();
+    const service = new PersonalOsService(store, [new FakeExecutor()], undefined, undefined, registry);
+    const draft = { name: "daily-research", version: "1.0.0", displayName: "每日调研", description: "完成一份有证据的每日调研。", instructions: "# 每日调研\n\n1. 读取上下文。\n2. 核验来源。\n3. 提交结果。", expectedCurrentHash: null };
+    const validation = service.validateSkillDraft(draft);
+    expect(validation).toMatchObject({ valid: true, current: null, candidate: { name: "daily-research", version: "1.0.0", contentHash: expect.stringMatching(/^[a-f0-9]{64}$/) } });
+    const published = service.publishSkill({ ...draft, validatedContentHash: validation.candidate.contentHash });
+    expect(registry.get("daily-research")).toEqual(published);
+    expect(readFileSync(join(root, "skills", "daily-research", "agents", "openai.yaml"), "utf8")).toContain("$daily-research");
+    expect(service.validateSkillDraft({ ...draft, expectedCurrentHash: published.contentHash }).issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "SKILL_VERSION_MUST_INCREASE" })]));
+    expect(service.validateSkillDraft({ ...draft, version: "1.0.1", expectedCurrentHash: "0".repeat(64) }).issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "SKILL_CONCURRENT_UPDATE" })]));
+    expect(service.validateSkillDraft({ ...draft, version: "1.0.1", expectedCurrentHash: published.contentHash, instructions: "# Secret\n\napi_key: sk_1234567890abcdefghijklmnop" }).issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "SKILL_SECRET_DETECTED" })]));
+    expect(() => service.validateSkillDraft({ ...draft, name: "../escape" })).toThrow();
+    const outside = mkdtempSync(join(tmpdir(), "personal-os-skill-outside-"));
+    symlinkSync(outside, join(root, "skills", "linked-skill"));
+    const linkedDraft = { ...draft, name: "linked-skill", expectedCurrentHash: null };
+    const linkedValidation = service.validateSkillDraft(linkedDraft);
+    expect(() => service.publishSkill({ ...linkedDraft, validatedContentHash: linkedValidation.candidate.contentHash })).toThrow("SKILL_SYMLINK_NOT_ALLOWED");
+    expect(store.listAudit().some((entry) => entry.action === "skill.published" && JSON.stringify(entry).includes("每日调研") === false)).toBe(true);
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("creates immutable workflow revisions and explains preflight and operations health", async () => {
+    const store = new SqliteVNextStore();
+    const service = new PersonalOsService(store, [new InternalExecutor()]);
+    const first = service.createWorkSpec({ title: "日报", instructions: "生成日报", executorType: "internal", input: { operation: "echo", message: "ok", delayMs: 0 }, kind: "workflow", maxAttempts: 3 });
+    const revision = service.createWorkSpecRevision(first.id, { title: "日报新版", instructions: "生成并核验日报", executorType: "internal", input: { operation: "echo", message: "new", delayMs: 0 }, maxAttempts: 3 });
+    expect(revision).toMatchObject({ revisionOfWorkSpecId: first.id, revisionNumber: 2, title: "日报新版" });
+    const parallelRevision = service.createWorkSpecRevision(first.id, { title: "日报第三版", instructions: "另一条改进", executorType: "internal", input: { operation: "echo", message: "third", delayMs: 0 }, maxAttempts: 3 });
+    expect(parallelRevision).toMatchObject({ revisionOfWorkSpecId: first.id, revisionNumber: 3 });
+    expect(store.getWorkSpec(first.id)).toMatchObject({ revisionOfWorkSpecId: null, revisionNumber: 1, title: "日报" });
+    expect(await service.preflightWorkSpec(revision.id)).toMatchObject({ ready: true, checks: expect.arrayContaining([expect.objectContaining({ code: "executor", status: "pass" }), expect.objectContaining({ code: "schedule", status: "warning" })]) });
+    expect(service.listWorkflowOperations().find((item) => item.workSpec.id === revision.id)).toMatchObject({ health: "never_run", latestRun: null, consecutiveFailures: 0 });
+    const run = service.createRun(revision.id);
+    await service.startRun(run.id);
+    expect(service.listWorkflowOperations().find((item) => item.workSpec.id === revision.id)).toMatchObject({ health: "healthy", latestRun: { id: run.id } });
+    store.close();
   });
 
   it("requires skill-bound agent runtimes to submit a structured MCP result before success", async () => {
@@ -313,6 +364,68 @@ describe("ScheduleService", () => {
     expect(updated.nextRunAt).not.toBe(before);
     expect(store.listAudit().find((item) => item.action === "schedule.updated")).toMatchObject({ beforeSnapshot: { name: "早报" }, afterSnapshot: { name: "晨报", workSpecId: workSpec.id } });
     expect(() => schedules.update(schedule.id, {})).toThrow();
+    store.close();
+  });
+
+  it("rebinds a Schedule only to an active workflow and preserves its timing", () => {
+    const clock = new MutableClock(new Date("2026-08-01T00:00:00.000Z"));
+    const store = new SqliteVNextStore();
+    const execution = new PersonalOsService(store, [new FakeExecutor()], clock);
+    const first = execution.createWorkSpec({ title: "第一版", instructions: "v1", executorType: "fake", input: {}, kind: "workflow" });
+    const second = execution.createWorkSpecRevision(first.id, { title: "第二版", instructions: "v2", executorType: "fake", input: {} });
+    const oneOff = execution.createWorkSpec({ title: "一次性", instructions: "no", executorType: "fake", input: {}, kind: "one_off" });
+    const schedules = new ScheduleService(store, execution, clock);
+    const schedule = schedules.create({ workSpecId: first.id, name: "日报", cronExpression: "0 8 * * *", timezone: "Asia/Tokyo", enabled: true, catchUp: false });
+    const rebound = schedules.rebind(schedule.id, { workSpecId: second.id });
+    expect(rebound).toMatchObject({ workSpecId: second.id, nextRunAt: schedule.nextRunAt, lastRunAt: schedule.lastRunAt });
+    expect(store.listAudit().find((entry) => entry.action === "schedule.rebound")).toMatchObject({ beforeSnapshot: { workSpecId: first.id }, afterSnapshot: { workSpecId: second.id } });
+    expect(() => schedules.rebind(schedule.id, { workSpecId: oneOff.id })).toThrow("SCHEDULE_REBIND_TARGET_NOT_ACTIVE_WORKFLOW");
+    store.close();
+  });
+
+  it("automatically retries retryable scheduled failures but never manual runs", async () => {
+    const clock = new MutableClock(new Date("2026-08-01T00:00:00.000Z"));
+    const store = new SqliteVNextStore();
+    let calls = 0;
+    const flaky: ExecutorAdapter = {
+      type: "fake",
+      validate: () => undefined,
+      health: () => ({ available: true, detail: "flaky" }),
+      execute: async () => { calls += 1; if (calls !== 2) throw new Error("TEMPORARY_NETWORK_FAILURE"); return { status: "succeeded", result: { recovered: true } }; }
+    };
+    const execution = new PersonalOsService(store, [flaky], clock);
+    const spec = execution.createWorkSpec({ title: "恢复", instructions: "恢复", executorType: "fake", input: {}, kind: "workflow", maxAttempts: 2 });
+    const schedules = new ScheduleService(store, execution, clock);
+    schedules.create({ workSpecId: spec.id, name: "每分钟", cronExpression: "* * * * *", timezone: "UTC", enabled: true, catchUp: true });
+    clock.value = new Date("2026-08-01T00:01:00.000Z");
+    expect(await schedules.tick()).toBe(1);
+    await waitUntil(() => store.listRuns().length === 2 && store.listRuns().some((run) => run.status === "succeeded"));
+    const scheduledRuns = store.listRuns();
+    expect(scheduledRuns).toHaveLength(2);
+    expect(scheduledRuns.find((run) => run.attempt === 2)).toMatchObject({ retryOfRunId: scheduledRuns.find((run) => run.attempt === 1)?.id, status: "succeeded" });
+    expect(store.listRunEvents(scheduledRuns.find((run) => run.attempt === 1)!.id).some((event) => event.eventType === "run.retry_scheduled")).toBe(true);
+    const manual = execution.createRun(spec.id);
+    await execution.startRun(manual.id);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+    expect(store.listRuns().filter((run) => run.retryOfRunId === manual.id)).toHaveLength(0);
+    store.close();
+  });
+
+  it("stops scheduled recovery at max attempts and emits an operator-visible event", async () => {
+    const clock = new MutableClock(new Date("2026-08-01T00:00:00.000Z"));
+    const store = new SqliteVNextStore();
+    const alwaysFailing: ExecutorAdapter = { type: "fake", validate: () => undefined, health: () => ({ available: true, detail: "downstream unavailable" }), execute: async () => { throw new Error("TEMPORARY_DOWNSTREAM_FAILURE"); } };
+    const execution = new PersonalOsService(store, [alwaysFailing], clock);
+    const spec = execution.createWorkSpec({ title: "有限恢复", instructions: "最多两次", executorType: "fake", input: {}, kind: "workflow", maxAttempts: 2 });
+    const schedules = new ScheduleService(store, execution, clock);
+    schedules.create({ workSpecId: spec.id, name: "每分钟", cronExpression: "* * * * *", timezone: "UTC", enabled: true, catchUp: true });
+    clock.value = new Date("2026-08-01T00:01:00.000Z");
+    await schedules.tick();
+    await waitUntil(() => store.listRuns().length === 2 && store.listRuns().every((run) => run.status === "failed"));
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+    expect(store.listRuns()).toHaveLength(2);
+    const finalRun = store.listRuns().find((run) => run.attempt === 2)!;
+    expect(store.listRunEvents(finalRun.id).some((event) => event.eventType === "run.retry_exhausted")).toBe(true);
     store.close();
   });
 

@@ -458,6 +458,17 @@ export const migrations: Migration[] = [
         ALTER TABLE work_specs ADD COLUMN skill_json TEXT;
       `);
     }
+  },
+  {
+    version: 10,
+    name: "work_spec_revisions",
+    up(database) {
+      database.exec(`
+        ALTER TABLE work_specs ADD COLUMN revision_of_work_spec_id TEXT REFERENCES work_specs(id);
+        ALTER TABLE work_specs ADD COLUMN revision_number INTEGER NOT NULL DEFAULT 1;
+        CREATE INDEX work_specs_revision_idx ON work_specs(revision_of_work_spec_id, revision_number);
+      `);
+    }
   }
 ];
 

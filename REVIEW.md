@@ -809,3 +809,42 @@ Personal OS now owns a narrow native v2 Agent Gateway instead of relying on the 
 - The Web bundle still triggers Vite's existing 500 kB advisory warning. It does not block local correctness but should be code-split in a later performance phase.
 
 Verdict: **Phase 9 passed. The native v2 Agent Gateway and Skill authority are ready for normal Personal OS workflows.**
+
+## 2026-08-03 Personal OS Phase 10 workflow operations review
+
+Status: **Passed and deployed.**
+
+### Outcome
+
+Personal OS now exposes the safe daily maintenance loop above Codex/OpenWorker: a user can validate and publish a Skill, create an immutable workflow revision, run an explainable preflight, explicitly rebind a Schedule and observe bounded automatic recovery. Historical WorkSpecs and Runs remain unchanged.
+
+### Findings resolved before verdict
+
+| Severity | Finding | Resolution |
+|---|---|---|
+| High | Production Skill writes would have targeted the atomically replaced Runtime copy, so a later deployment could erase them | Configure the LaunchAgent with the Git worktree `.agents/skills` as the explicit read/write authority |
+| High | Schedule update persisted timing fields but did not update `work_spec_id` during a rebind | Add the bound WorkSpec to the repository update and prove timing, timezone and enabled state remain unchanged |
+| High | A Skill directory symlink could redirect a read or publish outside the allowed root | Reject symlinked Skill roots and entries on validation, read and atomic publish paths |
+| Medium | A failed Runtime could immediately end a scheduled workflow without using its declared retry policy | Retry only Scheduler-created retryable failures, create a new Run per attempt and stop at `maxAttempts` |
+| Medium | Skill source in Audit could expose instructions or accidental sensitive text | Audit only name, version and safe Hash metadata; validate obvious secrets before any write |
+| Medium | Health check could run before a freshly installed LaunchAgent opened its port | Add a bounded startup retry window while preserving a non-zero failure after the limit |
+
+### Direct evidence
+
+| Gate | Result |
+|---|---|
+| Automated regression | Vitest 100/100; Playwright 11/11; typecheck, ESLint, Build and diff check passed |
+| Skill governance | Version, optimistic conflict, secret, traversal, symlink and atomic publication tests passed |
+| Workflow governance | Immutable lineage, preflight checks, Schedule rebind and Audit tests passed |
+| Recovery | Scheduler-only retry, fresh Run lineage, manual no-retry and exhaustion tests passed |
+| Production | Web 5273, API 8787, Scheduler, Codex and OpenWorker healthy; two enabled schedules |
+| Database | Migration 10, `quick_check=ok`, zero foreign-key violations |
+| Visual | Desktop and 390px Radar operations screenshots reviewed with no horizontal overflow |
+
+### Remaining non-blocking limitations
+
+- The existing Vite bundle remains above its 500 kB advisory threshold.
+- Workflow health is visible in Personal OS but does not yet send an external notification when a schedule becomes degraded.
+- Agent-created Obsidian prose still requires the existing controlled note flow; arbitrary Vault writes remain intentionally unavailable.
+
+Verdict: **Phase 10 passed. Workflow maintenance and scheduled recovery are usable without giving Codex or OpenWorker uncontrolled authority.**
