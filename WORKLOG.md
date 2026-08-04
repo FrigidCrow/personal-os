@@ -1,5 +1,53 @@
 # Work Log
 
+## 2026-08-04 - Phase 12 rehearsal-to-Skill production gate
+
+### Plan
+
+- Restore the proven preflight → two independent rehearsals → failure drill → candidate → human publish lifecycle on the current v2 control plane.
+- Reuse Phase 11 checkpoints, keep candidates database-only and keep Schedule rebinding separate from publication.
+
+### Work
+
+- Added migration 13 with Run mode/root lineage, immutable evaluations and Skill candidates.
+- Added deterministic rehearsal evaluation, schema failure drills, evidence gates, candidate validation and human publication into the existing repository Skill registry.
+- Publication creates a new immutable WorkSpec revision pinned to the exact Skill hash. The source WorkSpec and every Schedule remain unchanged until explicit rebind.
+- Added a `验证晋级` Radar surface with honest evidence counts, evaluation actions, full candidate content review, human publish and explicit final rebind.
+
+### Review
+
+- Rehearsal mode is present in the Runtime prompt and MCP context; it cannot auto-deposit, enter production review or modify Schedule firing state.
+- Nonterminal Runs cannot be evaluated. Retry roots are stable, failed/cancelled evidence does not count, pending candidates do not touch the filesystem and stale/double publication is rejected.
+
+### Test
+
+- 112 unit/integration tests, 14/14 Playwright journeys, TypeScript, ESLint, production builds and patch hygiene passed.
+- Production backup completed; migration 13, Web/API health, SQLite quick/foreign-key checks and the live empty promotion gate passed. Exactly two existing schedules remain enabled and retain their Phase 11.1 WorkSpec bindings.
+
+## 2026-08-04 - Phase 11.1 automatic Obsidian deposition
+
+### Plan
+
+- Remove repetitive daily acceptance from only the pinned-Skill, low-risk Codex/OpenWorker report path while preserving the conservative review requirement everywhere else.
+- Register the real Obsidian Vault, keep writes below managed report directories and deduplicate recurring reports by local calendar day.
+
+### Work
+
+- Added migration 12, explicit review/deposition triggers, managed subdirectories, local-time periods and persisted deposition deduplication keys.
+- Added automatic completion deposition, same-day note reuse, unreviewed-AI disclosure, pinned Skill provenance and retry routing without changing Run truth when the file write fails.
+- Added Radar controls for write timing, subdirectory, deduplication period and timezone.
+- Registered `/Users/frigidcrow/Documents/Obsidian Vault`, indexed it and rebound the two enabled production schedules to immutable revision 2 WorkSpecs: AI briefing → `Reports/AI日报`; opportunity scan → `Reports/机会雷达`.
+
+### Review
+
+- Legacy WorkSpecs and Phase 11 note JSON are normalized to conservative defaults; automatic policy requires a real pinned repository Skill and an Agent Runtime.
+- Traversal and nested symlink paths are rejected. Failed and cancelled Runs do not write notes; a same-day rerun reuses the managed note instead of overwriting or duplicating it.
+
+### Test
+
+- 109 unit/integration tests, 13/13 Playwright journeys, TypeScript, ESLint, production builds and patch hygiene passed before deployment.
+- Production backup completed; migration 12 started cleanly; SQLite `quick_check` is `ok`, foreign-key check is empty and exactly two schedules remain enabled.
+
 ## 2026-07-30 - Asset investment and return ledger planning
 
 ### Plan
@@ -958,3 +1006,35 @@ Phase E verification so far:
 - TypeScript, ESLint, Build and `git diff --check` passed; only the existing Vite bundle-size advisory remains.
 - Production Web/API/Scheduler and both Runtime adapters report healthy; schema 10 has `quick_check=ok`, zero foreign-key violations and two enabled schedules.
 - Production backup created at `~/.local/share/personal-os-v2/backups/personal-os-v2-2026-08-03T01-49-01-441Z.db` before deployment.
+# 2026-08-04 Phase 11.1 and Phase 12 plan
+
+- Froze the Phase 11.1 automatic-deposition specification and 12-row acceptance matrix.
+- Froze the Phase 12 rehearsal-to-Skill specification and 14-row acceptance matrix.
+- Chose backward-compatible defaults: required review and on-acceptance deposition.
+- Chose explicit immutable revision and schedule-rebind migration for the two daily reports.
+- Chose persisted Run modes, evaluations and database-only candidates instead of reviving the retired v1 control plane.
+
+## 2026-08-04 - Phase 11.1, Phase 12 and Qishui production proof
+
+### Work
+
+- Added automatic low-risk Obsidian deposition with managed subdirectories, local-day de-duplication and actionable deposition failures; rebound the AI briefing and opportunity scan to immutable automatic-deposition revisions.
+- Added production/rehearsal/failure-drill Run modes, deterministic evaluation, two-rehearsal promotion gates, database-only Skill candidates, human publication and explicit Schedule rebinding.
+- Added a trusted managed-resource lifecycle to Codex Runtime. Core starts and stops the dedicated Qishui AVD outside the Codex sandbox, including cleanup after Agent failure and partial start failure.
+- Hardened the Qishui emulator against crash-consent startup stalls and stale no-ADB processes; bounded cleanup validates the stored PID belongs to the dedicated AVD before escalation.
+- Completed two live isolated Qishui rehearsals, one failure drill and enabled the daily `09:00 Asia/Tokyo` production Schedule only after the gate became ready.
+- Made Qishui source metadata truthful: screenshot-only visual review is the default; OCR is claimed only when it actually succeeded and was reconciled.
+
+### Review
+
+- The first live rehearsal passed the full dual-chart workflow but exposed that the published Skill directory lacked `references/tools.md`; the reference is now installed and the second rehearsal read it directly.
+- A second-start emulator hang exposed crash-report consent and incomplete partial-start cleanup. The dedicated process is now identified safely, crash prompts are disabled and Core cleanup covers start failures.
+- macOS Vision OCR remains unavailable with `Foundation._GenericObjCError`. Both live runs preserved the failure evidence and used Codex visual review of official screenshots; no OCR or audio facts were fabricated.
+- Qishui audio remains `protected_storage`: 0/20 current tracks have a lawful ffprobe-readable path. Chart metadata analysis and original Suno prompt preparation work; audio-derived analysis remains gated.
+
+### Test
+
+- Personal OS: 118/118 unit/integration tests, 14/14 Playwright journeys, TypeScript, ESLint, production build and `git diff --check` passed.
+- Qishui: 17/17 unit tests, Skill quick validation and patch hygiene passed.
+- Live rehearsal roots `a318a63b-e3a4-4983-ab01-0c2a600aebcf` and `335073ff-0578-4b33-8291-da533170d97b` passed; failure drill `91fb86a8-4fb8-4d6f-8b1b-8f7ee4b0d354` passed.
+- Production health is green with three enabled schedules; plain LaunchAgent reinstall preserves the Qishui script, Python path and three narrow allowed roots.

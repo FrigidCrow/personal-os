@@ -27,6 +27,7 @@ import {
   operatingUnitInputSchema,
   projectInputSchema,
   runCreateInputSchema,
+  runEvaluationInputSchema,
   runInputResponseSchema,
   runRetryInputSchema,
   runReviewInputSchema,
@@ -45,7 +46,7 @@ import {
   type RunEvent,
   type RuntimeCapabilityScope
 } from "@personal-os/vnext-contracts";
-import { ResultDepositionService, type FinanceService, type KnowledgeService, type PersonalOsService, type RuntimeCapabilityGrant, type ScheduleService, type SkillRegistry, type VNextStore } from "@personal-os/vnext-application";
+import { RehearsalPromotionService, ResultDepositionService, type FinanceService, type KnowledgeService, type PersonalOsService, type RuntimeCapabilityGrant, type ScheduleService, type SkillRegistry, type VNextStore } from "@personal-os/vnext-application";
 
 export interface ApiDependencies {
   store: VNextStore;
@@ -63,6 +64,8 @@ type Variables = { requestId: string };
 export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables: Variables }> {
   const { store, execution, schedules, knowledge, finance } = dependencies;
   const depositions = dependencies.depositions ?? new ResultDepositionService(store, knowledge);
+  const promotion = dependencies.skills ? new RehearsalPromotionService(store, execution, dependencies.skills) : null;
+  execution.setRunCompletionObserver(depositions);
   const app = new Hono<{ Variables: Variables }>();
 
   app.use("*", async (context, next) => {
@@ -110,6 +113,17 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
   app.get("/api/v2/work-specs/:id/preflight", async (context) => context.json(success(await execution.preflightWorkSpec(context.req.param("id")), context.get("requestId"))));
   app.get("/api/v2/operations/workflows", (context) => context.json(success(execution.listWorkflowOperations(), context.get("requestId"))));
   app.post("/api/v2/work-specs/:id/retire", (context) => context.json(success(execution.retireWorkSpec(context.req.param("id"), context.get("requestId")), context.get("requestId"))));
+  app.get("/api/v2/work-specs/:id/promotion", (context) => context.json(success(requirePromotion(promotion).getGate(context.req.param("id")), context.get("requestId"))));
+  app.post("/api/v2/work-specs/:id/rehearsals", async (context) => {
+    const run = await requirePromotion(promotion).createRehearsal(context.req.param("id"), context.get("requestId"));
+    void execution.startRun(run.id, context.get("requestId"));
+    return context.json(success(run, context.get("requestId")), 202);
+  });
+  app.post("/api/v2/runs/:id/evaluation", async (context) => context.json(success(requirePromotion(promotion).evaluateRun(context.req.param("id"), runEvaluationInputSchema.parse(await optionalJson(context)), context.get("requestId")), context.get("requestId")), 201));
+  app.post("/api/v2/work-specs/:id/failure-drills", (context) => context.json(success(requirePromotion(promotion).runFailureDrill(context.req.param("id"), context.get("requestId")), context.get("requestId")), 201));
+  app.post("/api/v2/work-specs/:id/skill-candidates", async (context) => context.json(success(requirePromotion(promotion).createCandidate(context.req.param("id"), skillDraftInputSchema.parse(await context.req.json()), context.get("requestId")), context.get("requestId")), 201));
+  app.get("/api/v2/skill-candidates/:id", (context) => context.json(success(requirePromotion(promotion).getCandidate(context.req.param("id")), context.get("requestId"))));
+  app.post("/api/v2/skill-candidates/:id/publish", (context) => context.json(success(requirePromotion(promotion).publishCandidate(context.req.param("id"), context.get("requestId")), context.get("requestId")), 201));
   app.get("/api/v2/skills", (context) => context.json(success(dependencies.skills?.list() ?? [], context.get("requestId"))));
   app.post("/api/v2/skills/validate", async (context) => context.json(success(execution.validateSkillDraft(skillDraftInputSchema.parse(await context.req.json())), context.get("requestId"))));
   app.post("/api/v2/skills/publish", async (context) => context.json(success(execution.publishSkill(skillPublishInputSchema.parse(await context.req.json()), context.get("requestId")), context.get("requestId")), 201));
@@ -209,7 +223,7 @@ export function createVNextApp(dependencies: ApiDependencies): Hono<{ Variables:
     if (!store.getRun(context.req.param("id"))) throw new Error("RUN_NOT_FOUND");
     return context.json(success(depositions.get(context.req.param("id")), context.get("requestId")));
   });
-  app.post("/api/v2/runs/:id/deposition/retry", (context) => context.json(success(depositions.depositAcceptedRun(context.req.param("id"), context.get("requestId")), context.get("requestId"))));
+  app.post("/api/v2/runs/:id/deposition/retry", (context) => context.json(success(depositions.retryRunDeposition(context.req.param("id"), context.get("requestId")), context.get("requestId"))));
   app.get("/api/v2/depositions", (context) => {
     const raw = context.req.query("status");
     const status = raw ? z.enum(["pending", "succeeded", "failed"]).parse(raw) : undefined;
@@ -359,11 +373,12 @@ function statusFor(code: string): 400 | 401 | 403 | 404 | 409 | 500 | 503 {
   if (code === "RUNTIME_CAPABILITY_REQUIRED" || code === "RUNTIME_CAPABILITY_INVALID" || code === "RUNTIME_CAPABILITY_EXPIRED") return 401;
   if (code === "RUNTIME_CAPABILITY_SCOPE_DENIED") return 403;
   if (code.endsWith("_NOT_FOUND")) return 404;
-  if (code.includes("TRANSITION") || code.includes("NOT_RETRYABLE") || code.includes("ALREADY_") || code.includes("NOT_WAITING_") || code.includes("REQUIRES_COMPLETED") || code.includes("REQUIRES_ACCEPTED") || code.includes("HAS_ACTIVE") || code.includes("EXCEEDS_") || code.includes("_CONFLICT") || code.endsWith("_EXISTS") || code.endsWith("_IMMUTABLE") || code === "MAX_ATTEMPTS_REACHED" || code === "WORK_SPEC_NOT_ACTIVE" || code === "WORK_SPEC_RETIRED" || code === "SCHEDULE_REBIND_TARGET_NOT_ACTIVE_WORKFLOW" || code === "APPROVAL_EXPIRED" || code === "SKILL_CONCURRENT_UPDATE" || code === "SKILL_CURRENT_VERSION_MISSING" || code === "SKILL_VERSION_MUST_INCREASE" || code === "SKILL_DRAFT_CHANGED_AFTER_VALIDATION") return 409;
+  if (code.includes("TRANSITION") || code.includes("NOT_RETRYABLE") || code.includes("ALREADY_") || code.includes("NOT_WAITING_") || code.includes("REQUIRES_COMPLETED") || code.includes("REQUIRES_ACCEPTED") || code.includes("REQUIRES_REHEARSAL") || code.includes("REQUIRES_TERMINAL") || code.includes("HAS_ACTIVE") || code.includes("EXCEEDS_") || code.includes("_CONFLICT") || code.includes("EVIDENCE_") || code.includes("CHANGED_AFTER_VALIDATION") || code.endsWith("_EXISTS") || code.endsWith("_IMMUTABLE") || code.endsWith("_ONLY") || code === "MAX_ATTEMPTS_REACHED" || code === "WORK_SPEC_NOT_ACTIVE" || code === "WORK_SPEC_RETIRED" || code === "SCHEDULE_REBIND_TARGET_NOT_ACTIVE_WORKFLOW" || code === "APPROVAL_EXPIRED" || code === "SKILL_CONCURRENT_UPDATE" || code === "SKILL_CURRENT_VERSION_MISSING" || code === "SKILL_VERSION_MUST_INCREASE" || code === "SKILL_DRAFT_CHANGED_AFTER_VALIDATION") return 409;
   if (code === "EXECUTOR_UNAVAILABLE") return 503;
-  if (code.includes("NOT_ALLOWED") || code.includes("NOT_CHANGEABLE") || code.includes("NOT_REFUNDABLE") || code.includes("MISMATCH") || code.includes("MUST_") || code.includes("REQUIRES_WORKFLOW") || code.includes("PATH_ESCAPE") || code.includes("SECRET_DETECTED") || code.includes("PREFLIGHT_FAILED") || code.endsWith("_REQUIRED") || code.startsWith("INVALID_")) return 400;
+  if (code.includes("NOT_ALLOWED") || code.includes("NOT_CHANGEABLE") || code.includes("NOT_REFUNDABLE") || code.includes("MISMATCH") || code.includes("MUST_") || code.includes("REQUIRES_WORKFLOW") || code.startsWith("REHEARSAL_REQUIRES_") || code.includes("PATH_ESCAPE") || code.includes("SECRET_DETECTED") || code.includes("PREFLIGHT_FAILED") || code.endsWith("_REQUIRED") || code.startsWith("INVALID_")) return 400;
   return 500;
 }
+function requirePromotion(value: RehearsalPromotionService | null): RehearsalPromotionService { if (!value) throw new Error("SKILL_REGISTRY_UNAVAILABLE"); return value; }
 function runtimeGrant(authorization: string | undefined, scope: RuntimeCapabilityScope, execution: PersonalOsService): RuntimeCapabilityGrant {
   const match = /^Bearer\s+(.+)$/i.exec(authorization ?? "");
   if (!match?.[1]) throw new Error("RUNTIME_CAPABILITY_REQUIRED");

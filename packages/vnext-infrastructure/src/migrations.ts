@@ -511,6 +511,65 @@ export const migrations: Migration[] = [
         CREATE INDEX run_depositions_status_idx ON run_depositions(status, updated_at DESC);
       `);
     }
+  },
+  {
+    version: 12,
+    name: "automatic_report_deposition",
+    up(database) {
+      database.exec(`
+        ALTER TABLE work_specs ADD COLUMN review_policy TEXT NOT NULL DEFAULT 'required'
+          CHECK(review_policy IN ('required','not_required'));
+        ALTER TABLE run_depositions ADD COLUMN subdirectory TEXT NOT NULL DEFAULT '';
+        ALTER TABLE run_depositions ADD COLUMN deduplication_key TEXT;
+        CREATE INDEX run_depositions_deduplication_idx
+          ON run_depositions(deduplication_key, status, updated_at DESC);
+      `);
+    }
+  },
+  {
+    version: 13,
+    name: "rehearsal_to_skill",
+    up(database) {
+      database.exec(`
+        ALTER TABLE runs ADD COLUMN run_mode TEXT NOT NULL DEFAULT 'production'
+          CHECK(run_mode IN ('production','rehearsal','failure_drill'));
+        ALTER TABLE runs ADD COLUMN rehearsal_root_run_id TEXT REFERENCES runs(id);
+        CREATE INDEX runs_rehearsal_idx
+          ON runs(work_spec_id, run_mode, rehearsal_root_run_id, created_at DESC);
+
+        CREATE TABLE run_evaluations (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL UNIQUE REFERENCES runs(id) ON DELETE CASCADE,
+          work_spec_id TEXT NOT NULL REFERENCES work_specs(id),
+          run_mode TEXT NOT NULL CHECK(run_mode IN ('rehearsal','failure_drill')),
+          rehearsal_root_run_id TEXT NOT NULL REFERENCES runs(id),
+          evaluator_version TEXT NOT NULL,
+          passed INTEGER NOT NULL CHECK(passed IN (0,1)),
+          checks_json TEXT NOT NULL,
+          note TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX run_evaluations_gate_idx
+          ON run_evaluations(work_spec_id, run_mode, passed, created_at DESC);
+
+        CREATE TABLE skill_candidates (
+          id TEXT PRIMARY KEY,
+          work_spec_id TEXT NOT NULL REFERENCES work_specs(id),
+          draft_json TEXT NOT NULL,
+          content TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          evidence_run_ids_json TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pending','published')),
+          published_skill_json TEXT,
+          published_work_spec_id TEXT REFERENCES work_specs(id),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          published_at TEXT
+        );
+        CREATE INDEX skill_candidates_work_spec_idx
+          ON skill_candidates(work_spec_id, created_at DESC);
+      `);
+    }
   }
 ];
 

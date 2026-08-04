@@ -18,9 +18,11 @@ Personal OS 是 Codex 和 OpenWorker 上面的一层本地控制台。你可以�
 - 运行前检查 Runtime、项目、Skill、定时和重试设置；
 - 为工作流设置 Cron 定时；
 - 创建工作流新版，并把定时规则明确换绑到新版；
+- 让复杂雷达先预执行两次并通过失败演练，再由你审查并发布为专属 Skill；
+- 由 Core 在 Agent 运行前后启动和清理专用本地资源，例如汽水音乐 Android 模拟器；
 - 让 Codex/OpenWorker 分步骤保存检查点，失败后选择继续完成的步骤或全部重做；
 - 实时查看运行、日志、审批、结果、成本和成果；
-- 人工验收后，把结果自动写入指定 Obsidian Vault 的 `Reports` 或 `Generated`；
+- 普通结果验收后写入 Obsidian；固定 Skill 的低风险日报成功后可以自动写入，不用每天审批；
 - 定时运行遇到临时错误时有限重试，到达上限后停下等待处理；
 - 搜索 Obsidian，受控创建笔记；
 - 记录收入、支出、预算、预测和项目投入产出。
@@ -75,4 +77,6 @@ SQLite 是业务状态的唯一事实源。Obsidian 保存 Markdown 原文，Git
 
 Agent 不能通过这套 MCP 直接付款、联系客户、发布内容、删除文件或部署生产环境。高风险动作仍需人工决定。
 
-阶段 11 的设计和验收见 [计划](docs/PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-SPEC.md) 与 [验收记录](docs/PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-ACCEPTANCE.md)。
+当前汽水音乐雷达已绑定 `qishui-daily-sync@1.0.1`，每天 `09:00`（`Asia/Tokyo`）由 Core 启动专用模拟器，Codex 视觉采集热歌榜和新歌榜各 Top10，生成差分、曲库、Obsidian 日报与中文原创实验，再自动关闭模拟器。音频仍按真实能力单独验收；应用私有或受保护文件不会被伪装为可分析音频。
+
+当前恢复、自动沉淀和晋级门禁见 [阶段 11](docs/PERSONAL-OS-PHASE11-RECOVERABLE-WORKFLOWS-SPEC.md)、[阶段 11.1](docs/PERSONAL-OS-PHASE11-1-AUTOMATIC-DEPOSITION-SPEC.md) 与 [阶段 12](docs/PERSONAL-OS-PHASE12-REHEARSAL-TO-SKILL-SPEC.md)。

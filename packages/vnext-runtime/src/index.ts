@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Codex, type ThreadEvent, type ThreadItem, type ThreadOptions } from "@openai/codex-sdk";
 import {
   codexRuntimeOptionsSchema,
@@ -119,6 +119,39 @@ export interface CodexExecutorOptions {
   mcpServerPath?: string;
   apiBaseUrl?: string;
   clientFactory?: (context: ExecutionContext) => CodexClientLike;
+  managedResources?: Record<string, ManagedResourceController>;
+}
+
+export interface ManagedResourceController {
+  start(signal: AbortSignal): Promise<void>;
+  stop(): Promise<void>;
+}
+
+export interface CommandManagedResourceOptions {
+  command: string;
+  startArgs: string[];
+  stopArgs: string[];
+  cwd: string;
+  timeoutMs?: number;
+}
+
+/** Runs a trusted, preconfigured lifecycle command without a shell. */
+export class CommandManagedResourceController implements ManagedResourceController {
+  private readonly timeoutMs: number;
+
+  constructor(private readonly options: CommandManagedResourceOptions) {
+    if (!isAbsolute(options.command)) throw new Error("MANAGED_RESOURCE_COMMAND_MUST_BE_ABSOLUTE");
+    if (!isAbsolute(options.cwd)) throw new Error("MANAGED_RESOURCE_CWD_MUST_BE_ABSOLUTE");
+    this.timeoutMs = options.timeoutMs ?? 240_000;
+  }
+
+  async start(signal: AbortSignal): Promise<void> {
+    await runManagedCommand(this.options.command, this.options.startArgs, this.options.cwd, this.timeoutMs, signal);
+  }
+
+  async stop(): Promise<void> {
+    await runManagedCommand(this.options.command, this.options.stopArgs, this.options.cwd, this.timeoutMs);
+  }
 }
 
 const PERSONAL_OS_MCP_TOOL_NAMES = [
@@ -138,11 +171,13 @@ export class CodexExecutor implements ExecutorAdapter {
   private readonly clientFactory: (context: ExecutionContext) => CodexClientLike;
   private readonly mcpServerPath: string | null;
   private readonly apiBaseUrl: string;
+  private readonly managedResources: Readonly<Record<string, ManagedResourceController>>;
 
   constructor(options: CodexExecutorOptions) {
     this.allowedRoots = options.allowedRoots.map((root) => resolve(root));
     this.mcpServerPath = options.mcpServerPath ? resolve(options.mcpServerPath) : null;
     this.apiBaseUrl = (options.apiBaseUrl ?? "http://127.0.0.1:8787").replace(/\/$/, "");
+    this.managedResources = options.managedResources ?? {};
     this.clientFactory = options.clientFactory ?? ((context) => {
       const mcp: Record<string, {
         command: string;
@@ -184,14 +219,41 @@ export class CodexExecutor implements ExecutorAdapter {
       throw new Error(`CODEX_GIT_REPOSITORY_REQUIRED:${cwd}`);
     }
     const options = codexOptions(context.run.input);
+    if (options.managedResource && !this.managedResources[options.managedResource]) {
+      throw new Error(`MANAGED_RESOURCE_UNAVAILABLE:${options.managedResource}`);
+    }
+    for (const directory of options.additionalDirectories) {
+      if (!isAbsolute(directory)) throw new Error(`ADDITIONAL_DIRECTORY_MUST_BE_ABSOLUTE:${directory}`);
+      const resolved = resolve(directory);
+      if (!this.allowedRoots.some((root) => isInside(root, resolved))) throw new Error(`ADDITIONAL_DIRECTORY_NOT_ALLOWED:${resolved}`);
+      if (!existsSync(resolved) || !statSync(resolved).isDirectory()) throw new Error(`ADDITIONAL_DIRECTORY_NOT_FOUND:${resolved}`);
+    }
     if (options.webSearch && !options.networkAccess) throw new Error("CODEX_WEB_SEARCH_REQUIRES_NETWORK");
     if (context.capability && (!this.mcpServerPath || !existsSync(this.mcpServerPath))) throw new Error("PERSONAL_OS_MCP_SERVER_MISSING");
   }
 
   async execute(context: ExecutionContext): Promise<ExecutionResult> {
     this.validate(context);
-    const cwd = resolve(context.project!.repositoryPath!);
     const options = codexOptions(context.run.input);
+    const managedResource = options.managedResource ? this.managedResources[options.managedResource]! : null;
+    try {
+      if (managedResource) {
+        context.emit({ eventType: "managed_resource.starting", level: "info", source: "codex", message: `正在准备受管资源 ${options.managedResource}。` });
+        await managedResource.start(context.signal);
+        context.emit({ eventType: "managed_resource.ready", level: "info", source: "codex", message: `受管资源 ${options.managedResource} 已就绪。` });
+      }
+      return await this.executeThread(context, options);
+    } finally {
+      if (managedResource) {
+        context.emit({ eventType: "managed_resource.stopping", level: "info", source: "codex", message: `正在释放受管资源 ${options.managedResource}。` });
+        await managedResource.stop();
+        context.emit({ eventType: "managed_resource.stopped", level: "info", source: "codex", message: `受管资源 ${options.managedResource} 已释放。` });
+      }
+    }
+  }
+
+  private async executeThread(context: ExecutionContext, options: ReturnType<typeof codexOptions>): Promise<ExecutionResult> {
+    const cwd = resolve(context.project!.repositoryPath!);
     const threadOptions: ThreadOptions = {
       workingDirectory: cwd,
       skipGitRepoCheck: false,
@@ -199,6 +261,7 @@ export class CodexExecutor implements ExecutorAdapter {
       approvalPolicy: "never",
       networkAccessEnabled: options.networkAccess,
       webSearchMode: options.webSearch ? "live" : "disabled",
+      ...(options.additionalDirectories.length > 0 ? { additionalDirectories: options.additionalDirectories.map((directory) => resolve(directory)) } : {}),
       ...(options.model ? { model: options.model } : {})
     };
     context.emit({
@@ -227,7 +290,13 @@ export class CodexExecutor implements ExecutorAdapter {
       } else if (event.type === "item.completed") {
         if (event.item.type === "agent_message") finalResponse = event.item.text;
         if (event.item.type === "file_change" && event.item.status === "completed") {
-          for (const change of event.item.changes) if (change.kind !== "delete") artifactPaths.add(change.path);
+          for (const change of event.item.changes) {
+            if (change.kind === "delete") continue;
+            const absolute = resolve(cwd, change.path);
+            // Additional directories can be writable, but Git artifacts remain
+            // repository-scoped. An Obsidian write must not fail the whole Run.
+            if (isInside(cwd, absolute)) artifactPaths.add(absolute);
+          }
         }
         context.emit(codexItemEvent(event.item));
       } else if (event.type === "turn.completed") {
@@ -253,6 +322,45 @@ export class CodexExecutor implements ExecutorAdapter {
   health() {
     return { available: this.allowedRoots.length > 0, detail: "Codex SDK 已配置；Runtime 隔离全局 Plugin/Skill 搜索，真实认证在只读冒烟执行时验证。" };
   }
+}
+
+async function runManagedCommand(command: string, args: string[], cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<void> {
+  if (!existsSync(command) || !statSync(command).isFile()) throw new Error(`MANAGED_RESOURCE_COMMAND_NOT_FOUND:${command}`);
+  if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new Error(`MANAGED_RESOURCE_CWD_NOT_FOUND:${cwd}`);
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, {
+      cwd,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { PATH: process.env.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin", LANG: process.env.LANG ?? "en_US.UTF-8" }
+    });
+    let stderr = "";
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      if (error) rejectPromise(error);
+      else resolvePromise();
+    };
+    const onAbort = () => {
+      child.kill("SIGTERM");
+      finish(signal?.reason instanceof Error ? signal.reason : new Error("CANCELLED"));
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      finish(new Error(`MANAGED_RESOURCE_TIMEOUT:${command}`));
+    }, timeoutMs);
+    timer.unref();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+    child.once("error", (error) => finish(error));
+    child.once("close", (code, closeSignal) => {
+      if (code === 0) finish();
+      else finish(new Error(`MANAGED_RESOURCE_EXITED:${code ?? closeSignal ?? "unknown"}:${truncate(stderr, 1_000)}`));
+    });
+  });
 }
 
 interface SocketMessageEvent { data: string | ArrayBuffer | Blob }
@@ -458,6 +566,7 @@ export function buildRuntimePrompt(context: ExecutionContext, additionalInstruct
   const safeInput = redactSensitive(context.run.input);
   return [
     `Personal OS Run: ${context.run.id}`,
+    `Mode: ${context.run.runMode}${context.run.rehearsalRootRunId ? ` (root ${context.run.rehearsalRootRunId})` : ""}`,
     `Project: ${context.project?.name ?? "Unassigned"}`,
     `Work: ${context.workSpec.title}`,
     `Instructions:\n${context.workSpec.instructions}`,
@@ -469,11 +578,13 @@ export function buildRuntimePrompt(context: ExecutionContext, additionalInstruct
     "- Do not pay, purchase, publish, contact people, deploy to production, delete user files, bypass protected interfaces, or fabricate evidence.",
     "- Stop and request explicit human approval or input when required.",
     "- Finish with the complete result and a concise verification summary.",
+    context.run.runMode === "rehearsal" ? "- This is a rehearsal: exercise the real read-only workflow, save checkpoint evidence, include verification entries, and do not treat the result as production or publish it externally." : "",
     context.capability ? [
       "Personal OS MCP is available for governed progress, recoverable checkpoints, knowledge, artifacts, approvals and structured results.",
       "Call get_run_context first. Reused checkpoints in that context are completed work: verify their referenced output still exists, then do not repeat them.",
       "Call save_checkpoint when a meaningful step starts, completes or fails. Use a stable stepKey so a later retry can resume safely.",
       "Call append_run_event for milestones and submit_run_result before finishing.",
+      "After submit_run_result succeeds, do not call more tools or change files; return the final summary immediately.",
       context.run.executorType === "openworker" ? `If a tool asks for capabilityToken, pass this value exactly and never print or save it: ${context.capability.token}` : "The MCP process already holds the capability; omit capabilityToken."
     ].join("\n") : "",
     additionalInstructions ? `Additional instructions:\n${redactFreeText(additionalInstructions)}` : ""

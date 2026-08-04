@@ -8,6 +8,8 @@ export function buildPersonalOsServices({
   v2DatabasePath,
   obsidianVaultPath,
   allowedRoots = [projectRoot],
+  qishuiEmulatorScript,
+  pythonPath,
   timezone = "Asia/Tokyo"
 }) {
   return [
@@ -22,6 +24,8 @@ export function buildPersonalOsServices({
         PERSONAL_OS_V2_SCHEDULER_ENABLED: "true",
         PERSONAL_OS_SKILLS_ROOT: join(projectRoot, ".agents", "skills"),
         PERSONAL_OS_ALLOWED_ROOTS: allowedRoots.join(delimiter),
+        ...(qishuiEmulatorScript ? { PERSONAL_OS_QISHUI_EMULATOR_SCRIPT: qishuiEmulatorScript } : {}),
+        ...(pythonPath ? { PERSONAL_OS_PYTHON_PATH: pythonPath } : {}),
         PERSONAL_OS_TIMEZONE: timezone,
         OBSIDIAN_VAULT_PATH: obsidianVaultPath
       }

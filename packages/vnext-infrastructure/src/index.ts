@@ -34,11 +34,14 @@ import type {
   Run,
   RunCheckpoint,
   RunDeposition,
+  RunEvaluation,
   RunEvent,
   Schedule,
   WorkSpec,
+  SkillCandidate,
   SkillSnapshot
 } from "@personal-os/vnext-contracts";
+import { resultDepositionPolicySchema } from "@personal-os/vnext-contracts";
 import { applyMigrations, migrations, type Migration } from "./migrations.js";
 
 export { applyMigrations, migrations, type Migration } from "./migrations.js";
@@ -82,7 +85,7 @@ export class SqliteVNextStore implements VNextStore {
     return mapOne(this.connection.prepare("SELECT * FROM work_specs WHERE id = ?").get(id), workSpecFromRow);
   }
   insertWorkSpec(workSpec: WorkSpec): WorkSpec {
-    this.connection.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,result_deposition_json,revision_of_work_spec_id,revision_number,created_at,updated_at) VALUES (@id,@projectId,@kind,@title,@instructions,@executorType,@inputJson,@timeoutSeconds,@maxAttempts,@lifecycleStatus,@skillJson,@resultDepositionJson,@revisionOfWorkSpecId,@revisionNumber,@createdAt,@updatedAt)`).run({ ...workSpec, inputJson: stringify(workSpec.input), skillJson: stringifyNullable(workSpec.skill), resultDepositionJson: stringifyNullable(workSpec.resultDeposition) });
+    this.connection.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,review_policy,result_deposition_json,revision_of_work_spec_id,revision_number,created_at,updated_at) VALUES (@id,@projectId,@kind,@title,@instructions,@executorType,@inputJson,@timeoutSeconds,@maxAttempts,@lifecycleStatus,@skillJson,@reviewPolicy,@resultDepositionJson,@revisionOfWorkSpecId,@revisionNumber,@createdAt,@updatedAt)`).run({ ...workSpec, inputJson: stringify(workSpec.input), skillJson: stringifyNullable(workSpec.skill), resultDepositionJson: stringifyNullable(workSpec.resultDeposition) });
     return workSpec;
   }
   updateWorkSpec(workSpec: WorkSpec): WorkSpec {
@@ -125,11 +128,11 @@ export class SqliteVNextStore implements VNextStore {
     return mapOne(this.connection.prepare("SELECT * FROM runs WHERE idempotency_key = ?").get(key), runFromRow);
   }
   insertRun(run: Run): Run {
-    this.connection.prepare(`INSERT INTO runs(id,work_spec_id,project_id,executor_type,status,input_json,attempt,idempotency_key,retry_of_run_id,external_run_id,error_code,error_message,result_json,usage_json,actual_cost_minor,actual_cost_currency,cost_source,review_status,reviewed_at,review_comment,created_at,started_at,finished_at) VALUES (@id,@workSpecId,@projectId,@executorType,@status,@inputJson,@attempt,@idempotencyKey,@retryOfRunId,@externalRunId,@errorCode,@errorMessage,@resultJson,@usageJson,@actualCostMinor,@actualCostCurrency,@costSource,@reviewStatus,@reviewedAt,@reviewComment,@createdAt,@startedAt,@finishedAt)`).run({ ...run, inputJson: stringify(run.input), resultJson: stringifyNullable(run.result), usageJson: stringifyNullable(run.usage) });
+    this.connection.prepare(`INSERT INTO runs(id,work_spec_id,project_id,executor_type,status,input_json,attempt,idempotency_key,retry_of_run_id,run_mode,rehearsal_root_run_id,external_run_id,error_code,error_message,result_json,usage_json,actual_cost_minor,actual_cost_currency,cost_source,review_status,reviewed_at,review_comment,created_at,started_at,finished_at) VALUES (@id,@workSpecId,@projectId,@executorType,@status,@inputJson,@attempt,@idempotencyKey,@retryOfRunId,@runMode,@rehearsalRootRunId,@externalRunId,@errorCode,@errorMessage,@resultJson,@usageJson,@actualCostMinor,@actualCostCurrency,@costSource,@reviewStatus,@reviewedAt,@reviewComment,@createdAt,@startedAt,@finishedAt)`).run({ ...run, inputJson: stringify(run.input), resultJson: stringifyNullable(run.result), usageJson: stringifyNullable(run.usage) });
     return run;
   }
   updateRun(run: Run): Run {
-    const result = this.connection.prepare(`UPDATE runs SET status=@status,input_json=@inputJson,external_run_id=@externalRunId,error_code=@errorCode,error_message=@errorMessage,result_json=@resultJson,usage_json=@usageJson,actual_cost_minor=@actualCostMinor,actual_cost_currency=@actualCostCurrency,cost_source=@costSource,review_status=@reviewStatus,reviewed_at=@reviewedAt,review_comment=@reviewComment,started_at=@startedAt,finished_at=@finishedAt WHERE id=@id`).run({ ...run, inputJson: stringify(run.input), resultJson: stringifyNullable(run.result), usageJson: stringifyNullable(run.usage) });
+    const result = this.connection.prepare(`UPDATE runs SET status=@status,input_json=@inputJson,run_mode=@runMode,rehearsal_root_run_id=@rehearsalRootRunId,external_run_id=@externalRunId,error_code=@errorCode,error_message=@errorMessage,result_json=@resultJson,usage_json=@usageJson,actual_cost_minor=@actualCostMinor,actual_cost_currency=@actualCostCurrency,cost_source=@costSource,review_status=@reviewStatus,reviewed_at=@reviewedAt,review_comment=@reviewComment,started_at=@startedAt,finished_at=@finishedAt WHERE id=@id`).run({ ...run, inputJson: stringify(run.input), resultJson: stringifyNullable(run.result), usageJson: stringifyNullable(run.usage) });
     if (result.changes !== 1) throw new Error("RUN_NOT_FOUND");
     return run;
   }
@@ -172,14 +175,49 @@ export class SqliteVNextStore implements VNextStore {
   getRunDeposition(runId: string): RunDeposition | null {
     return mapOne(this.connection.prepare("SELECT * FROM run_depositions WHERE run_id=?").get(runId), depositionFromRow);
   }
+  findSucceededRunDepositionByDeduplicationKey(key: string): RunDeposition | null {
+    return mapOne(this.connection.prepare("SELECT * FROM run_depositions WHERE deduplication_key=? AND status='succeeded' ORDER BY updated_at DESC LIMIT 1").get(key), depositionFromRow);
+  }
   insertRunDeposition(deposition: RunDeposition): RunDeposition {
-    this.connection.prepare(`INSERT INTO run_depositions(id,run_id,vault_id,directory,title,status,document_id,artifact_id,relative_path,error_code,error_message,attempts,created_at,updated_at) VALUES (@id,@runId,@vaultId,@directory,@title,@status,@documentId,@artifactId,@relativePath,@errorCode,@errorMessage,@attempts,@createdAt,@updatedAt)`).run(deposition);
+    this.connection.prepare(`INSERT INTO run_depositions(id,run_id,vault_id,directory,subdirectory,deduplication_key,title,status,document_id,artifact_id,relative_path,error_code,error_message,attempts,created_at,updated_at) VALUES (@id,@runId,@vaultId,@directory,@subdirectory,@deduplicationKey,@title,@status,@documentId,@artifactId,@relativePath,@errorCode,@errorMessage,@attempts,@createdAt,@updatedAt)`).run(deposition);
     return deposition;
   }
   updateRunDeposition(deposition: RunDeposition): RunDeposition {
-    const result = this.connection.prepare(`UPDATE run_depositions SET status=@status,document_id=@documentId,artifact_id=@artifactId,relative_path=@relativePath,error_code=@errorCode,error_message=@errorMessage,attempts=@attempts,updated_at=@updatedAt WHERE id=@id`).run(deposition);
+    const result = this.connection.prepare(`UPDATE run_depositions SET directory=@directory,subdirectory=@subdirectory,deduplication_key=@deduplicationKey,title=@title,status=@status,document_id=@documentId,artifact_id=@artifactId,relative_path=@relativePath,error_code=@errorCode,error_message=@errorMessage,attempts=@attempts,updated_at=@updatedAt WHERE id=@id`).run(deposition);
     if (result.changes !== 1) throw new Error("RUN_DEPOSITION_NOT_FOUND");
     return deposition;
+  }
+
+  listRunEvaluations(workSpecId?: string): RunEvaluation[] {
+    const rows = workSpecId
+      ? this.connection.prepare("SELECT * FROM run_evaluations WHERE work_spec_id=? ORDER BY created_at DESC").all(workSpecId)
+      : this.connection.prepare("SELECT * FROM run_evaluations ORDER BY created_at DESC").all();
+    return (rows as Row[]).map(runEvaluationFromRow);
+  }
+  getRunEvaluation(runId: string): RunEvaluation | null {
+    return mapOne(this.connection.prepare("SELECT * FROM run_evaluations WHERE run_id=?").get(runId), runEvaluationFromRow);
+  }
+  insertRunEvaluation(evaluation: RunEvaluation): RunEvaluation {
+    this.connection.prepare(`INSERT INTO run_evaluations(id,run_id,work_spec_id,run_mode,rehearsal_root_run_id,evaluator_version,passed,checks_json,note,created_at) VALUES (@id,@runId,@workSpecId,@runMode,@rehearsalRootRunId,@evaluatorVersion,@passed,@checksJson,@note,@createdAt)`).run({ ...evaluation, passed: int(evaluation.passed), checksJson: stringify(evaluation.checks) });
+    return evaluation;
+  }
+  listSkillCandidates(workSpecId?: string): SkillCandidate[] {
+    const rows = workSpecId
+      ? this.connection.prepare("SELECT * FROM skill_candidates WHERE work_spec_id=? ORDER BY created_at DESC").all(workSpecId)
+      : this.connection.prepare("SELECT * FROM skill_candidates ORDER BY created_at DESC").all();
+    return (rows as Row[]).map(skillCandidateFromRow);
+  }
+  getSkillCandidate(id: string): SkillCandidate | null {
+    return mapOne(this.connection.prepare("SELECT * FROM skill_candidates WHERE id=?").get(id), skillCandidateFromRow);
+  }
+  insertSkillCandidate(candidate: SkillCandidate): SkillCandidate {
+    this.connection.prepare(`INSERT INTO skill_candidates(id,work_spec_id,draft_json,content,content_hash,evidence_run_ids_json,status,published_skill_json,published_work_spec_id,created_at,updated_at,published_at) VALUES (@id,@workSpecId,@draftJson,@content,@contentHash,@evidenceRunIdsJson,@status,@publishedSkillJson,@publishedWorkSpecId,@createdAt,@updatedAt,@publishedAt)`).run({ ...candidate, draftJson: stringify(candidate.draft), evidenceRunIdsJson: stringify(candidate.evidenceRunIds), publishedSkillJson: stringifyNullable(candidate.publishedSkill) });
+    return candidate;
+  }
+  updateSkillCandidate(candidate: SkillCandidate): SkillCandidate {
+    const result = this.connection.prepare(`UPDATE skill_candidates SET status=@status,published_skill_json=@publishedSkillJson,published_work_spec_id=@publishedWorkSpecId,updated_at=@updatedAt,published_at=@publishedAt WHERE id=@id AND status='pending'`).run({ ...candidate, publishedSkillJson: stringifyNullable(candidate.publishedSkill) });
+    if (result.changes !== 1) throw new Error("SKILL_CANDIDATE_ALREADY_PUBLISHED");
+    return candidate;
   }
 
   listSchedules(): Schedule[] {
@@ -503,11 +541,13 @@ function excerpt(value: string): string { const compact = value.replace(/\s+/g, 
 function stripSearchMarkup(value: string): string { return value.replace(/<\/?mark>/g, ""); }
 
 function projectFromRow(row: Row): Project { return { id: string(row,"id"), name: string(row,"name"), description: string(row,"description"), repositoryPath: nullableString(row,"repository_path"), obsidianPath: nullableString(row,"obsidian_path"), status: string(row,"status") as Project["status"], createdAt: string(row,"created_at"), updatedAt: string(row,"updated_at") }; }
-function workSpecFromRow(row: Row): WorkSpec { return { id:string(row,"id"),projectId:nullableString(row,"project_id"),kind:string(row,"kind") as WorkSpec["kind"],title:string(row,"title"),instructions:string(row,"instructions"),executorType:string(row,"executor_type") as WorkSpec["executorType"],input:json(row,"input_json"),timeoutSeconds:number(row,"timeout_seconds"),maxAttempts:number(row,"max_attempts"),lifecycleStatus:string(row,"lifecycle_status") as WorkSpec["lifecycleStatus"],skill:json(row,"skill_json") as SkillSnapshot | null,resultDeposition:json(row,"result_deposition_json") as WorkSpec["resultDeposition"],revisionOfWorkSpecId:nullableString(row,"revision_of_work_spec_id"),revisionNumber:number(row,"revision_number"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
-function runFromRow(row: Row): Run { return { id:string(row,"id"),workSpecId:string(row,"work_spec_id"),projectId:nullableString(row,"project_id"),executorType:string(row,"executor_type") as Run["executorType"],status:string(row,"status") as Run["status"],input:json(row,"input_json"),attempt:number(row,"attempt"),idempotencyKey:nullableString(row,"idempotency_key"),retryOfRunId:nullableString(row,"retry_of_run_id"),externalRunId:nullableString(row,"external_run_id"),errorCode:nullableString(row,"error_code"),errorMessage:nullableString(row,"error_message"),result:json(row,"result_json"),usage:json(row,"usage_json"),actualCostMinor:row.actual_cost_minor===null||row.actual_cost_minor===undefined?null:number(row,"actual_cost_minor"),actualCostCurrency:nullableString(row,"actual_cost_currency"),costSource:nullableString(row,"cost_source") as Run["costSource"],reviewStatus:string(row,"review_status") as Run["reviewStatus"],reviewedAt:nullableString(row,"reviewed_at"),reviewComment:nullableString(row,"review_comment"),createdAt:string(row,"created_at"),startedAt:nullableString(row,"started_at"),finishedAt:nullableString(row,"finished_at") }; }
+function workSpecFromRow(row: Row): WorkSpec { const rawDeposition=json(row,"result_deposition_json"); return { id:string(row,"id"),projectId:nullableString(row,"project_id"),kind:string(row,"kind") as WorkSpec["kind"],title:string(row,"title"),instructions:string(row,"instructions"),executorType:string(row,"executor_type") as WorkSpec["executorType"],input:json(row,"input_json"),timeoutSeconds:number(row,"timeout_seconds"),maxAttempts:number(row,"max_attempts"),lifecycleStatus:string(row,"lifecycle_status") as WorkSpec["lifecycleStatus"],skill:json(row,"skill_json") as SkillSnapshot | null,reviewPolicy:(nullableString(row,"review_policy") ?? "required") as WorkSpec["reviewPolicy"],resultDeposition:rawDeposition === null ? null : resultDepositionPolicySchema.parse(rawDeposition),revisionOfWorkSpecId:nullableString(row,"revision_of_work_spec_id"),revisionNumber:number(row,"revision_number"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
+function runFromRow(row: Row): Run { return { id:string(row,"id"),workSpecId:string(row,"work_spec_id"),projectId:nullableString(row,"project_id"),executorType:string(row,"executor_type") as Run["executorType"],status:string(row,"status") as Run["status"],input:json(row,"input_json"),attempt:number(row,"attempt"),idempotencyKey:nullableString(row,"idempotency_key"),retryOfRunId:nullableString(row,"retry_of_run_id"),runMode:(nullableString(row,"run_mode") ?? "production") as Run["runMode"],rehearsalRootRunId:nullableString(row,"rehearsal_root_run_id"),externalRunId:nullableString(row,"external_run_id"),errorCode:nullableString(row,"error_code"),errorMessage:nullableString(row,"error_message"),result:json(row,"result_json"),usage:json(row,"usage_json"),actualCostMinor:row.actual_cost_minor===null||row.actual_cost_minor===undefined?null:number(row,"actual_cost_minor"),actualCostCurrency:nullableString(row,"actual_cost_currency"),costSource:nullableString(row,"cost_source") as Run["costSource"],reviewStatus:string(row,"review_status") as Run["reviewStatus"],reviewedAt:nullableString(row,"reviewed_at"),reviewComment:nullableString(row,"review_comment"),createdAt:string(row,"created_at"),startedAt:nullableString(row,"started_at"),finishedAt:nullableString(row,"finished_at") }; }
 function runEventFromRow(row: Row): RunEvent { return { id:string(row,"id"),runId:string(row,"run_id"),eventType:string(row,"event_type"),level:string(row,"level") as RunEvent["level"],source:string(row,"source"),message:string(row,"message"),structuredData:json(row,"structured_data_json"),sequence:number(row,"sequence"),requestId:nullableString(row,"request_id"),createdAt:string(row,"created_at") }; }
 function checkpointFromRow(row: Row): RunCheckpoint { return { id:string(row,"id"),runId:string(row,"run_id"),stepKey:string(row,"step_key"),label:string(row,"label"),status:string(row,"status") as RunCheckpoint["status"],summary:string(row,"summary"),data:json(row,"data_json"),sourceCheckpointId:nullableString(row,"source_checkpoint_id"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
-function depositionFromRow(row: Row): RunDeposition { return { id:string(row,"id"),runId:string(row,"run_id"),vaultId:string(row,"vault_id"),directory:string(row,"directory") as RunDeposition["directory"],title:string(row,"title"),status:string(row,"status") as RunDeposition["status"],documentId:nullableString(row,"document_id"),artifactId:nullableString(row,"artifact_id"),relativePath:nullableString(row,"relative_path"),errorCode:nullableString(row,"error_code"),errorMessage:nullableString(row,"error_message"),attempts:number(row,"attempts"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
+function depositionFromRow(row: Row): RunDeposition { return { id:string(row,"id"),runId:string(row,"run_id"),vaultId:string(row,"vault_id"),directory:string(row,"directory") as RunDeposition["directory"],subdirectory:nullableString(row,"subdirectory") ?? "",deduplicationKey:nullableString(row,"deduplication_key"),title:string(row,"title"),status:string(row,"status") as RunDeposition["status"],documentId:nullableString(row,"document_id"),artifactId:nullableString(row,"artifact_id"),relativePath:nullableString(row,"relative_path"),errorCode:nullableString(row,"error_code"),errorMessage:nullableString(row,"error_message"),attempts:number(row,"attempts"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
+function runEvaluationFromRow(row: Row): RunEvaluation { return { id:string(row,"id"),runId:string(row,"run_id"),workSpecId:string(row,"work_spec_id"),runMode:string(row,"run_mode") as RunEvaluation["runMode"],rehearsalRootRunId:string(row,"rehearsal_root_run_id"),evaluatorVersion:string(row,"evaluator_version"),passed:Boolean(number(row,"passed")),checks:(json(row,"checks_json") ?? []) as RunEvaluation["checks"],note:string(row,"note"),createdAt:string(row,"created_at") }; }
+function skillCandidateFromRow(row: Row): SkillCandidate { return { id:string(row,"id"),workSpecId:string(row,"work_spec_id"),draft:json(row,"draft_json") as SkillCandidate["draft"],content:string(row,"content"),contentHash:string(row,"content_hash"),evidenceRunIds:(json(row,"evidence_run_ids_json") ?? []) as string[],status:string(row,"status") as SkillCandidate["status"],publishedSkill:json(row,"published_skill_json") as SkillSnapshot | null,publishedWorkSpecId:nullableString(row,"published_work_spec_id"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at"),publishedAt:nullableString(row,"published_at") }; }
 function scheduleFromRow(row: Row): Schedule { return { id:string(row,"id"),workSpecId:string(row,"work_spec_id"),name:string(row,"name"),cronExpression:string(row,"cron_expression"),timezone:string(row,"timezone"),enabled:Boolean(number(row,"enabled")),catchUp:Boolean(number(row,"catch_up")),nextRunAt:string(row,"next_run_at"),lastRunAt:nullableString(row,"last_run_at"),createdAt:string(row,"created_at"),updatedAt:string(row,"updated_at") }; }
 function auditFromRow(row: Row): AuditLog { return { id:string(row,"id"),actorType:string(row,"actor_type") as AuditLog["actorType"],actorId:string(row,"actor_id"),action:string(row,"action"),resourceType:string(row,"resource_type"),resourceId:string(row,"resource_id"),beforeSnapshot:json(row,"before_snapshot_json"),afterSnapshot:json(row,"after_snapshot_json"),requestId:nullableString(row,"request_id"),runId:nullableString(row,"run_id"),createdAt:string(row,"created_at") }; }
 function approvalFromRow(row: Row): Approval { return { id:string(row,"id"),runId:string(row,"run_id"),requestType:string(row,"request_type") as Approval["requestType"],riskLevel:string(row,"risk_level") as Approval["riskLevel"],summary:string(row,"summary"),payload:json(row,"payload_json"),status:string(row,"status") as Approval["status"],expiresAt:nullableString(row,"expires_at"),requestedAt:string(row,"requested_at"),resolvedAt:nullableString(row,"resolved_at"),resolutionComment:nullableString(row,"resolution_comment") }; }

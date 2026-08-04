@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SqliteVNextStore } from "@personal-os/vnext-infrastructure";
 import { FakeExecutor, InternalExecutor } from "@personal-os/vnext-runtime";
-import { KnowledgeService, PersonalOsService, RepositorySkillRegistry, ResultDepositionService, RuntimeCapabilityAuthority, ScheduleService, type Clock, type ExecutionContext, type ExecutionResult, type ExecutorAdapter } from "./index.js";
+import { KnowledgeService, PersonalOsService, RehearsalPromotionService, RepositorySkillRegistry, ResultDepositionService, RuntimeCapabilityAuthority, ScheduleService, type Clock, type ExecutionContext, type ExecutionResult, type ExecutorAdapter } from "./index.js";
 
 class MutableClock implements Clock {
   constructor(public value: Date) {}
@@ -421,6 +421,160 @@ describe("PersonalOsService execution lifecycle", () => {
     store.close();
     rmSync(root, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("automatically deposits safe Skill-bound daily reports once per local day", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-phase11-auto-"));
+    const vaultRoot = join(root, "vault");
+    const skillRoot = join(root, "skills");
+    mkdirSync(vaultRoot, { recursive: true });
+    mkdirSync(join(skillRoot, "daily-brief"), { recursive: true });
+    writeFileSync(join(skillRoot, "daily-brief", "SKILL.md"), `---\nname: daily-brief\ndescription: Generate a structured daily briefing.\nmetadata:\n  version: "1.0.0"\n---\n\n# Daily briefing\n`);
+    const clock = new MutableClock(new Date("2026-08-04T00:30:00.000Z"));
+    const store = new SqliteVNextStore();
+    const knowledge = new KnowledgeService(store, clock);
+    const vault = knowledge.addVault({ name: "个人知识库", rootPath: vaultRoot });
+    const registry = new RepositorySkillRegistry(skillRoot);
+    const skill = registry.get("daily-brief")!;
+    const adapter: ExecutorAdapter = {
+      type: "codex",
+      validate: () => undefined,
+      health: () => ({ available: true, detail: "fixture" }),
+      execute: async (context) => {
+        const grant = execution.getCapabilityAuthority().authorize(context.capability!.token, "result:submit");
+        execution.submitRuntimeResult(grant, { summary: "今日 AI 新闻", data: { qualityStatus: "passed", headlines: ["模型发布"] }, verification: ["两条来源已核验"] });
+        return { status: "succeeded", externalRunId: `codex-${context.run.id}`, result: { finalResponse: "今日 AI 新闻" } };
+      }
+    };
+    const failingAdapter: ExecutorAdapter = {
+      type: "openworker",
+      validate: () => undefined,
+      health: () => ({ available: true, detail: "fixture" }),
+      execute: async () => { throw new Error("fixture failure"); }
+    };
+    const execution = new PersonalOsService(store, [adapter, failingAdapter], clock, undefined, registry);
+    const deposition = new ResultDepositionService(store, knowledge, clock);
+    execution.setRunCompletionObserver(deposition);
+    const policy = { vaultId: vault.id, directory: "Reports" as const, subdirectory: "AI日报", titleTemplate: "{date} AI 日报", trigger: "on_success" as const, period: "calendar_day" as const, timezone: "Asia/Tokyo" };
+    expect(() => execution.createWorkSpec({ title: "错误自动沉淀", instructions: "缺少固定 Skill", kind: "workflow", executorType: "codex", input: {}, reviewPolicy: "not_required", resultDeposition: policy })).toThrow("AUTO_DEPOSITION_REQUIRES_PINNED_SKILL");
+    expect(() => execution.createWorkSpec({ title: "错误人工策略", instructions: "策略冲突", kind: "workflow", executorType: "codex", input: {}, skill, resultDeposition: policy })).toThrow("AUTO_DEPOSITION_REVIEW_POLICY_MISMATCH");
+    expect(() => execution.createWorkSpec({ title: "越界目录", instructions: "非法目录", kind: "workflow", executorType: "codex", input: {}, skill, reviewPolicy: "not_required", resultDeposition: { ...policy, subdirectory: "../escape" } })).toThrow();
+    const spec = execution.createWorkSpec({ title: "AI 日报", instructions: "只读生成日报", kind: "workflow", executorType: "codex", input: {}, skill, reviewPolicy: "not_required", resultDeposition: policy });
+
+    const outside = join(root, "outside");
+    mkdirSync(outside);
+    symlinkSync(outside, join(vaultRoot, "Reports"));
+    expect(await execution.preflightWorkSpec(spec.id)).toMatchObject({ ready: false, checks: expect.arrayContaining([expect.objectContaining({ code: "deposition", status: "fail" })]) });
+    rmSync(join(vaultRoot, "Reports"));
+
+    const cancelled = execution.createRun(spec.id);
+    execution.cancelRun(cancelled.id);
+    expect(deposition.get(cancelled.id)).toBeNull();
+    const failedSpec = execution.createWorkSpec({ title: "失败日报", instructions: "模拟执行失败", kind: "workflow", executorType: "openworker", input: {}, skill, reviewPolicy: "not_required", resultDeposition: policy });
+    const failed = execution.createRun(failedSpec.id);
+    expect(await execution.startRun(failed.id)).toMatchObject({ status: "failed" });
+    expect(deposition.get(failed.id)).toBeNull();
+
+    const first = execution.createRun(spec.id);
+    expect(await execution.startRun(first.id)).toMatchObject({ status: "succeeded", reviewStatus: "not_required" });
+    const firstDeposition = deposition.get(first.id)!;
+    expect(firstDeposition).toMatchObject({ status: "succeeded", subdirectory: "AI日报", relativePath: "Reports/AI日报/2026-08-04-AI-日报.md" });
+    expect(readFileSync(join(vaultRoot, firstDeposition.relativePath!), "utf8")).toContain("AI 生成，未人工复核");
+
+    const second = execution.createRun(spec.id);
+    await execution.startRun(second.id);
+    expect(deposition.get(second.id)).toMatchObject({ status: "succeeded", relativePath: firstDeposition.relativePath, documentId: firstDeposition.documentId });
+    expect(store.listRunEvents(second.id).some((event) => event.eventType === "deposition.reused")).toBe(true);
+
+    clock.value = new Date("2026-08-05T00:30:00.000Z");
+    const third = execution.createRun(spec.id);
+    await execution.startRun(third.id);
+    expect(deposition.get(third.id)?.relativePath).toBe("Reports/AI日报/2026-08-05-AI-日报.md");
+    expect(store.listRunDepositions("succeeded")).toHaveLength(3);
+    expect(store.searchKnowledge("今日 AI 新闻")).toHaveLength(2);
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("promotes two distinct rehearsals and one failure drill into a human-published immutable Skill revision", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-phase12-promotion-"));
+    const vaultRoot = join(root, "vault");
+    const skillRoot = join(root, "skills");
+    mkdirSync(vaultRoot, { recursive: true });
+    mkdirSync(join(skillRoot, "base-research"), { recursive: true });
+    writeFileSync(join(skillRoot, "base-research", "SKILL.md"), `---\nname: base-research\ndescription: Run a governed research rehearsal.\nmetadata:\n  version: "1.0.0"\n---\n\n# Base research\n\n1. Save checkpoint evidence.\n2. Submit a structured result.\n`);
+    const store = new SqliteVNextStore();
+    const registry = new RepositorySkillRegistry(skillRoot);
+    const knowledge = new KnowledgeService(store);
+    const vault = knowledge.addVault({ name: "个人知识库", rootPath: vaultRoot });
+    let failNext = false;
+    const adapter: ExecutorAdapter = {
+      type: "openworker",
+      validate: () => undefined,
+      health: () => ({ available: true, detail: "fixture" }),
+      execute: async (context) => {
+        if (!store.getRunCheckpoint(context.run.id, "collect")) {
+          const checkpointGrant = execution.getCapabilityAuthority().authorize(context.capability!.token, "checkpoint:write");
+          execution.saveRuntimeCheckpoint(checkpointGrant, { stepKey: "collect", label: "采榜", status: "completed", summary: "已采集并校验", data: { rows: 20 } });
+        }
+        if (failNext) { failNext = false; throw new Error("temporary fixture failure"); }
+        const resultGrant = execution.getCapabilityAuthority().authorize(context.capability!.token, "result:submit");
+        execution.submitRuntimeResult(resultGrant, { summary: "双榜 Top10 已完成", data: { hot: 10, new: 10 }, verification: ["两张榜单均为连续 1-10 名"] });
+        return { status: "succeeded", externalRunId: `openworker-${context.run.id}`, result: { finalResponse: "完成" } };
+      }
+    };
+    const execution = new PersonalOsService(store, [adapter], undefined, undefined, registry);
+    const deposition = new ResultDepositionService(store, knowledge);
+    execution.setRunCompletionObserver(deposition);
+    const schedules = new ScheduleService(store, execution);
+    const promotion = new RehearsalPromotionService(store, execution, registry);
+    const source = execution.createWorkSpec({
+      title: "汽水双榜采集", instructions: "采集热歌榜与新歌榜 Top10 并保存证据。", kind: "workflow", executorType: "openworker", input: {},
+      skill: registry.get("base-research"), reviewPolicy: "not_required",
+      resultDeposition: { vaultId: vault.id, directory: "Reports", subdirectory: "汽水音乐", titleTemplate: "{date} 汽水双榜", trigger: "on_success", period: "calendar_day", timezone: "Asia/Tokyo" }
+    });
+    const schedule = schedules.create({ workSpecId: source.id, name: "每日汽水采榜", cronExpression: "0 9 * * *", timezone: "Asia/Tokyo", enabled: false, catchUp: false });
+
+    const premature = await promotion.createRehearsal(source.id);
+    expect(() => promotion.evaluateRun(premature.id)).toThrow("RUN_EVALUATION_REQUIRES_TERMINAL_RUN");
+    execution.cancelRun(premature.id);
+
+    failNext = true;
+    const failedRoot = await promotion.createRehearsal(source.id);
+    expect(await execution.startRun(failedRoot.id)).toMatchObject({ status: "failed", runMode: "rehearsal", rehearsalRootRunId: failedRoot.id });
+    const resumed = execution.retryRun(failedRoot.id, "phase12-resume", "resume");
+    expect(resumed).toMatchObject({ runMode: "rehearsal", rehearsalRootRunId: failedRoot.id });
+    expect(store.listRunCheckpoints(resumed.id)).toEqual([expect.objectContaining({ status: "reused", stepKey: "collect" })]);
+    await execution.startRun(resumed.id);
+    expect(promotion.evaluateRun(resumed.id)).toMatchObject({ passed: true, runMode: "rehearsal", rehearsalRootRunId: failedRoot.id });
+
+    const second = await promotion.createRehearsal(source.id);
+    await execution.startRun(second.id);
+    expect(promotion.evaluateRun(second.id)).toMatchObject({ passed: true });
+    expect(promotion.getGate(source.id)).toMatchObject({ ready: false, passedRehearsalRoots: [expect.any(String), expect.any(String)], missing: [expect.stringContaining("失败演练")] });
+    expect(store.listRunDepositions()).toHaveLength(0);
+
+    const drill = promotion.runFailureDrill(source.id);
+    expect(drill.run).toMatchObject({ runMode: "failure_drill", status: "failed", errorCode: "EXPECTED_VALIDATION_REJECTION" });
+    expect(drill.evaluation).toMatchObject({ passed: true, runMode: "failure_drill" });
+    expect(promotion.getGate(source.id)).toMatchObject({ ready: true, passedRehearsalRoots: expect.arrayContaining([failedRoot.id, second.id]) });
+
+    const draft = { name: "qishui-top10-analysis", version: "1.0.0", displayName: "汽水 Top10 分析", description: "采集并分析汽水音乐热歌榜与新歌榜。", instructions: "# 汽水 Top10 分析\n\n1. 读取真实榜单截图。\n2. 保存双榜 Top10 与验证证据。\n3. 分析重复信号并提交结构化结果。", expectedCurrentHash: null };
+    expect(() => promotion.createCandidate(source.id, { ...draft, instructions: `${draft.instructions}\napi_key=sk-secret-value` })).toThrow("SKILL_CANDIDATE_SECRET_DETECTED");
+    const candidate = promotion.createCandidate(source.id, draft);
+    expect(candidate).toMatchObject({ status: "pending", workSpecId: source.id, contentHash: expect.stringMatching(/^[a-f0-9]{64}$/), evidenceRunIds: expect.arrayContaining([resumed.id, second.id, drill.run.id]) });
+    const staleCandidate = promotion.createCandidate(source.id, { ...draft, instructions: `${draft.instructions}\n4. 保存另一份候选。` });
+    expect(existsSync(join(skillRoot, draft.name))).toBe(false);
+
+    const published = promotion.publishCandidate(candidate.id);
+    expect(published).toMatchObject({ status: "published", publishedSkill: { name: draft.name, version: "1.0.0" }, publishedWorkSpecId: expect.any(String) });
+    expect(existsSync(join(skillRoot, draft.name, "SKILL.md"))).toBe(true);
+    expect(store.getWorkSpec(published.publishedWorkSpecId!)).toMatchObject({ revisionOfWorkSpecId: source.id, revisionNumber: 2, skill: { name: draft.name, contentHash: candidate.contentHash } });
+    expect(store.getSchedule(schedule.id)?.workSpecId).toBe(source.id);
+    expect(() => promotion.publishCandidate(candidate.id)).toThrow("SKILL_CANDIDATE_ALREADY_PUBLISHED");
+    expect(() => promotion.publishCandidate(staleCandidate.id)).toThrow("SKILL_CONCURRENT_UPDATE");
+    store.close();
+    rmSync(root, { recursive: true, force: true });
   });
 });
 
