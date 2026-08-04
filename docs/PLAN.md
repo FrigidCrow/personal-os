@@ -666,3 +666,9 @@ The v2 control plane will restore the proven Radar lifecycle that was lost durin
 Status: **Passed and deployed on 2026-08-04.** Migration 13 restores the real rehearsal-to-Skill lifecycle on the current v2 control plane. Two distinct passed rehearsal roots and one passed deterministic failure drill are required; pending candidates stay in SQLite; human publication creates an immutable WorkSpec revision; Schedule rebinding remains a separate explicit action. Evidence is recorded in [PERSONAL-OS-PHASE12-REHEARSAL-TO-SKILL-ACCEPTANCE.md](PERSONAL-OS-PHASE12-REHEARSAL-TO-SKILL-ACCEPTANCE.md).
 
 The Qishui production proof also adds a bounded managed-resource lifecycle: Core starts and stops the dedicated Android AVD outside the Codex workspace sandbox, while Codex remains the visual control loop. Two live isolated rehearsals and a failure drill passed before the daily `09:00 Asia/Tokyo` schedule was enabled.
+
+### 2026-08-04 Phase 13 production automation operations
+
+Phase 13 turns Scheduler execution into an operator-readable ledger. Every planned occurrence records whether it fired on time, caught up after sleep/restart, was skipped by policy or failed before a Run could start. Radar then combines that evidence with the current checkpoint, latest success, next trigger, Obsidian deposition, duration, actual cost and an explainable failure category. Today surfaces unresolved schedule misses without adding an external notification service or a new task queue.
+
+Status: **Passed and deployed on 2026-08-04.** The Scheduler occurrence ledger, bounded restart recovery, production-only health calculation, WorkSpec-stable occurrence lineage, Radar operations center and Today schedule alerts passed every gate in [PERSONAL-OS-PHASE13-PRODUCTION-OPERATIONS-ACCEPTANCE.md](PERSONAL-OS-PHASE13-PRODUCTION-OPERATIONS-ACCEPTANCE.md). Production runs migration 14 with three enabled schedules and healthy Web, API, Scheduler, Codex and OpenWorker executors.

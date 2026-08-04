@@ -107,6 +107,22 @@ describe("vNext SQLite migrations", () => {
     database.close();
   });
 
+  it("upgrades historical schedule firings into Phase 13 occurrences and links their Runs", () => {
+    const database = new Database(":memory:");
+    applyMigrations(database, migrations.slice(0, 13));
+    const now = "2026-08-04T00:00:00.000Z";
+    database.prepare(`INSERT INTO work_specs(id,project_id,kind,title,instructions,executor_type,input_json,timeout_seconds,max_attempts,lifecycle_status,skill_json,result_deposition_json,revision_of_work_spec_id,revision_number,review_policy,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("phase13-workflow", null, "workflow", "历史定时", "旧定义", "internal", "{}", 5, 2, "active", null, null, null, 1, "required", now, now);
+    database.prepare(`INSERT INTO schedules(id,work_spec_id,name,cron_expression,timezone,enabled,catch_up,next_run_at,last_run_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run("phase13-schedule", "phase13-workflow", "历史规则", "0 8 * * *", "UTC", 1, 0, "2026-08-05T08:00:00.000Z", now, now, now);
+    database.prepare(`INSERT INTO runs(id,work_spec_id,project_id,executor_type,status,input_json,attempt,idempotency_key,retry_of_run_id,external_run_id,error_code,error_message,result_json,usage_json,actual_cost_minor,actual_cost_currency,cost_source,review_status,reviewed_at,review_comment,created_at,started_at,finished_at,run_mode,rehearsal_root_run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("phase13-run", "phase13-workflow", null, "internal", "succeeded", "{}", 1, "phase13-schedule:2026-08-04T00:00:00.000Z", null, null, null, null, "{}", null, null, null, null, "accepted", now, null, now, now, now, "production", null);
+    database.prepare(`INSERT INTO schedule_firings(idempotency_key,schedule_id,scheduled_for,created_at) VALUES (?,?,?,?)`).run("phase13-schedule:2026-08-04T00:00:00.000Z", "phase13-schedule", now, now);
+    applyMigrations(database);
+    expect(database.prepare("SELECT work_spec_id,outcome,lateness_ms,run_id,error_code FROM schedule_firings").get()).toEqual({ work_spec_id: "phase13-workflow", outcome: "fired", lateness_ms: 0, run_id: "phase13-run", error_code: null });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='schedule_firings_outcome_idx'").get()).toEqual({ name: "schedule_firings_outcome_idx" });
+    expect(() => database.prepare("UPDATE schedule_firings SET lateness_ms=-1").run()).toThrow("INVALID_SCHEDULE_OCCURRENCE");
+    expect(database.pragma("foreign_key_check")).toEqual([]);
+    database.close();
+  });
+
   it("creates all seven Phase 5 finance tables and backfills transaction facts", () => {
     const database = new Database(":memory:");
     applyMigrations(database, migrations.slice(0, 6));

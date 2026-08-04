@@ -121,6 +121,79 @@ describe("PersonalOsService execution lifecycle", () => {
     store.close();
   });
 
+  it("aggregates the active step, last success, deposition, duration, cost and recovered failure", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-phase13-operations-"));
+    const clock = new MutableClock(new Date("2026-08-04T00:00:00.000Z"));
+    const store = new SqliteVNextStore();
+    const service = new PersonalOsService(store, [new InternalExecutor()], clock);
+    const knowledge = new KnowledgeService(store);
+    const vault = knowledge.addVault({ name: "运营知识库", rootPath: root });
+    const spec = service.createWorkSpec({ title: "生产日报", instructions: "生成日报", executorType: "internal", input: { operation: "echo", message: "ok", delayMs: 0 }, kind: "workflow" });
+
+    const success = service.createRun(spec.id);
+    await service.startRun(success.id);
+    store.updateRun({ ...store.getRun(success.id)!, startedAt: "2026-08-04T00:00:00.000Z", finishedAt: "2026-08-04T00:00:02.500Z" });
+    service.recordActualCost(success.id, { amountMinor: 320, currency: "CNY", source: "manual_receipt" });
+    store.insertRunDeposition({ id: "phase13-deposition", runId: success.id, vaultId: vault.id, directory: "Reports", subdirectory: "AI日报", deduplicationKey: null, title: "生产日报", status: "succeeded", documentId: null, artifactId: null, relativePath: "Reports/AI日报/2026-08-04-生产日报.md", errorCode: null, errorMessage: null, attempts: 1, createdAt: clock.value.toISOString(), updatedAt: clock.value.toISOString() });
+
+    clock.value = new Date("2026-08-04T00:01:00.000Z");
+    const active = service.createRun(spec.id);
+    store.updateRun({ ...active, status: "running", startedAt: clock.value.toISOString() });
+    store.insertRunCheckpoint({ id: "phase13-checkpoint", runId: active.id, stepKey: "collect", label: "采集公开信号", status: "running", summary: "正在采集", data: {}, sourceCheckpointId: null, createdAt: clock.value.toISOString(), updatedAt: clock.value.toISOString() });
+
+    expect(service.listWorkflowOperations().find((item) => item.workSpec.id === spec.id)).toMatchObject({
+      health: "attention",
+      activeRun: { id: active.id },
+      currentCheckpoint: { label: "采集公开信号" },
+      latestSuccessfulRun: { id: success.id },
+      latestTerminalRun: { id: success.id, actualCostMinor: 320, actualCostCurrency: "CNY" },
+      latestDurationMs: 2_500,
+      latestDeposition: { status: "succeeded", relativePath: "Reports/AI日报/2026-08-04-生产日报.md" },
+      attentionReason: "当前步骤：采集公开信号。"
+    });
+
+    clock.value = new Date("2026-08-04T00:02:00.000Z");
+    store.updateRun({ ...store.getRun(active.id)!, status: "failed", errorCode: "MANAGED_RESOURCE_START_FAILED", errorMessage: "emulator unavailable", finishedAt: clock.value.toISOString() });
+    expect(service.listWorkflowOperations().find((item) => item.workSpec.id === spec.id)).toMatchObject({ health: "degraded", failureCategory: "managed_resource", consecutiveFailures: 1, currentCheckpoint: null });
+
+    clock.value = new Date("2026-08-04T00:03:00.000Z");
+    const recovered = service.createRun(spec.id);
+    await service.startRun(recovered.id);
+    expect(service.listWorkflowOperations().find((item) => item.workSpec.id === spec.id)).toMatchObject({ health: "healthy", failureCategory: null, consecutiveFailures: 0, latestSuccessfulRun: { id: recovered.id } });
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("classifies runtime, business, input and deposition failures for the operator", async () => {
+    const root = mkdtempSync(join(tmpdir(), "personal-os-phase13-categories-"));
+    const store = new SqliteVNextStore();
+    const service = new PersonalOsService(store, [new InternalExecutor()]);
+    const vault = new KnowledgeService(store).addVault({ name: "分类知识库", rootPath: root });
+    const failed = (title: string, errorCode: string, errorMessage: string) => {
+      const spec = service.createWorkSpec({ title, instructions: title, executorType: "internal", input: { operation: "echo", message: "ok", delayMs: 0 }, kind: "workflow" });
+      const run = service.createRun(spec.id);
+      store.updateRun({ ...run, status: "failed", errorCode, errorMessage, startedAt: run.createdAt, finishedAt: run.createdAt });
+      return spec;
+    };
+    const runtime = failed("Runtime 失败", "EXECUTION_TIMEOUT", "network timeout");
+    const business = failed("业务失败", "EVIDENCE_GATE_FAILED", "没有足够证据");
+    const inputSpec = service.createWorkSpec({ title: "等待输入", instructions: "等待用户", executorType: "internal", input: { operation: "echo", message: "ok", delayMs: 0 }, kind: "workflow" });
+    const inputRun = service.createRun(inputSpec.id);
+    store.updateRun({ ...inputRun, status: "waiting_input", startedAt: inputRun.createdAt });
+    const depositionSpec = service.createWorkSpec({ title: "沉淀失败", instructions: "写入日报", executorType: "internal", input: { operation: "echo", message: "ok", delayMs: 0 }, kind: "workflow" });
+    const depositionRun = service.createRun(depositionSpec.id);
+    await service.startRun(depositionRun.id);
+    store.insertRunDeposition({ id: "failed-deposition", runId: depositionRun.id, vaultId: vault.id, directory: "Reports", subdirectory: "", deduplicationKey: null, title: "沉淀失败", status: "failed", documentId: null, artifactId: null, relativePath: null, errorCode: "VAULT_NOT_WRITABLE", errorMessage: "Vault 不可写", attempts: 1, createdAt: depositionRun.createdAt, updatedAt: depositionRun.createdAt });
+
+    const summaries = new Map(service.listWorkflowOperations().map((item) => [item.workSpec.id, item]));
+    expect(summaries.get(runtime.id)).toMatchObject({ failureCategory: "runtime" });
+    expect(summaries.get(business.id)).toMatchObject({ failureCategory: "business" });
+    expect(summaries.get(inputSpec.id)).toMatchObject({ failureCategory: "input_or_approval" });
+    expect(summaries.get(depositionSpec.id)).toMatchObject({ failureCategory: "deposition", latestDeposition: { status: "failed" } });
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("requires skill-bound agent runtimes to submit a structured MCP result before success", async () => {
     const root = mkdtempSync(join(tmpdir(), "personal-os-required-result-"));
     const skillRoot = join(root, "skills");
@@ -672,6 +745,7 @@ describe("ScheduleService", () => {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
     expect(store.listRuns()).toHaveLength(1);
     expect(fake.executions).toBe(1);
+    expect(store.listScheduleFirings()).toEqual([expect.objectContaining({ outcome: "fired", runId: store.listRuns()[0]?.id, latenessMs: 0 })]);
     store.close();
   });
 
@@ -700,6 +774,7 @@ describe("ScheduleService", () => {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
     expect(secondStore.listRuns()).toHaveLength(2);
     expect(secondStore.listRuns().some((run) => run.idempotencyKey === `${schedule.id}:${planned}`)).toBe(true);
+    expect(secondStore.listScheduleFirings()).toEqual([expect.objectContaining({ outcome: "catch_up", scheduledFor: planned, latenessMs: 180_000, runId: expect.any(String) })]);
     expect(secondSchedules.health()).toMatchObject({ status: "healthy", lastTickAt: clock.value.toISOString(), enabledSchedules: 1 });
     secondStore.close();
     rmSync(root, { recursive: true, force: true });
@@ -717,6 +792,82 @@ describe("ScheduleService", () => {
     expect(await schedules.tick()).toBe(0);
     expect(store.listRuns()).toHaveLength(0);
     expect(store.getSchedule(schedule.id)).toMatchObject({ lastRunAt: schedule.nextRunAt });
+    expect(store.listScheduleFirings()).toEqual([expect.objectContaining({ outcome: "skipped", latenessMs: 240_000, runId: null })]);
+    expect(store.listAudit().some((entry) => entry.action === "schedule.skipped" && entry.resourceId === schedule.id)).toBe(true);
+    expect(execution.listWorkflowOperations().find((item) => item.workSpec.id === spec.id)).toMatchObject({ health: "degraded", failureCategory: "scheduler", latestOccurrence: { outcome: "skipped" } });
+    const rehearsal = execution.createRun(spec.id, { runMode: "rehearsal" });
+    await execution.startRun(rehearsal.id);
+    expect(execution.listWorkflowOperations().find((item) => item.workSpec.id === spec.id)).toMatchObject({ health: "degraded", failureCategory: "scheduler", latestRun: null });
+    store.close();
+  });
+
+  it("keeps an occurrence with the WorkSpec that owned it after its Schedule is rebound", async () => {
+    const clock = new MutableClock(new Date("2026-08-01T00:00:00.000Z"));
+    const store = new SqliteVNextStore();
+    const execution = new PersonalOsService(store, [new FakeExecutor()], clock);
+    const first = execution.createWorkSpec({ title: "旧版本", instructions: "保留旧调度历史", executorType: "fake", input: {}, kind: "workflow", lifecycleStatus: "active" });
+    const second = execution.createWorkSpec({ title: "新版本", instructions: "接管未来调度", executorType: "fake", input: {}, kind: "workflow", lifecycleStatus: "active" });
+    const schedules = new ScheduleService(store, execution, clock);
+    const schedule = schedules.create({ workSpecId: first.id, name: "可换绑规则", cronExpression: "* * * * *", timezone: "UTC", enabled: true, catchUp: false });
+    clock.value = new Date("2026-08-01T00:05:00.000Z");
+    expect(await schedules.tick()).toBe(0);
+    schedules.rebind(schedule.id, { workSpecId: second.id });
+    expect(store.listScheduleFirings()).toEqual([expect.objectContaining({ workSpecId: first.id, outcome: "skipped" })]);
+    expect(execution.listWorkflowOperations().find((item) => item.workSpec.id === first.id)).toMatchObject({ health: "degraded", failureCategory: "scheduler" });
+    expect(execution.listWorkflowOperations().find((item) => item.workSpec.id === second.id)).toMatchObject({ health: "never_run", latestOccurrence: null });
+    store.close();
+  });
+
+  it("records a redacted start failure and advances the schedule without inventing a Run", async () => {
+    const clock = new MutableClock(new Date("2026-08-01T00:00:00.000Z"));
+    const store = new SqliteVNextStore();
+    class FailingStartService extends PersonalOsService {
+      override createRun(): never { throw new Error("EXECUTOR_UNAVAILABLE: api_key=sk_phase13_secret_value"); }
+    }
+    const execution = new FailingStartService(store, [new FakeExecutor()], clock);
+    const spec = execution.createWorkSpec({ title: "启动失败", instructions: "验证调度失败", executorType: "fake", input: {}, kind: "workflow" });
+    const schedules = new ScheduleService(store, execution, clock);
+    const schedule = schedules.create({ workSpecId: spec.id, name: "每分钟", cronExpression: "* * * * *", timezone: "UTC", enabled: true, catchUp: true });
+    const planned = schedule.nextRunAt;
+    clock.value = new Date("2026-08-01T00:01:00.000Z");
+    expect(await schedules.tick()).toBe(0);
+    expect(store.listRuns()).toHaveLength(0);
+    expect(store.getSchedule(schedule.id)).toMatchObject({ lastRunAt: planned, nextRunAt: "2026-08-01T00:02:00.000Z" });
+    expect(store.listScheduleFirings()).toEqual([expect.objectContaining({ outcome: "start_failed", errorCode: "EXECUTOR_UNAVAILABLE", errorMessage: expect.not.stringContaining("sk_phase13_secret_value") })]);
+    expect(store.listAudit().some((entry) => entry.action === "schedule.start_failed")).toBe(true);
+    expect(schedules.health()).toMatchObject({ status: "degraded", lastError: expect.not.stringContaining("sk_phase13_secret_value") });
+    store.close();
+  });
+
+  it("turns an occurrence claimed before a crash into an explicit start failure on restart", async () => {
+    const clock = new MutableClock(new Date("2026-08-01T00:00:00.000Z"));
+    const store = new SqliteVNextStore();
+    const execution = new PersonalOsService(store, [new FakeExecutor()], clock);
+    const spec = execution.createWorkSpec({ title: "崩溃窗口", instructions: "恢复领取记录", executorType: "fake", input: {}, kind: "workflow" });
+    const schedules = new ScheduleService(store, execution, clock);
+    const schedule = schedules.create({ workSpecId: spec.id, name: "每分钟", cronExpression: "* * * * *", timezone: "UTC", enabled: true, catchUp: true });
+    const key = `${schedule.id}:${schedule.nextRunAt}`;
+    store.claimScheduleFiring({ idempotencyKey: key, scheduleId: schedule.id, workSpecId: spec.id, scheduledFor: schedule.nextRunAt, observedAt: schedule.nextRunAt, outcome: "fired", latenessMs: 0, runId: null, errorCode: null, errorMessage: null });
+    clock.value = new Date(schedule.nextRunAt);
+    expect(await schedules.tick()).toBe(0);
+    expect(store.listScheduleFirings()).toEqual([expect.objectContaining({ outcome: "start_failed", errorCode: "SCHEDULE_OCCURRENCE_INCOMPLETE", runId: null })]);
+    expect(store.getSchedule(schedule.id)?.nextRunAt).toBe("2026-08-01T00:02:00.000Z");
+    store.close();
+  });
+
+  it("moves a queued scheduled Run through bounded recovery after a process restart", async () => {
+    const clock = new MutableClock(new Date("2026-08-01T00:00:00.000Z"));
+    const store = new SqliteVNextStore();
+    const execution = new PersonalOsService(store, [new FakeExecutor()], clock);
+    const spec = execution.createWorkSpec({ title: "排队恢复", instructions: "恢复尚未启动的定时 Run", executorType: "fake", input: {}, kind: "workflow", maxAttempts: 2 });
+    const schedules = new ScheduleService(store, execution, clock);
+    const schedule = schedules.create({ workSpecId: spec.id, name: "每分钟", cronExpression: "* * * * *", timezone: "UTC", enabled: true, catchUp: true });
+    const queued = execution.createRun(spec.id, { idempotencyKey: `${schedule.id}:${schedule.nextRunAt}` });
+    expect(queued.status).toBe("queued");
+    expect(execution.recoverInterruptedRuns()).toBe(1);
+    await waitUntil(() => store.listRuns().length === 2 && store.listRuns().some((run) => run.status === "succeeded"));
+    expect(store.getRun(queued.id)).toMatchObject({ status: "failed", errorCode: "PROCESS_RESTARTED" });
+    expect(store.listRuns().find((run) => run.retryOfRunId === queued.id)).toMatchObject({ attempt: 2, status: "succeeded" });
     store.close();
   });
 });

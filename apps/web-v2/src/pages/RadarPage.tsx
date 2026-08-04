@@ -1,10 +1,13 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftIcon,
   ArchiveBoxIcon,
+  BookOpenTextIcon,
   CalendarDotsIcon,
   CheckCircleIcon,
+  ClockCountdownIcon,
+  CoinsIcon,
   CrosshairSimpleIcon,
   FingerprintIcon,
   FlaskIcon,
@@ -50,7 +53,7 @@ export function RadarPage({ selectedId }: { selectedId?: string } = {}) {
   const artifacts = useQuery({ queryKey: ["artifacts"], queryFn: () => api<Artifact[]>("/artifacts?limit=500") });
   const skills = useQuery({ queryKey: ["skills"], queryFn: () => api<SkillSnapshot[]>("/skills") });
   const vaults = useQuery({ queryKey: ["vaults"], queryFn: () => api<KnowledgeVault[]>("/knowledge/vaults") });
-  const operations = useQuery({ queryKey: ["workflow-operations"], queryFn: () => api<WorkflowOperationsSummary[]>("/operations/workflows") });
+  const operations = useQuery({ queryKey: ["workflow-operations"], queryFn: () => api<WorkflowOperationsSummary[]>("/operations/workflows"), refetchInterval: 4_000 });
   const refresh = () => {
     for (const queryKey of [["work-specs"], ["schedules"], ["runs"], ["workflow-operations"]]) void client.invalidateQueries({ queryKey });
   };
@@ -125,8 +128,38 @@ function OperationsPanel({ values }: { values: WorkflowOperationsSummary[] }) {
   const healthy = values.filter((item) => item.health === "healthy").length;
   const attention = values.filter((item) => item.health === "attention" || item.health === "degraded").length;
   const scheduled = values.filter((item) => item.enabledScheduleCount > 0).length;
-  return <section className="operations-band panel"><div><small>工作流</small><strong>{values.length}</strong></div><div><small>运行正常</small><strong>{healthy}</strong></div><div><small>需要处理</small><strong>{attention}</strong></div><div><small>定时已启用</small><strong>{scheduled}</strong></div></section>;
+  const ordered = [...values].sort((left, right) => operationPriority(left) - operationPriority(right) || (left.nextRunAt ?? "9999").localeCompare(right.nextRunAt ?? "9999"));
+  return <section className="automation-operations panel" aria-label="生产自动化运营中心">
+    <div className="section-heading"><div><h2>生产自动化运营</h2><p>确认每个雷达是否按时启动、执行到哪一步，以及结果是否进入 Obsidian。</p></div></div>
+    <div className="operations-band" aria-label="自动化概览"><div><small>工作流</small><strong>{values.length}</strong></div><div><small>运行正常</small><strong>{healthy}</strong></div><div><small>运行或待处理</small><strong>{attention}</strong></div><div><small>定时已启用</small><strong>{scheduled}</strong></div></div>
+    {ordered.length === 0 ? <EmptyBlock title="还没有自动工作流" description="创建雷达并设置定时后，这里会显示真实运行状态。" /> : <div className="automation-list">{ordered.map((item) => {
+      const terminal = item.latestTerminalRun;
+      const current = item.activeRun ? (item.currentCheckpoint?.label ?? (item.activeRun.status === "queued" ? "等待 Runtime" : "Runtime 已启动")) : "没有正在运行";
+      const deposition = item.latestDeposition;
+      return <Link href={`/radar/${item.workSpec.id}`} className={`automation-row ${item.health}`} key={item.workSpec.id}>
+        <header><div><h3>{item.workSpec.title}</h3><span>{item.workSpec.skill ? `${item.workSpec.skill.name}@${item.workSpec.skill.version}` : item.workSpec.executorType}</span></div><HealthBadge value={item.health} /></header>
+        <p className="automation-reason">{item.attentionReason ?? "最近一次执行和沉淀没有发现阻塞。"}</p>
+        <div className="automation-facts">
+          <OperationFact label="当前" value={current} hint={item.activeRun ? formatDate(item.activeRun.startedAt ?? item.activeRun.createdAt) : "等待下一次触发"} />
+          <OperationFact label="最后成功" value={formatDate(item.latestSuccessfulRun?.finishedAt ?? item.latestSuccessfulRun?.createdAt)} hint={item.latestSuccessfulRun ? `Run ${item.latestSuccessfulRun.id.slice(0, 8)}` : "还没有成功记录"} />
+          <OperationFact label="下次触发" value={formatDate(item.nextRunAt)} hint={`${item.enabledScheduleCount}/${item.scheduleCount} 条定时启用`} icon={<ClockCountdownIcon />} />
+          <OperationFact label="Obsidian" value={deposition?.relativePath ?? (deposition?.status === "failed" ? "写入失败" : "暂无沉淀")} hint={deposition ? `状态：${depositionLabel(deposition.status)}` : "按工作流策略写入"} icon={<BookOpenTextIcon />} />
+          <OperationFact label="上次运行" value={formatDuration(item.latestDurationMs)} hint={terminal?.actualCostMinor === null || terminal?.actualCostMinor === undefined ? "实际成本未登记" : `${terminal.actualCostCurrency} ${(terminal.actualCostMinor / 100).toFixed(2)}`} icon={<CoinsIcon />} />
+        </div>
+        <footer><span>{item.latestOccurrence ? `${occurrenceLabel(item.latestOccurrence.outcome)}，计划 ${formatDate(item.latestOccurrence.scheduledFor)}` : "还没有定时发生记录"}</span><span>{item.occurrenceIssueCount > 0 ? `历史调度异常 ${item.occurrenceIssueCount} 次` : "调度记录正常"}</span></footer>
+      </Link>;
+    })}</div>}
+  </section>;
 }
+
+function OperationFact({ label, value, hint, icon }: { label: string; value: string; hint: string; icon?: ReactNode }) {
+  return <div><span>{icon}{label}</span><strong title={value}>{value}</strong><small>{hint}</small></div>;
+}
+
+function operationPriority(value: WorkflowOperationsSummary): number { return value.health === "degraded" ? 0 : value.health === "attention" ? 1 : value.health === "never_run" ? 2 : value.health === "healthy" ? 3 : 4; }
+function occurrenceLabel(value: NonNullable<WorkflowOperationsSummary["latestOccurrence"]>["outcome"]): string { return ({ fired: "按时触发", catch_up: "恢复后补跑", skipped: "已按策略跳过", start_failed: "启动 Run 失败" } as const)[value]; }
+function depositionLabel(value: NonNullable<WorkflowOperationsSummary["latestDeposition"]>["status"]): string { return ({ pending: "正在写入", succeeded: "已写入", failed: "失败" } as const)[value]; }
+function formatDuration(value: number | null): string { if (value === null) return "暂无耗时"; if (value < 1_000) return `${value} 毫秒`; const seconds = Math.round(value / 1_000); return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`; }
 
 function PreflightPanel({ value }: { value: WorkSpecPreflight }) {
   return <section className={`preflight-panel panel ${value.ready ? "ready" : "blocked"}`}><div className="section-heading"><div><h2>{value.ready ? "可以运行" : "暂时不能运行"}</h2><p>检查时间 {formatDate(value.checkedAt)}。警告不会阻止运行，失败项会阻止换绑或执行。</p></div>{value.ready ? <CheckCircleIcon size={28} weight="fill" /> : <WarningCircleIcon size={28} weight="fill" />}</div><div className="preflight-checks">{value.checks.map((check) => <div key={check.code}><Status value={check.status} /><span><strong>{check.label}</strong><small>{check.detail}</small></span></div>)}</div></section>;
@@ -245,7 +278,7 @@ function ScheduleForm({ workflows, selectedWorkSpecId, pending, error, onSubmit 
 }
 
 function HealthBadge({ value }: { value: WorkflowOperationsSummary["health"] }) {
-  const labels = { healthy: "正常", degraded: "连续失败", attention: "处理中", never_run: "未运行", paused: "已暂停" };
+  const labels = { healthy: "正常", degraded: "异常", attention: "处理中", never_run: "未运行", paused: "已暂停" };
   return <span className={`health-badge ${value}`}>{labels[value]}</span>;
 }
 

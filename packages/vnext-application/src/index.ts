@@ -90,6 +90,7 @@ import {
   type RunStatus,
   type Schedule,
   type ScheduleInput,
+  type ScheduleOccurrence,
   type ScheduleRebindInput,
   type ScheduleUpdateInput,
   type RuntimeCapabilityScope,
@@ -204,7 +205,10 @@ export interface VNextStore {
   getSchedule(id: string): Schedule | null;
   insertSchedule(schedule: Schedule): Schedule;
   updateSchedule(schedule: Schedule): Schedule;
-  claimScheduleFiring(scheduleId: string, scheduledFor: string, key: string, createdAt: string): boolean;
+  listScheduleFirings(limit?: number): ScheduleOccurrence[];
+  getScheduleFiring(idempotencyKey: string): ScheduleOccurrence | null;
+  claimScheduleFiring(occurrence: ScheduleOccurrence): boolean;
+  updateScheduleFiring(occurrence: ScheduleOccurrence): ScheduleOccurrence;
   insertAudit(input: AuditInput, createdAt: string): AuditLog;
   listAudit(limit?: number): AuditLog[];
   listApprovals(status?: Approval["status"]): Approval[];
@@ -595,21 +599,40 @@ export class PersonalOsService {
   listWorkflowOperations(): WorkflowOperationsSummary[] {
     const schedules = this.store.listSchedules();
     const runs = this.store.listRuns(10_000);
+    const occurrences = this.store.listScheduleFirings(10_000);
+    const depositions = this.store.listRunDepositions();
     return this.store.listWorkSpecs({ kind: "workflow" }).filter((workSpec) => workSpec.lifecycleStatus !== "retired").map((workSpec) => {
       const ownSchedules = schedules.filter((schedule) => schedule.workSpecId === workSpec.id);
       const enabledSchedules = ownSchedules.filter((schedule) => schedule.enabled);
-      const ownRuns = runs.filter((run) => run.workSpecId === workSpec.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      const ownRuns = runs.filter((run) => run.workSpecId === workSpec.id && run.runMode === "production").sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      const ownRunIds = new Set(ownRuns.map((run) => run.id));
+      const ownOccurrences = occurrences.filter((occurrence) => occurrence.workSpecId === workSpec.id).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
       const latestRun = ownRuns[0] ?? null;
+      const activeRun = ownRuns.find((run) => ["queued", "running", "waiting_input", "waiting_approval"].includes(run.status)) ?? null;
+      const latestSuccessfulRun = ownRuns.find((run) => run.status === "succeeded" || run.status === "partially_succeeded") ?? null;
+      const latestTerminalRun = ownRuns.find((run) => isTerminalRunStatus(run.status)) ?? null;
+      const currentCheckpoint = activeRun
+        ? this.store.listRunCheckpoints(activeRun.id).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ?? null
+        : null;
+      const latestDeposition = depositions.find((deposition) => ownRunIds.has(deposition.runId)) ?? null;
+      const latestOccurrence = ownOccurrences[0] ?? null;
+      const occurrenceIssues = ownOccurrences.filter((occurrence) => occurrence.outcome === "skipped" || occurrence.outcome === "start_failed");
+      const latestOccurrenceIssue = occurrenceIssues.find((occurrence) => !latestSuccessfulRun || (latestSuccessfulRun.finishedAt ?? latestSuccessfulRun.createdAt) <= occurrence.observedAt) ?? null;
       let consecutiveFailures = 0;
       for (const run of ownRuns) {
         if (run.status !== "failed") break;
         consecutiveFailures += 1;
       }
+      let failureCategory: WorkflowOperationsSummary["failureCategory"] = null;
+      if (activeRun?.status === "waiting_input" || activeRun?.status === "waiting_approval") failureCategory = "input_or_approval";
+      else if (latestOccurrenceIssue) failureCategory = "scheduler";
+      else if (latestDeposition?.status === "failed") failureCategory = "deposition";
+      else if (latestRun?.status === "failed") failureCategory = classifyWorkflowFailure(latestRun.errorCode, latestRun.errorMessage);
       let health: WorkflowOperationsSummary["health"] = "never_run";
       if (workSpec.lifecycleStatus === "paused" || (ownSchedules.length > 0 && enabledSchedules.length === 0)) health = "paused";
-      else if (latestRun && ["running", "queued", "waiting_input", "waiting_approval"].includes(latestRun.status)) health = "attention";
-      else if (consecutiveFailures > 0) health = "degraded";
-      else if (latestRun?.status === "succeeded" || latestRun?.status === "partially_succeeded") health = "healthy";
+      else if (activeRun) health = "attention";
+      else if (latestOccurrenceIssue || latestDeposition?.status === "failed" || consecutiveFailures > 0) health = "degraded";
+      else if (latestSuccessfulRun) health = "healthy";
       return {
         workSpec,
         health,
@@ -617,7 +640,19 @@ export class PersonalOsService {
         enabledScheduleCount: enabledSchedules.length,
         nextRunAt: enabledSchedules.map((schedule) => schedule.nextRunAt).sort()[0] ?? null,
         latestRun,
-        consecutiveFailures
+        activeRun,
+        currentCheckpoint,
+        latestSuccessfulRun,
+        latestTerminalRun,
+        latestDurationMs: runDurationMs(latestTerminalRun),
+        latestDeposition,
+        latestOccurrence,
+        occurrenceIssueCount: occurrenceIssues.length,
+        consecutiveFailures,
+        failureCategory,
+        attentionReason: health === "paused"
+          ? "定时或工作流已暂停。"
+          : workflowAttentionReason({ activeRun, currentCheckpoint, latestOccurrenceIssue, latestDeposition, latestRun, failureCategory, consecutiveFailures })
       };
     });
   }
@@ -961,8 +996,11 @@ export class PersonalOsService {
   recoverInterruptedRuns(): number {
     let recovered = 0;
     for (const run of this.store.listRuns(10_000)) {
-      if (run.status === "running") {
-        this.failRun(run, "PROCESS_RESTARTED", "服务重启中断了本次执行，请重试。", undefined);
+      const scheduled = this.isScheduledRunChain(run);
+      if (run.status === "running" || (run.status === "queued" && scheduled)) {
+        const message = run.status === "queued" ? "服务重启发生在定时 Run 启动前，已进入有限恢复。" : "服务重启中断了本次执行，请重试。";
+        const failed = this.failRun(run, "PROCESS_RESTARTED", message, undefined);
+        if (scheduled) this.maybeAutoRetryScheduled(failed, "PROCESS_RESTARTED", message, undefined);
         recovered += 1;
       }
     }
@@ -1428,25 +1466,63 @@ export class ScheduleService {
   async tick(): Promise<number> {
     const now = this.clock.now();
     let created = 0;
+    let tickError: string | null = null;
     try {
       for (const schedule of this.store.listSchedules()) {
         if (!schedule.enabled || new Date(schedule.nextRunAt).getTime() > now.getTime()) continue;
         const scheduledFor = schedule.nextRunAt;
         const key = scheduleFiringKey(schedule.id, scheduledFor);
         const next = nextOccurrence(schedule.cronExpression, schedule.timezone, now).toISOString();
-        if (!schedule.catchUp && now.getTime() - new Date(scheduledFor).getTime() > 60_000) {
+        const latenessMs = Math.max(0, now.getTime() - new Date(scheduledFor).getTime());
+        const late = latenessMs > 60_000;
+        const outcome: ScheduleOccurrence["outcome"] = late ? (schedule.catchUp ? "catch_up" : "skipped") : "fired";
+        const occurrence: ScheduleOccurrence = {
+          idempotencyKey: key,
+          scheduleId: schedule.id,
+          workSpecId: schedule.workSpecId,
+          scheduledFor,
+          observedAt: now.toISOString(),
+          outcome,
+          latenessMs,
+          runId: null,
+          errorCode: null,
+          errorMessage: null
+        };
+        if (outcome === "skipped") {
+          if (this.store.claimScheduleFiring(occurrence)) {
+            this.store.insertAudit({ actorType: "scheduler", actorId: schedule.id, action: "schedule.skipped", resourceType: "schedule", resourceId: schedule.id, afterSnapshot: occurrence }, now.toISOString());
+          }
           this.store.updateSchedule({ ...schedule, nextRunAt: next, lastRunAt: scheduledFor, updatedAt: now.toISOString() });
           continue;
         }
-        if (this.store.claimScheduleFiring(schedule.id, scheduledFor, key, now.toISOString())) {
-          const run = this.execution.createRun(schedule.workSpecId, { idempotencyKey: key });
-          this.store.updateSchedule({ ...schedule, nextRunAt: next, lastRunAt: scheduledFor, updatedAt: now.toISOString() });
-          this.store.insertAudit({ actorType: "scheduler", actorId: schedule.id, action: "schedule.fired", resourceType: "run", resourceId: run.id, afterSnapshot: { scheduledFor }, runId: run.id }, now.toISOString());
-          void this.execution.startRun(run.id);
-          created += 1;
+        const claimed = this.store.claimScheduleFiring(occurrence);
+        if (claimed) {
+          try {
+            const run = this.execution.createRun(schedule.workSpecId, { idempotencyKey: key });
+            const linked = this.store.updateScheduleFiring({ ...occurrence, runId: run.id });
+            this.store.insertAudit({ actorType: "scheduler", actorId: schedule.id, action: outcome === "catch_up" ? "schedule.caught_up" : "schedule.fired", resourceType: "run", resourceId: run.id, afterSnapshot: linked, runId: run.id }, now.toISOString());
+            void this.execution.startRun(run.id);
+            created += 1;
+          } catch (error) {
+            const message = redactSensitiveText(error instanceof Error ? error.message : "SCHEDULE_RUN_START_FAILED");
+            const failed = this.store.updateScheduleFiring({ ...occurrence, outcome: "start_failed", errorCode: scheduleStartErrorCode(message), errorMessage: message });
+            tickError = message;
+            this.store.insertAudit({ actorType: "scheduler", actorId: schedule.id, action: "schedule.start_failed", resourceType: "schedule", resourceId: schedule.id, afterSnapshot: failed }, now.toISOString());
+          }
+        } else {
+          const existing = this.store.getScheduleFiring(key);
+          const existingRun = this.store.findRunByIdempotencyKey(key);
+          if (existing && existingRun && !existing.runId) this.store.updateScheduleFiring({ ...existing, runId: existingRun.id });
+          else if (existing && !existingRun && existing.outcome !== "skipped" && existing.outcome !== "start_failed") {
+            const message = "SCHEDULE_OCCURRENCE_INCOMPLETE: 上次服务在创建 Run 前中断";
+            const failed = this.store.updateScheduleFiring({ ...existing, outcome: "start_failed", errorCode: "SCHEDULE_OCCURRENCE_INCOMPLETE", errorMessage: message });
+            tickError = message;
+            this.store.insertAudit({ actorType: "scheduler", actorId: schedule.id, action: "schedule.start_failed", resourceType: "schedule", resourceId: schedule.id, afterSnapshot: failed }, now.toISOString());
+          }
         }
+        this.store.updateSchedule({ ...schedule, nextRunAt: next, lastRunAt: scheduledFor, updatedAt: now.toISOString() });
       }
-      this.lastError = null;
+      this.lastError = tickError;
       return created;
     } catch (error) {
       this.lastError = error instanceof Error ? redactSensitiveText(error.message) : "unknown scheduler error";
@@ -1461,8 +1537,52 @@ export function nextOccurrence(expression: string, timezone: string, after: Date
   return CronExpressionParser.parse(expression, { currentDate: after, tz: timezone }).next().toDate();
 }
 
+function scheduleStartErrorCode(message: string): string {
+  const candidate = message.split(":", 1)[0]?.trim().toUpperCase();
+  return candidate && /^[A-Z0-9_]{3,80}$/.test(candidate) ? candidate : "SCHEDULE_RUN_START_FAILED";
+}
+
+function runDurationMs(run: Run | null): number | null {
+  if (!run?.startedAt || !run.finishedAt) return null;
+  return Math.max(0, new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime());
+}
+
+function classifyWorkflowFailure(errorCode: string | null, errorMessage: string | null): NonNullable<WorkflowOperationsSummary["failureCategory"]> {
+  const signal = `${errorCode ?? ""} ${errorMessage ?? ""}`.toUpperCase();
+  if (/MANAGED_RESOURCE|EMULATOR|\bADB\b|DEVICE|UI_CHANGED|CAPABILITY_MISMATCH|QISHUI/.test(signal)) return "managed_resource";
+  if (/APPROVAL|WAITING_INPUT|INPUT_REQUIRED|HUMAN_INPUT/.test(signal)) return "input_or_approval";
+  if (/DEPOSITION|OBSIDIAN|VAULT/.test(signal)) return "deposition";
+  if (/EXECUTOR|EXECUTION_TIMEOUT|TEMPORARY|NETWORK|EXTERNAL_SERVICE|RATE_LIMIT|CODEX|OPENWORKER/.test(signal)) return "runtime";
+  return "business";
+}
+
+function workflowAttentionReason(input: {
+  activeRun: Run | null;
+  currentCheckpoint: RunCheckpoint | null;
+  latestOccurrenceIssue: ScheduleOccurrence | null;
+  latestDeposition: RunDeposition | null;
+  latestRun: Run | null;
+  failureCategory: WorkflowOperationsSummary["failureCategory"];
+  consecutiveFailures: number;
+}): string | null {
+  if (input.activeRun?.status === "waiting_input") return "当前运行正在等待你的输入。";
+  if (input.activeRun?.status === "waiting_approval") return "当前运行正在等待高风险动作审批。";
+  if (input.activeRun) return input.currentCheckpoint ? `当前步骤：${input.currentCheckpoint.label}。` : "当前运行已经启动，尚未保存步骤。";
+  if (input.latestOccurrenceIssue?.outcome === "skipped") return "上次计划时间已错过，当前规则不允许补跑。";
+  if (input.latestOccurrenceIssue?.outcome === "start_failed") return `上次调度未能创建 Run：${input.latestOccurrenceIssue.errorMessage ?? "检查工作流状态和调度器日志"}。`;
+  if (input.latestDeposition?.status === "failed") return `结果未写入 Obsidian：${input.latestDeposition.errorMessage ?? "检查 Vault 路径和权限"}。`;
+  if (input.latestRun?.status !== "failed") return null;
+  const prefix = input.consecutiveFailures > 1 ? `已经连续失败 ${input.consecutiveFailures} 次。` : "最近一次运行失败。";
+  const guidance = input.failureCategory === "managed_resource" ? "检查模拟器、设备或页面状态。"
+    : input.failureCategory === "runtime" ? "检查 Codex、OpenWorker、网络或超时设置。"
+      : input.failureCategory === "input_or_approval" ? "补充输入或处理审批后再恢复。"
+        : input.failureCategory === "deposition" ? "检查 Obsidian Vault 后重新沉淀。"
+          : "检查业务证据和 Skill 完成条件。";
+  return `${prefix}${guidance}`;
+}
+
 function isRetryableExecutionFailure(code: string, message: string): boolean {
-  if (code === "EXECUTION_TIMEOUT" || code === "EXECUTOR_UNAVAILABLE") return true;
+  if (code === "EXECUTION_TIMEOUT" || code === "EXECUTOR_UNAVAILABLE" || code === "PROCESS_RESTARTED") return true;
   if (code !== "EXECUTION_FAILED") return false;
   return !/^(?:PROJECT_NOT_FOUND|SKILL_|WORK_SPEC_|CODEX_PROJECT_REPOSITORY_REQUIRED|CODEX_GIT_REPOSITORY_REQUIRED|WORKING_DIRECTORY_NOT_ALLOWED|EXECUTABLE_NOT_ALLOWED|RUNTIME_CAPABILITY_|APPROVAL_)/.test(message);
 }

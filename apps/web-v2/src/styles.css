@@ -182,6 +182,25 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .operations-band > div:last-child { border-right: 0; }
 .operations-band small { color: var(--muted); font-size: 10px; }
 .operations-band strong { font-size: 24px; letter-spacing: -.04em; }
+.automation-operations { display: grid; gap: 18px; }
+.automation-operations > .operations-band { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.automation-list { display: grid; border-top: 1px solid var(--border); }
+.automation-row { min-width: 0; padding: 18px 2px; border-bottom: 1px solid var(--border); color: var(--text); display: grid; gap: 13px; text-decoration: none; transition: background-color .18s ease; }
+.automation-row:hover { background: color-mix(in srgb, var(--surface-2) 72%, transparent); }
+.automation-row.degraded { box-shadow: inset 3px 0 0 var(--bad); padding-left: 14px; }
+.automation-row.attention { box-shadow: inset 3px 0 0 var(--accent); padding-left: 14px; }
+.automation-row > header { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
+.automation-row > header > div { min-width: 0; display: grid; gap: 5px; }
+.automation-row h3 { margin: 0; font-size: 15px; }
+.automation-row header span:not(.health-badge), .automation-row footer, .automation-reason { color: var(--muted); font-size: 11px; }
+.automation-reason { margin: 0; line-height: 1.5; }
+.automation-facts { min-width: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: grid; grid-template-columns: 1.05fr 1fr 1fr 1.35fr 1fr; gap: 1px; background: var(--border); }
+.automation-facts > div { min-width: 0; min-height: 78px; padding: 11px 12px; background: var(--surface-2); display: grid; align-content: center; gap: 6px; }
+.automation-facts span { color: var(--muted); display: flex; align-items: center; gap: 5px; font-size: 10px; }
+.automation-facts span svg { color: var(--accent); }
+.automation-facts strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-variant-numeric: tabular-nums; }
+.automation-facts small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.automation-row footer { display: flex; justify-content: space-between; gap: 14px; font-variant-numeric: tabular-nums; }
 .health-badge { flex: none; width: max-content; padding: 4px 8px; border-radius: 999px; color: var(--muted); background: var(--surface); font-size: 10px; font-weight: 700; }
 .health-badge.healthy { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
 .health-badge.degraded { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
@@ -561,6 +580,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .promotion-metrics > div:last-child { border-bottom: 0; }
   .operations-band > div:nth-child(2) { border-right: 0; }
   .operations-band > div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  .automation-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .automation-facts > div:last-child { grid-column: 1 / -1; }
   .finance-grid, .operations-layout { grid-template-columns: 1fr; }
   .finance-commandbar { align-items: stretch; flex-direction: column; }
   .finance-commandbar > .button { width: 100%; }
@@ -586,6 +607,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .metric:last-child { border-bottom: 0; }
   .form-grid { grid-template-columns: 1fr; }
   .preflight-checks { grid-template-columns: 1fr; }
+  .automation-facts { grid-template-columns: 1fr; }
+  .automation-facts > div:last-child { grid-column: auto; }
+  .automation-row footer { align-items: flex-start; flex-direction: column; }
   .rebind-control { grid-template-columns: minmax(0, 1fr); }
   .finance-summary { grid-template-columns: 1fr; }
   .finance-commandbar { width: 100%; max-width: 100%; min-width: 0; overflow: hidden; }

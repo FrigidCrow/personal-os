@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import Database from "better-sqlite3";
 import { expect, test } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
@@ -45,7 +46,7 @@ test("项目、雷达和定时执行形成闭环", async ({ page }) => {
   await page.getByLabel("所属项目").selectOption({ label: "汽水音乐实验" });
   await page.getByLabel("执行要求").fill("采集热歌榜和新歌榜 Top10，去重后写入 Obsidian");
   await page.getByRole("button", { name: "保存固定版本" }).click();
-  await expect(page.getByRole("heading", { name: "每日热歌采集" })).toBeVisible();
+  await expect(page.locator(".workflow-grid").getByRole("heading", { name: "每日热歌采集" })).toBeVisible();
   await page.getByRole("button", { name: "设置定时" }).click();
   await page.getByLabel("定时名称").fill("每日 08:00 采榜");
   await page.getByRole("button", { name: "保存定时" }).click();
@@ -81,7 +82,7 @@ test("Skill 检查发布、工作流体检、创建新版和定时换绑", async
   await page.getByLabel("固定 Skill").selectOption("phase-ten-browser");
   await page.getByLabel("执行要求").fill("执行阶段十浏览器验证并输出证据");
   await page.getByRole("button", { name: "保存固定版本" }).click();
-  await page.getByRole("heading", { name: "阶段十浏览器工作流" }).click();
+  await page.locator(".workflow-grid").getByRole("heading", { name: "阶段十浏览器工作流" }).click();
   await page.getByRole("button", { name: "添加定时" }).click();
   await page.getByLabel("定时名称").fill("阶段十换绑");
   await page.getByRole("button", { name: "保存定时" }).click();
@@ -146,6 +147,38 @@ test("Today 聚合待处理运行并直达真实 Run", async ({ page }) => {
   await attention.click();
   await expect(page).toHaveURL(new RegExp(`/runs/${run.id}$`));
   await expect(page.locator(".run-detail")).toContainText("待验收");
+});
+
+test("生产自动化运营中心显示调度事实并把未恢复异常带到 Today", async ({ page }) => {
+  const specResponse = await page.request.post("/api/v2/work-specs", { data: { title: "阶段十三运营雷达", instructions: "验证生产调度发生记录。", executorType: "internal", input: { operation: "echo", message: "完成", delayMs: 0 }, kind: "workflow", lifecycleStatus: "active" } });
+  const spec = (await specResponse.json()).data as { id: string };
+  const scheduleResponse = await page.request.post("/api/v2/schedules", { data: { workSpecId: spec.id, name: "阶段十三每日规则", cronExpression: "0 8 * * *", timezone: "Asia/Tokyo", enabled: true, catchUp: false } });
+  const schedule = (await scheduleResponse.json()).data as { id: string; nextRunAt: string };
+  const observedAt = new Date().toISOString();
+  const database = new Database(resolve(process.cwd(), "review-artifacts", "e2e-current.db"));
+  database.prepare(`INSERT INTO schedule_firings(idempotency_key,schedule_id,work_spec_id,scheduled_for,created_at,outcome,lateness_ms,run_id,error_code,error_message) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(`${schedule.id}:${schedule.nextRunAt}`, schedule.id, spec.id, schedule.nextRunAt, observedAt, "skipped", 180_000, null, null, null);
+  database.close();
+
+  await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
+  await page.goto("/radar");
+  const row = page.locator(`.automation-row[href="/radar/${spec.id}"]`);
+  await expect(page.getByRole("region", { name: "生产自动化运营中心" })).toBeVisible();
+  await expect(row).toContainText("阶段十三运营雷达");
+  await expect(row).toContainText("已按策略跳过");
+  await expect(row).toContainText("上次计划时间已错过");
+  await page.screenshot({ path: "review-artifacts/phase13/automation-operations-desktop-dark.png", fullPage: true });
+
+  await page.goto("/");
+  const alert = page.locator(`.approval-inbox a[href="/radar/${spec.id}"]`);
+  await expect(alert).toContainText("定时执行异常：阶段十三运营雷达");
+  await alert.click();
+  await expect(page).toHaveURL(new RegExp(`/radar/${spec.id}$`));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "light" });
+  await page.goto("/radar");
+  await expect.poll(async () => await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  await page.screenshot({ path: "review-artifacts/phase13/automation-operations-mobile-light.png", fullPage: true });
 });
 
 test("五区和搜索层在 390px 无横向溢出", async ({ page }) => {
@@ -267,7 +300,7 @@ test("工作流验收后自动沉淀 Obsidian，并显示可恢复步骤区域",
   await page.getByLabel("托管根目录").selectOption("Reports");
   await page.getByLabel("笔记标题模板").fill("{date}-{title}");
   await page.getByRole("button", { name: "保存固定版本" }).click();
-  await page.getByRole("heading", { name: "阶段十一可恢复日报" }).click();
+  await page.locator(".workflow-grid").getByRole("heading", { name: "阶段十一可恢复日报" }).click();
   await expect(page.locator(".definition-panel")).toContainText("Reports，验收后写入");
 
   const specsResponse = await page.request.get("/api/v2/work-specs");
@@ -309,7 +342,7 @@ test("低风险日报可在雷达中配置成功后自动沉淀", async ({ page 
   await page.getByLabel("去重周期").selectOption("calendar_day");
   await page.getByLabel("笔记标题模板").fill("{date} 自动日报");
   await page.getByRole("button", { name: "保存固定版本" }).click();
-  await page.getByRole("heading", { name: "自动沉淀浏览器日报" }).click();
+  await page.locator(".workflow-grid").getByRole("heading", { name: "自动沉淀浏览器日报" }).click();
   await expect(page.locator(".definition-panel")).toContainText("Reports/AI日报，成功后自动写入");
 
   const response = await page.request.get("/api/v2/work-specs");

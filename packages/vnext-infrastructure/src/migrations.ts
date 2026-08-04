@@ -570,6 +570,71 @@ export const migrations: Migration[] = [
           ON skill_candidates(work_spec_id, created_at DESC);
       `);
     }
+  },
+  {
+    version: 14,
+    name: "production_schedule_operations",
+    up(database) {
+      database.exec(`
+        ALTER TABLE schedule_firings ADD COLUMN outcome TEXT NOT NULL DEFAULT 'fired';
+        ALTER TABLE schedule_firings ADD COLUMN lateness_ms INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE schedule_firings ADD COLUMN work_spec_id TEXT REFERENCES work_specs(id) ON DELETE SET NULL;
+        ALTER TABLE schedule_firings ADD COLUMN run_id TEXT REFERENCES runs(id) ON DELETE SET NULL;
+        ALTER TABLE schedule_firings ADD COLUMN error_code TEXT;
+        ALTER TABLE schedule_firings ADD COLUMN error_message TEXT;
+
+        UPDATE schedule_firings
+        SET run_id = (
+          SELECT runs.id
+          FROM runs
+          WHERE runs.idempotency_key = schedule_firings.idempotency_key
+          LIMIT 1
+        )
+        WHERE run_id IS NULL;
+
+        UPDATE schedule_firings
+        SET work_spec_id = COALESCE(
+          (
+            SELECT runs.work_spec_id
+            FROM runs
+            WHERE runs.id = schedule_firings.run_id
+            LIMIT 1
+          ),
+          (
+            SELECT schedules.work_spec_id
+            FROM schedules
+            WHERE schedules.id = schedule_firings.schedule_id
+            LIMIT 1
+          )
+        )
+        WHERE work_spec_id IS NULL;
+
+        CREATE TRIGGER schedule_firings_valid_insert
+        BEFORE INSERT ON schedule_firings
+        WHEN NEW.work_spec_id IS NULL
+          OR NEW.outcome NOT IN ('fired','catch_up','skipped','start_failed')
+          OR NEW.lateness_ms < 0
+        BEGIN
+          SELECT RAISE(ABORT, 'INVALID_SCHEDULE_OCCURRENCE');
+        END;
+
+        CREATE TRIGGER schedule_firings_valid_update
+        BEFORE UPDATE ON schedule_firings
+        WHEN NEW.work_spec_id IS NULL
+          OR NEW.outcome NOT IN ('fired','catch_up','skipped','start_failed')
+          OR NEW.lateness_ms < 0
+        BEGIN
+          SELECT RAISE(ABORT, 'INVALID_SCHEDULE_OCCURRENCE');
+        END;
+
+        CREATE INDEX schedule_firings_schedule_time_idx
+          ON schedule_firings(schedule_id, scheduled_for DESC);
+        CREATE INDEX schedule_firings_work_spec_time_idx
+          ON schedule_firings(work_spec_id, scheduled_for DESC);
+        CREATE INDEX schedule_firings_outcome_idx
+          ON schedule_firings(outcome, created_at DESC);
+      `);
+    }
   }
 ];
 

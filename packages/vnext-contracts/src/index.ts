@@ -105,6 +105,20 @@ export interface WorkSpecPreflight {
   checks: WorkSpecPreflightCheck[];
 }
 export type WorkflowHealthStatus = "healthy" | "degraded" | "attention" | "never_run" | "paused";
+export type WorkflowFailureCategory = "scheduler" | "runtime" | "business" | "managed_resource" | "input_or_approval" | "deposition";
+export type ScheduleOccurrenceOutcome = "fired" | "catch_up" | "skipped" | "start_failed";
+export interface ScheduleOccurrence {
+  idempotencyKey: string;
+  scheduleId: string;
+  workSpecId: string;
+  scheduledFor: string;
+  observedAt: string;
+  outcome: ScheduleOccurrenceOutcome;
+  latenessMs: number;
+  runId: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+}
 export interface WorkflowOperationsSummary {
   workSpec: WorkSpec;
   health: WorkflowHealthStatus;
@@ -112,7 +126,17 @@ export interface WorkflowOperationsSummary {
   enabledScheduleCount: number;
   nextRunAt: string | null;
   latestRun: Run | null;
+  activeRun: Run | null;
+  currentCheckpoint: RunCheckpoint | null;
+  latestSuccessfulRun: Run | null;
+  latestTerminalRun: Run | null;
+  latestDurationMs: number | null;
+  latestDeposition: RunDeposition | null;
+  latestOccurrence: ScheduleOccurrence | null;
+  occurrenceIssueCount: number;
   consecutiveFailures: number;
+  failureCategory: WorkflowFailureCategory | null;
+  attentionReason: string | null;
 }
 
 export const controlPlaneEntityTypeSchema = z.enum(["project", "work_spec", "run", "artifact", "knowledge"]);
